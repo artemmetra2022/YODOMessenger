@@ -1,15 +1,53 @@
-*.iml
-.gradle/
-/local.properties
-.idea/
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-*.apk
-*.ap_
-*.dex
+# Compiled and build artifacts
+*.class
+*.o
+*.obj
+*.out
+*.dll
+*.so
+*.a
+*.pyc
+__pycache__/
 
-# Секретные ключи Firebase — НЕ коммитим, кладём только через GitHub Secret в CI
-app/google-services.json
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+*.env.*
+
+# Build directories (common in Android/Kotlin projects)
+build/
+.gradle/
+target/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+.mypy_cache/
+.pytest_cache/
+
+# Android specific
+*.apk
+*.aar
+local.properties
+.gradle/
+build/

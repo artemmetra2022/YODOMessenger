@@ -3,10 +3,12 @@ package app.yodo.messenger.features.chats
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Search
@@ -49,6 +52,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,11 +62,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -76,6 +84,8 @@ import app.yodo.messenger.util.ImageUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -99,6 +109,10 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScopeCompat()
+    val focusManager = LocalFocusManager.current
+
+    // Обработчик свайпа для ответа на сообщение
+    var swipeReplyMessage by remember { mutableStateOf<Message?>(null) }
 
     // Восстанавливаем черновик один раз, когда он подгрузится
     LaunchedEffect(uiState.initialDraft) {
@@ -146,6 +160,8 @@ fun ChatScreen(
         if (inputText.isNotBlank()) {
             viewModel.sendMessage(inputText)
             inputText = ""
+            // Закрываем клавиатуру после отправки сообщения
+            focusManager.clearFocus()
         }
     }
 
@@ -414,14 +430,21 @@ private fun MessageBubble(
                         if (revealImage) {
                             val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
                             bitmap?.let {
+                                var imageModifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .padding(top = if (message.replyToText != null) 4.dp else 0.dp)
+                                
+                                // Добавляем возможность открытия изображения по клику
+                                imageModifier = imageModifier.clickable { 
+                                    viewModel.openImageViewer(message.imageBase64) 
+                                }
+                                
                                 Image(
                                     bitmap = it.asImageBitmap(),
                                     contentDescription = "Фото",
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .padding(top = if (message.replyToText != null) 4.dp else 0.dp)
+                                    modifier = imageModifier
                                 )
                             }
                         } else {

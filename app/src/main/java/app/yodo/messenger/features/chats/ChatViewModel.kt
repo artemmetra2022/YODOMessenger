@@ -36,7 +36,8 @@ data class ChatUiState(
     val editingMessage: Message? = null,
     val initialDraft: String? = null,
     val searchQuery: String = "",
-    val isSearchActive: Boolean = false
+    val isSearchActive: Boolean = false,
+    val imageViewerBase64: String? = null // Для просмотра изображения на весь экран
 )
 
 @HiltViewModel
@@ -245,6 +246,14 @@ class ChatViewModel @Inject constructor(
 
     fun consumeError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+
+    fun openImageViewer(base64: String) {
+        _uiState.value = _uiState.value.copy(imageViewerBase64 = base64)
+    }
+
+    fun closeImageViewer() {
+        _uiState.value = _uiState.value.copy(imageViewerBase64 = null)
     }
 
     override fun onCleared() {

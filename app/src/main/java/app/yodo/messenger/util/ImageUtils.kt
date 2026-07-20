@@ -14,9 +14,9 @@ import java.io.ByteArrayOutputStream
  */
 object ImageUtils {
 
-    private const val MAX_DIMENSION_PX = 400
-    private const val JPEG_QUALITY = 65
-    private const val MAX_BASE64_LENGTH = 700_000 // ~700 КБ, запас от лимита в 1 МБ на документ
+    private const val MAX_DIMENSION_PX = 1280 // Увеличено с 400 до 1280 для лучшего качества
+    private const val JPEG_QUALITY = 85 // Увеличено с 65 до 85 для лучшего качества
+    private const val MAX_BASE64_LENGTH = 900_000 // ~900 КБ, запас от лимита в 1 МБ на документ
 
     /** Возвращает Base64-строку (без префикса data:) или null при ошибке/слишком большом файле. */
     fun compressImageToBase64(context: Context, uri: Uri): String? {
