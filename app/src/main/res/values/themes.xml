@@ -1,0 +1,9 @@
+<resources>
+    <!-- Базовая системная тема окна/сплэша. Само оформление UI задаётся Compose-темой
+         в ui/theme/Theme.kt (YodoMessengerTheme) — этот файл нужен только потому,
+         что AndroidManifest обязан ссылаться на существующий style. -->
+    <style name="Theme.YodoMessenger" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0F172A</item>
+        <item name="android:windowBackground">#0F172A</item>
+    </style>
+</resources>

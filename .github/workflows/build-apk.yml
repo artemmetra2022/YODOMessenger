@@ -1,0 +1,98 @@
+name: Build Debug APK
+
+on:
+  workflow_dispatch:        # запуск вручную кнопкой "Run workflow" на вкладке Actions
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # В проекте нет закоммиченного gradlew/gradle-wrapper.jar (бинарный файл),
+      # поэтому используем официальный action, который сам скачивает и запускает Gradle.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      # google-services.json нельзя хранить в открытом репозитории (там ключи Firebase-проекта).
+      # Секрет может быть либо base64-строкой, либо вставленным как есть JSON — обрабатываем оба случая.
+      - name: Restore google-services.json from secret
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::Secret GOOGLE_SERVICES_JSON пустой или не задан. Добавь его в Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+          TRIMMED=$(echo "$GOOGLE_SERVICES_JSON" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+          if [[ "$TRIMMED" == "{"* ]]; then
+            # Секрет — это сырой JSON, а не base64
+            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          else
+            # Секрет — это base64-строка
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > app/google-services.json
+          fi
+
+          echo "--- Проверка валидности JSON ---"
+          python3 -c "import json; json.load(open('app/google-services.json'))" && echo "OK: google-services.json валиден"
+
+      - name: Build debug APK
+        run: gradle assembleDebug --stacktrace
+
+      # Gradle сам создаёт debug.keystore при первой сборке (стандартные пароли Android).
+      # Печатаем SHA-1/SHA-256 прямо в лог — нужны для Google Sign-In и Phone Auth,
+      # получить их без компьютера (без `./gradlew signingReport`) больше неоткуда.
+      - name: Print debug keystore SHA-1 / SHA-256 (нужно для Google Sign-In)
+        run: |
+          echo "======================================================"
+          echo "  SHA-1 и SHA-256 debug-ключа — скопируй их в Firebase:"
+          echo "  Project settings → твоё Android-приложение → Add fingerprint"
+          echo "======================================================"
+
+          KEYSTORE_PATH="$HOME/.android/debug.keystore"
+
+          if [ ! -f "$KEYSTORE_PATH" ]; then
+            echo "Файл не найден по стандартному пути ($KEYSTORE_PATH), ищу по всей системе..."
+            FOUND_PATH=$(find / -name "debug.keystore" -type f 2>/dev/null | head -n 1)
+            if [ -n "$FOUND_PATH" ]; then
+              echo "Нашёл: $FOUND_PATH"
+              KEYSTORE_PATH="$FOUND_PATH"
+            else
+              echo "debug.keystore не найден нигде в системе — странно, но сборка APK при этом прошла успешно."
+              echo "Список содержимого \$HOME/.android (если есть):"
+              ls -la "$HOME/.android" 2>/dev/null || echo "(папки не существует)"
+              exit 0
+            fi
+          fi
+
+          keytool -list -v \
+            -keystore "$KEYSTORE_PATH" \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android > /tmp/keytool_output.txt 2>&1 || true
+
+          echo "--- Полный вывод keytool ---"
+          cat /tmp/keytool_output.txt
+
+          echo "--- Отфильтрованные строки SHA1/SHA256 ---"
+          grep -E "SHA1:|SHA256:" /tmp/keytool_output.txt || echo "Не нашли строки SHA1/SHA256 — смотри полный вывод выше, формат мог отличаться."
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yodo-messenger-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

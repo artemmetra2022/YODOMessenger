@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.dex
+
+# Секретные ключи Firebase — НЕ коммитим, кладём только через GitHub Secret в CI
+app/google-services.json
