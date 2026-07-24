@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Основная тема приложения для Jetpack Compose -->
+    <style name="Theme.YODOMessenger" parent="android:Theme.Material.Light.NoActionBar">
+        
+        <!-- Прозрачные системные панели для Edge-to-Edge отображения -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        
+        <!-- Темные иконки в статус-баре и навигации (подходит для светлого фона) -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        
+        <!-- Отключаем автоматическую серую подложку навигационной панели (Android 10+) -->
+        <item name="android:enforceNavigationBarContrast">false</item>
+        
+        <!-- Цвет фона окна при запуске (предотвращает белую вспышку до загрузки Compose) -->
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        
+        <!-- Разрешаем приложению рисоваться за системными барами -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        
+    </style>
+</resources>
