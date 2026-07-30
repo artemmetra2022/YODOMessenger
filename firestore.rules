@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      // Публичное чтение нужно для входа по username (email резолвится ДО авторизации
+      // в FirebaseAuth) и для профилей пользователей. Секретных полей (пароль и т.п.)
+      // в этой коллекции нет — пароли хранит сам Firebase Auth, а не Firestore.
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+
+      // Сессии (устройства) — только владелец аккаунта может читать и писать.
+      match /sessions/{sessionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    match /posts/{postId} {
+      // Посты стены профиля — читают все авторизованные пользователи (лента видна
+      // на чужих профилях так же, как на своём); создавать/менять/удалять может
+      // только автор поста, и только от своего имени (authorId == uid).
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.authorId;
+      allow update, delete: if request.auth != null &&
+        request.auth.uid == resource.data.authorId;
+    }
+    match /usernames/{username} {
+      // Хранит только { uid }, публичное чтение необходимо, чтобы найти email
+      // по username при входе (до того, как пользователь аутентифицирован).
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /chats/{chatId} {
+      // п.41: официальный канал YodoMessenger должен быть виден и открываем ВСЕМ
+      // авторизованным пользователям (это рассылка от админов, а не приватный чат),
+      // поэтому для него read разрешён всем, а не только участникам participantIds.
+      // Писать в сам документ чата (title, lastMessage и т.п.) могут только админы канала.
+      allow read: if request.auth != null &&
+        (chatId == 'yodo_official_channel' || request.auth.uid in resource.data.participantIds);
+      allow write: if request.auth != null &&
+        (chatId == 'yodo_official_channel'
+          ? request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']
+          : request.auth.uid in resource.data.participantIds);
+      allow create: if request.auth != null;
+      match /messages/{messageId} {
+        // Сообщения официального канала читают все, но отправлять (create) в него
+        // могут только два админа; редактировать/удалять свои сообщения — тоже только они.
+        allow read: if request.auth != null;
+        allow create: if request.auth != null &&
+          (chatId != 'yodo_official_channel' ||
+            request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']);
+        allow update, delete: if request.auth != null &&
+          (chatId != 'yodo_official_channel' ||
+            request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']);
+      }
+    }
+  }
+}

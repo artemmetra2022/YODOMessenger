@@ -1,0 +1,12 @@
+{
+  "name": "yodo-messenger-push-worker",
+  "description": "Одноразовый скрипт рассылки push-уведомлений, запускается по расписанию GitHub Actions. Не требует платного плана Firebase.",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.1.0"
+  }
+}
