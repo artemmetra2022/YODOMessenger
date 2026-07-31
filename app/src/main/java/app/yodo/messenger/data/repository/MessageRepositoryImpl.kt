@@ -5,6 +5,7 @@ import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.Comment
 import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.MessageStatus
+import app.yodo.messenger.domain.model.Poll
 import app.yodo.messenger.domain.model.ScheduledMessage
 import app.yodo.messenger.domain.repository.MessageRepository
 import app.yodo.messenger.domain.repository.ReplyContext
@@ -423,6 +424,162 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
+    // НОВОЕ (опросы): создание сообщения-опроса
+    override suspend fun sendPollMessage(
+        chatId: String,
+        question: String,
+        options: List<String>,
+        isAnonymous: Boolean,
+        allowMultipleAnswers: Boolean,
+        replyTo: ReplyContext?,
+        hasTtlOverride: Boolean,
+        ttlOverrideSeconds: Long?
+    ): SendMessageResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
+        if (question.trim().isEmpty()) return SendMessageResult.Error("Введите вопрос опроса")
+        if (options.size < 2) return SendMessageResult.Error("Добавьте минимум 2 варианта ответа")
+        if (options.any { it.trim().isEmpty() }) return SendMessageResult.Error("Варианты ответа не могут быть пустыми")
+        
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val chatSnapshot = chatRef.get().await()
+            val participantIds = (chatSnapshot.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList<String>()
+            val now = System.currentTimeMillis()
+            
+            // Build poll data structure
+            val pollData = mapOf(
+                "question" to question.trim(),
+                "options" to options.map { it.trim() },
+                "votesByOption" to emptyMap<Int, List<String>>(),
+                "isAnonymous" to isAnonymous,
+                "allowMultipleAnswers" to allowMultipleAnswers,
+                "isClosed" to false
+            )
+            
+            val data = mutableMapOf<String, Any?>(
+                "text" to "",
+                "poll" to pollData,
+                "senderId" to uid,
+                "timestamp" to now,
+                "status" to "SENT",
+                "notified" to false
+            )
+            
+            // Handle reply context
+            if (replyTo != null) {
+                data["replyToMessageId"] = replyTo.messageId
+                data["replyToSenderName"] = replyTo.senderName
+                data["replyToText"] = replyTo.text
+            }
+            
+            // Handle TTL (disappearing messages)
+            val ttlSeconds = if (hasTtlOverride) ttlOverrideSeconds else chatSnapshot.getLong("disappearingTtlSeconds")
+            if (ttlSeconds != null && ttlSeconds > 0) {
+                data["expiresAt"] = now + ttlSeconds * 1000L
+            }
+            
+            val newDocRef = chatRef.collection("messages").add(data).await()
+            
+            // Update chat preview
+            val previewText = "📊 ${question.trim()}"
+            val unreadUpdates = mutableMapOf<String, Any?>(
+                "lastMessage" to previewText, 
+                "lastMessageTimestamp" to now,
+                "lastMessageSenderId" to uid, 
+                "lastMessageStatus" to "SENT"
+            )
+            participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
+                unreadUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
+            }
+            chatRef.update(unreadUpdates).await()
+            
+            SendMessageResult.Success(messageId = newDocRef.id)
+        } catch (e: Exception) { 
+            SendMessageResult.Error(e.toUserMessage("Не удалось создать опрос")) 
+        }
+    }
+
+    // НОВОЕ (опросы): голосование в опросе
+    override suspend fun voteOnPoll(chatId: String, messageId: String, optionIndices: Set<Int>): SendMessageResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
+        if (optionIndices.isEmpty()) return SendMessageResult.Error("Выберите вариант ответа")
+        
+        return try {
+            val messageRef = firestore.collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+            
+            val messageSnapshot = messageRef.get().await()
+            val pollRaw = messageSnapshot.get("poll") as? Map<*, *> 
+                ?: return SendMessageResult.Error("Опрос не найден")
+            
+            val isClosed = pollRaw["isClosed"] as? Boolean ?: false
+            if (isClosed) return SendMessageResult.Error("Опрос закрыт")
+            
+            val optionsRaw = pollRaw["options"] as? List<*> 
+                ?: return SendMessageResult.Error("Неверная структура опроса")
+            val allowMultiple = pollRaw["allowMultipleAnswers"] as? Boolean ?: false
+            
+            // Validate option indices
+            val validIndices = optionIndices.filter { it >= 0 && it < optionsRaw.size }
+            if (validIndices.isEmpty()) return SendMessageResult.Error("Неверные варианты ответа")
+            
+            if (!allowMultiple && validIndices.size > 1) {
+                return SendMessageResult.Error("Можно выбрать только один вариант")
+            }
+            
+            val votesByOptionRaw = pollRaw["votesByOption"] as? Map<*, *> ?: emptyMap<Any, Any>()
+            val votesByOption = mutableMapOf<Int, MutableList<String>>()
+            
+            // Parse existing votes
+            votesByOptionRaw.forEach { (key, value) ->
+                val index = (key as? Number)?.toInt() ?: return@forEach
+                val voters = (value as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
+                votesByOption[index] = voters
+            }
+            
+            // Remove user's previous votes from all options
+            votesByOption.forEach { (_, voters) ->
+                voters.remove(uid)
+            }
+            
+            // Add user's new votes
+            validIndices.forEach { index ->
+                votesByOption.getOrPut(index) { mutableListOf() }.add(uid)
+            }
+            
+            // Convert to Firestore-compatible format
+            val votesByOptionMap = votesByOption.mapKeys { it.key.toString() }
+            
+            messageRef.update("poll.votesByOption", votesByOptionMap).await()
+            SendMessageResult.Success()
+        } catch (e: Exception) { 
+            SendMessageResult.Error(e.toUserMessage("Не удалось проголосовать")) 
+        }
+    }
+
+    // НОВОЕ (опросы): закрыть опрос
+    override suspend fun closePoll(chatId: String, messageId: String): SendMessageResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
+        
+        return try {
+            val messageRef = firestore.collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+            
+            val messageSnapshot = messageRef.get().await()
+            val senderId = messageSnapshot.getString("senderId")
+            
+            // Only poll creator can close it
+            if (senderId != uid) {
+                return SendMessageResult.Error("Только создатель опроса может его закрыть")
+            }
+            
+            messageRef.update("poll.isClosed", true).await()
+            SendMessageResult.Success()
+        } catch (e: Exception) { 
+            SendMessageResult.Error(e.toUserMessage("Не удалось закрыть опрос")) 
+        }
+    }
+
     override suspend fun exportChatHistory(chatId: String): String {
         return try {
             val snapshot = firestore.collection("chats").document(chatId)
@@ -546,6 +703,36 @@ class MessageRepositoryImpl @Inject constructor(
                 val uids = (value as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                 emoji to uids
             }?.toMap() ?: emptyMap()
+            
+            // Parse poll data if present
+            val poll = doc.get("poll") as? Map<*, *?>?.let { pollMap ->
+                val question = pollMap["question"] as? String ?: return@let null
+                val optionsRaw = pollMap["options"] as? List<*> ?: return@let null
+                val options = optionsRaw.filterIsInstance<String>()
+                if (options.isEmpty()) return@let null
+                
+                val isAnonymous = pollMap["isAnonymous"] as? Boolean ?: true
+                val allowMultipleAnswers = pollMap["allowMultipleAnswers"] as? Boolean ?: false
+                val isClosed = pollMap["isClosed"] as? Boolean ?: false
+                
+                // Parse votesByOption: Map<Int, List<String>>
+                val votesByOptionRaw = pollMap["votesByOption"] as? Map<*, *> ?: emptyMap<Int, List<String>>()
+                val votesByOption = votesByOptionRaw.mapNotNull { (key, value) ->
+                    val optionIndex = (key as? Number)?.toInt() ?: return@mapNotNull null
+                    val voterUids = (value as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    optionIndex to voterUids
+                }.toMap()
+                
+                Poll(
+                    question = question,
+                    options = options,
+                    votesByOption = votesByOption,
+                    isAnonymous = isAnonymous,
+                    allowMultipleAnswers = allowMultipleAnswers,
+                    isClosed = isClosed
+                )
+            }
+            
             Message(
                 id = doc.id, chatId = chatId,
                 senderId = doc.getString("senderId") ?: return null,
@@ -573,7 +760,8 @@ class MessageRepositoryImpl @Inject constructor(
                 fileSizeBytes = doc.getLong("fileSizeBytes"),
                 locationLat = doc.getDouble("locationLat"),
                 locationLng = doc.getDouble("locationLng"),
-                commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt()
+                commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt(),
+                poll = poll
             )
         } catch (e: Exception) { null }
     }

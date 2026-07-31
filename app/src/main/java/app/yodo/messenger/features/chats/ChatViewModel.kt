@@ -472,6 +472,49 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // НОВОЕ (опросы): создание опроса
+    fun sendPoll(
+        question: String,
+        options: List<String>,
+        isAnonymous: Boolean = true,
+        allowMultipleAnswers: Boolean = false,
+        hasTtlOverride: Boolean = false,
+        ttlOverrideSeconds: Long? = null
+    ) {
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
+        viewModelScope.launch {
+            when (val result = messageRepository.sendPollMessage(
+                chatId = chatId,
+                question = question,
+                options = options,
+                isAnonymous = isAnonymous,
+                allowMultipleAnswers = allowMultipleAnswers,
+                replyTo = _uiState.value.replyingTo?.let { ReplyContext(it.id, it.replyToSenderName ?: "", it.text) },
+                hasTtlOverride = hasTtlOverride,
+                ttlOverrideSeconds = ttlOverrideSeconds
+            )) {
+                is SendMessageResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isSending = false, replyingTo = null)
+                }
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    // НОВОЕ (опросы): голосование в опросе
+    fun voteOnPoll(messageId: String, optionIndices: Set<Int>) {
+        viewModelScope.launch {
+            messageRepository.voteOnPoll(chatId, messageId, optionIndices)
+        }
+    }
+
+    // НОВОЕ (опросы): закрыть опрос (только создатель)
+    fun closePoll(messageId: String) {
+        viewModelScope.launch {
+            messageRepository.closePoll(chatId, messageId)
+        }
+    }
+
     fun deleteMessage(message: Message) {
         viewModelScope.launch {
             when (val result = messageRepository.deleteMessage(chatId, message.id)) {

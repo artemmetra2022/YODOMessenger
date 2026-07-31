@@ -64,4 +64,18 @@ interface MessageRepository {
     suspend fun countMessages(chatId: String): Int
     /** Последние посты канала (для превью в профиле канала). */
     suspend fun getRecentMessages(chatId: String, limit: Int): List<Message>
+    
+    // НОВОЕ (опросы): создание и голосование
+    suspend fun sendPollMessage(
+        chatId: String,
+        question: String,
+        options: List<String>,
+        isAnonymous: Boolean = true,
+        allowMultipleAnswers: Boolean = false,
+        replyTo: ReplyContext? = null,
+        hasTtlOverride: Boolean = false,
+        ttlOverrideSeconds: Long? = null
+    ): SendMessageResult
+    suspend fun voteOnPoll(chatId: String, messageId: String, optionIndices: Set<Int>): SendMessageResult
+    suspend fun closePoll(chatId: String, messageId: String): SendMessageResult
 }
