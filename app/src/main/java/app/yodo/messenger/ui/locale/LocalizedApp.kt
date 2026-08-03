@@ -4,11 +4,21 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import app.yodo.messenger.data.local.AppLanguage
 import java.util.Locale
+
+/**
+ * Хранит исходный (Activity-based) контекст, существовавший до подмены LocalContext
+ * в LocalizedApp. hiltViewModel() требует Activity в цепочке LocalContext.current,
+ * а createConfigurationContext() отдаёт "голый" ContextImpl — поэтому места, вызывающие
+ * hiltViewModel() (например LanguageSwitcher), должны на время восстановить
+ * LocalContext provides LocalActivityContext.current.
+ */
+val LocalActivityContext = compositionLocalOf<Context?> { null }
 
 /**
  * Оборачивает контент приложения, подменяя LocalContext на контекст с нужной локалью.
@@ -19,6 +29,14 @@ import java.util.Locale
  * Configuration.locale через CompositionLocalProvider. Пересборка происходит автоматически,
  * так как languageCode передаётся как ключ remember() и как параметр — при его смене
  * весь контент под LocalizedApp перекомпонуется с новыми строками.
+ *
+ * ВАЖНО: createConfigurationContext() возвращает обычный ContextImpl, не Activity.
+ * hiltViewModel() внутри дерева ищет Activity через LocalContext.current и падает с
+ * IllegalStateException, если находит "голый" ContextImpl. Поэтому исходный контекст
+ * дополнительно прокидывается через LocalActivityContext — компоненты, вызывающие
+ * hiltViewModel() (см. LanguageSwitcher), временно восстанавливают его перед созданием
+ * ViewModel, а stringResource()/ресурсы по-прежнему разрешаются через LocalContext
+ * с локализованным контекстом.
  */
 @Composable
 fun LocalizedApp(
@@ -44,7 +62,10 @@ fun LocalizedApp(
         baseContext.createConfigurationContext(config)
     }
 
-    CompositionLocalProvider(LocalContext provides localizedContext) {
+    CompositionLocalProvider(
+        LocalContext provides localizedContext,
+        LocalActivityContext provides baseContext
+    ) {
         content()
     }
 }

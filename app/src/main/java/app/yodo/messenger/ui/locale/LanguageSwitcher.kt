@@ -8,9 +8,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -25,9 +27,20 @@ import androidx.compose.runtime.getValue
 @Composable
 fun LanguageSwitcher(
     modifier: Modifier = Modifier,
-    accentColor: Color = MaterialTheme.colorScheme.primary,
-    viewModel: LanguageViewModel = hiltViewModel()
+    accentColor: Color = MaterialTheme.colorScheme.primary
 ) {
+    // LocalContext.current в этом месте дерева может быть локализованным ContextImpl
+    // (см. LocalizedApp.kt), а hiltViewModel() требует Activity-контекст. Поэтому
+    // на время создания ViewModel временно восстанавливаем исходный Activity-контекст.
+    val activityContext = LocalActivityContext.current
+    val viewModel: LanguageViewModel = if (activityContext != null) {
+        CompositionLocalProvider(LocalContext provides activityContext) {
+            hiltViewModel()
+        }
+    } else {
+        hiltViewModel()
+    }
+
     val currentLanguage by viewModel.currentLanguage.collectAsState()
 
     Row(
