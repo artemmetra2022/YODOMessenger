@@ -33,13 +33,13 @@ fun LanguageSwitcher(
     // (см. LocalizedApp.kt), а hiltViewModel() требует Activity-контекст. Поэтому
     // на время создания ViewModel временно восстанавливаем исходный Activity-контекст.
     val activityContext = LocalActivityContext.current
-    val viewModel: LanguageViewModel
-    if (activityContext != null) {
+    val viewModel: LanguageViewModel = if (activityContext != null) {
         CompositionLocalProvider(LocalContext provides activityContext) {
-            viewModel = hiltViewModel()
+            val vm: LanguageViewModel = hiltViewModel()
+            vm
         }
     } else {
-        viewModel = hiltViewModel()
+        hiltViewModel()
     }
 
     val currentLanguage by viewModel.currentLanguage.collectAsState()
