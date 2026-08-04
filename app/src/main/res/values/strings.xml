@@ -44,21 +44,17 @@
     <!-- Настройки -->
     <string name="settings_title">Настройки</string>
     <string name="settings_profile">Профиль</string>
-
     <string name="settings_section_appearance">Оформление</string>
     <string name="settings_dark_theme">Тёмная тема</string>
     <string name="settings_dark_theme_subtitle">Тёмное оформление интерфейса</string>
-
     <string name="settings_section_customization">Кастомизация</string>
     <string name="settings_color_theme">Цветовая тема</string>
     <string name="settings_font_size">Размер шрифта</string>
-
     <string name="settings_section_language">Язык</string>
     <string name="settings_language_title">Язык приложения</string>
     <string name="settings_language_system">Системный</string>
     <string name="settings_language_ru">Русский</string>
     <string name="settings_language_en">English</string>
-
     <string name="settings_section_chats">Чаты</string>
     <string name="settings_send_on_enter">Отправка по Enter</string>
     <string name="settings_send_on_enter_subtitle">Enter отправляет сообщение</string>
@@ -66,22 +62,18 @@
     <string name="settings_hide_keyboard_subtitle">Закрывается после отправки</string>
     <string name="settings_auto_download">Автозагрузка фото</string>
     <string name="settings_auto_download_subtitle">Показывать изображения сразу</string>
-
     <string name="settings_section_privacy">Конфиденциальность</string>
     <string name="settings_online_status">Статус «в сети»</string>
     <string name="settings_online_status_subtitle">Другие видят, когда ты онлайн</string>
     <string name="settings_read_receipts">Статус прочтения</string>
     <string name="settings_read_receipts_subtitle">Собеседник видит двойную галочку</string>
-
     <string name="settings_pin_set">PIN-код установлен</string>
     <string name="settings_pin_set_up">Установить PIN-код</string>
     <string name="settings_pin_never">Защита не активна</string>
     <string name="settings_pin_on_close">Запрашивается при закрытии</string>
     <string name="settings_pin_on_background">Запрашивается при сворачивании</string>
-
     <string name="settings_blocked_users">Заблокированные пользователи</string>
     <string name="settings_blocked_users_subtitle">Управление блокировками</string>
-
     <string name="settings_extended_profile">Расширенный профиль</string>
     <string name="settings_extended_profile_subtitle">Что видят другие пользователи</string>
     <string name="settings_about_me">Заметки «О себе»</string>
@@ -93,7 +85,6 @@
     <string name="settings_phone_number">Номер телефона</string>
     <string name="settings_show_in_profile">Показывать в профиле другим</string>
     <string name="settings_email">Email</string>
-
     <string name="settings_section_notifications">Уведомления</string>
     <string name="settings_mute_all">Отключить все уведомления</string>
     <string name="settings_mute_all_subtitle">Полностью выключить push</string>
@@ -101,7 +92,6 @@
     <string name="settings_sound_subtitle">Звуковой сигнал при сообщении</string>
     <string name="settings_vibration">Вибрация</string>
     <string name="settings_vibration_subtitle">Вибросигнал при сообщении</string>
-
     <string name="settings_section_account">Аккаунт</string>
     <string name="settings_logout">Выйти из аккаунта</string>
     <string name="settings_logout_subtitle">Завершить текущую сессию</string>
@@ -384,6 +374,9 @@
     <string name="profile_birth_date_label">Дата рождения</string>
     <string name="profile_birth_date_placeholder">дд.мм.гггг</string>
     <string name="profile_change_photo_cd">Изменить фото</string>
+    <string name="profile_qr_code">QR-код</string>
+    <string name="profile_location_field">Местоположение</string>
+    <string name="profile_website_field">Сайт / ссылка</string>
 
     <!-- UserProfile -->
     <string name="user_profile_not_found">Пользователь не найден</string>
@@ -519,5 +512,4 @@
     <string name="nav_chats_cd">Чаты</string>
     <string name="nav_nearby_cd">Рядом</string>
     <string name="nav_offline_cd">Офлайн</string>
-
 </resources>

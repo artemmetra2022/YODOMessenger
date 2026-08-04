@@ -53,10 +53,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
@@ -82,6 +82,7 @@ fun ProfileScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val colorTheme = LocalColorTheme.current
+
     var name by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var bio by remember { mutableStateOf("") }
@@ -92,9 +93,10 @@ fun ProfileScreen(
     var initialized by remember { mutableStateOf(false) }
     var showBirthDatePicker by remember { mutableStateOf(false) }
     var birthDateError by remember { mutableStateOf<String?>(null) }
-    val coroutineScope = rememberCoroutineScope()
 
+    val coroutineScope = rememberCoroutineScope()
     val updateJobs = remember { mutableMapOf<String, Job>() }
+
     fun autoSave(key: String, delayMs: Long = 800L, action: () -> Unit) {
         updateJobs[key]?.cancel()
         updateJobs[key] = coroutineScope.launch {
@@ -116,7 +118,6 @@ fun ProfileScreen(
         }
     }
 
-    // п.35: навигация в чат "Избранное" из профиля
     val savedChatId by viewModel.savedChatId.collectAsState()
     LaunchedEffect(savedChatId) {
         savedChatId?.let {
@@ -162,7 +163,6 @@ fun ProfileScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Крупный аватар
             Box(
                 modifier = Modifier.size(112.dp).clickable { imagePicker.launch("image/*") },
                 contentAlignment = Alignment.Center
@@ -204,17 +204,16 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Ряд кнопок: Изменить / История / QR-код / Ещё
+            // ИСПРАВЛЕНО: "QR-код" → stringResource
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 ProfileQuickAction(Icons.Filled.Edit, stringResource(R.string.profile_edit_cd)) { imagePicker.launch("image/*") }
                 ProfileQuickAction(Icons.Filled.History, stringResource(R.string.profile_history_cd), onOpenHistory)
-                ProfileQuickAction(Icons.Filled.QrCode, "QR-код", onOpenQrCode)
-                ProfileQuickAction(Icons.Filled.MoreHoriz, stringResource(R.string.profile_more_cd)) { /* дополнительное меню появится позже */ }
+                ProfileQuickAction(Icons.Filled.QrCode, stringResource(R.string.profile_qr_code), onOpenQrCode)
+                ProfileQuickAction(Icons.Filled.MoreHoriz, stringResource(R.string.profile_more_cd)) {}
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Карточка "О себе"
             ProfileCard {
                 Text(stringResource(R.string.profile_about_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.height(4.dp))
@@ -231,7 +230,6 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Карточка с именем пользователя и телефоном
             ProfileCard {
                 ProfileField(
                     stringResource(R.string.profile_name_field), name,
@@ -252,7 +250,6 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Список действий: Избранное / Недавние звонки / Устройства / Выйти
             ProfileCard(padding = 0.dp) {
                 ProfileListItem(Icons.Filled.Bookmark, stringResource(R.string.profile_favorites), colorTheme.primary, Color.Unspecified) { viewModel.openSavedMessages() }
                 HorizontalDivider()
@@ -270,10 +267,10 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Расширенные поля — дата рождения, местоположение, сайт
             ProfileCard {
                 Text(stringResource(R.string.profile_more_section), style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
+
                 OutlinedTextField(
                     value = birthDate,
                     onValueChange = {},
@@ -299,6 +296,7 @@ fun ProfileScreen(
                 if (uiState.isSavingBirthDate) {
                     CircularProgressIndicator(modifier = Modifier.padding(top = 4.dp).size(18.dp))
                 }
+
                 if (showBirthDatePicker) {
                     val initialMillis = BirthDateValidator.displayStringToMillis(birthDate)
                     val datePickerState = rememberDatePickerState(
@@ -329,22 +327,26 @@ fun ProfileScreen(
                             }) { Text("ОК") }
                         },
                         dismissButton = {
-                            TextButton(onClick = { showBirthDatePicker = false }) { Text("Отмена") }
+                            TextButton(onClick = { showBirthDatePicker = false }) { Text(stringResource(R.string.action_cancel)) }
                         }
                     ) {
                         DatePicker(state = datePickerState)
                     }
                 }
+
+                // ИСПРАВЛЕНО: "Местоположение" → stringResource
                 ProfileField(
-                    "Местоположение", location,
+                    stringResource(R.string.profile_location_field), location,
                     onValueChange = { location = it; autoSave("location") { viewModel.updateLocation(location) } },
                     isSaving = uiState.isSavingLocation
                 )
+                // ИСПРАВЛЕНО: "Сайт / ссылка" → stringResource
                 ProfileField(
-                    "Сайт / ссылка", website,
+                    stringResource(R.string.profile_website_field), website,
                     onValueChange = { website = it; autoSave("website") { viewModel.updateWebsite(website) } },
                     isSaving = uiState.isSavingWebsite
                 )
+
                 uiState.user?.email?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 }
@@ -354,9 +356,6 @@ fun ProfileScreen(
                 Text(text = error, color = YodoError, modifier = Modifier.padding(top = 12.dp))
             }
 
-            // ════════════════════════════════════════
-            // Мои посты — видны всем пользователям, как во ВКонтакте
-            // ════════════════════════════════════════
             uiState.user?.uid?.let { uid ->
                 Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider()

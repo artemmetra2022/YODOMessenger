@@ -13,14 +13,13 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.res.stringResource
-import app.yodo.messenger.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import app.yodo.messenger.R
 import app.yodo.messenger.features.chats.ChatListScreen
 
 @Composable
@@ -59,11 +58,12 @@ fun MainScreen(
                     icon = { Icon(Icons.Filled.WifiOff, contentDescription = stringResource(R.string.nav_offline_cd)) },
                     label = { Text(stringResource(R.string.nav_offline)) }
                 )
+                // ИСПРАВЛЕНО: "Настройки" → stringResource(R.string.settings_title)
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { onSettingsClick() },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = "Настройки") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_title)) },
+                    label = { Text(stringResource(R.string.settings_title)) }
                 )
             }
         }
@@ -82,8 +82,5 @@ fun MainScreen(
         }
     }
 
-    // НОВОЕ: сразу после первого входа — предложить выдать разрешение на уведомления.
-    // Показывается только один раз (флаг хранится в DataStore), при всех последующих
-    // запусках/заходах на экран списка чатов диалог больше не появляется.
     NotificationPermissionPrompt()
 }

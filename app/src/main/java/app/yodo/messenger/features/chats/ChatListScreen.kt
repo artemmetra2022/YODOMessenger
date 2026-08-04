@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -55,10 +56,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -82,25 +83,23 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
-// Конфигурация табов фильтрации
+// Конфигурация табов фильтрации — ИСПРАВЛЕНО: labelResId вместо пустых строк
 // ---------------------------------------------------------------------------
-
 private data class FilterTab(
     val filter: ChatFilter,
-    val label: String
+    @StringRes val labelResId: Int
 )
 
 private val filterTabs = listOf(
-    FilterTab(ChatFilter.ALL,     ""),
-    FilterTab(ChatFilter.PRIVATE, ""),
-    FilterTab(ChatFilter.GROUPS,  ""),
-    FilterTab(ChatFilter.UNREAD,  "")
+    FilterTab(ChatFilter.ALL,     R.string.chat_filter_all),
+    FilterTab(ChatFilter.PRIVATE, R.string.chat_filter_private),
+    FilterTab(ChatFilter.GROUPS,  R.string.chat_filter_groups),
+    FilterTab(ChatFilter.UNREAD,  R.string.chat_filter_unread)
 )
 
 // ---------------------------------------------------------------------------
 // ChatListScreen
 // ---------------------------------------------------------------------------
-
 @Composable
 fun ChatListScreen(
     onChatClick: (String) -> Unit,
@@ -125,7 +124,6 @@ fun ChatListScreen(
                     .fillMaxWidth()
                     .statusBarsPadding()
             ) {
-                // Заголовок + иконки
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -145,8 +143,6 @@ fun ChatListScreen(
                         Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.chat_profile_cd))
                     }
                 }
-
-                // Горизонтальные табы фильтрации (как в Telegram)
                 val allActive = (uiState as? ChatListUiState.Content)?.allActiveChats ?: emptyList()
                 ChatFilterTabs(
                     tabs = filterTabs,
@@ -204,7 +200,6 @@ fun ChatListScreen(
                 }
                 is ChatListUiState.Content -> {
                     if (state.chats.isEmpty()) {
-                        // Пустой результат фильтрации
                         Text(
                             text = emptyFilterMessage(activeFilter),
                             modifier = Modifier.align(Alignment.Center).padding(24.dp),
@@ -214,7 +209,6 @@ fun ChatListScreen(
                         )
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            // Строка архива
                             if (state.archivedChats.isNotEmpty()) {
                                 item(key = "archive_row") {
                                     Row(
@@ -274,9 +268,8 @@ fun ChatListScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Горизонтальные табы фильтрации
+// Горизонтальные табы фильтрации — ИСПРАВЛЕНО: stringResource(tab.labelResId)
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun ChatFilterTabs(
     tabs: List<FilterTab>,
@@ -293,13 +286,12 @@ private fun ChatFilterTabs(
     ) {
         items(tabs) { tab ->
             val isActive = tab.filter == activeFilter
-            // Считаем бейдж для "Непрочитанные"
             val badge = if (tab.filter == ChatFilter.UNREAD) {
                 allChats.count { it.unreadCount > 0 }
             } else 0
 
             FilterChip(
-                label = tab.label,
+                label = stringResource(tab.labelResId),
                 isActive = isActive,
                 badge = badge,
                 onClick = { onTabSelected(tab.filter) }
@@ -345,7 +337,7 @@ private fun FilterChip(
                 ) {
                     Text(
                         text = if (badge > 99) "99+" else badge.toString(),
-                        color = if (isActive) Color.White else Color.White,
+                        color = Color.White,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -355,7 +347,7 @@ private fun FilterChip(
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun emptyFilterMessage(filter: ChatFilter): String = when (filter) {
     ChatFilter.ALL     -> stringResource(R.string.chat_list_empty_all)
     ChatFilter.PRIVATE -> stringResource(R.string.chat_list_empty_private)
@@ -366,7 +358,6 @@ private fun emptyFilterMessage(filter: ChatFilter): String = when (filter) {
 // ---------------------------------------------------------------------------
 // SwipeableChatListItem
 // ---------------------------------------------------------------------------
-
 @Composable
 internal fun SwipeableChatListItem(
     chat: ChatPreview,
@@ -425,7 +416,6 @@ internal fun SwipeableChatListItem(
 // ---------------------------------------------------------------------------
 // ChatListItem
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun ChatListItem(
     chat: ChatPreview,
@@ -442,14 +432,13 @@ private fun ChatListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Аватар
         if (isSavedChat) {
             Box(
                 modifier = Modifier.size(56.dp).clip(CircleShape)
                     .background(colorTheme.primary.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Filled.Bookmark, contentDescription = "Избранное",
+                Icon(Icons.Filled.Bookmark, contentDescription = stringResource(R.string.chat_list_favorite_cd),
                     tint = colorTheme.primary, modifier = Modifier.size(28.dp))
             }
         } else if (isChannel) {
@@ -462,7 +451,6 @@ private fun ChatListItem(
                     userId = chat.chatId
                 )
             } else {
-                // Цветная аватарка с инициалом канала
                 UserAvatar(
                     displayName = if (chat.isVerified) "Y" else chat.title,
                     photoUrl = null,
@@ -478,7 +466,6 @@ private fun ChatListItem(
                     photoUrl = chat.avatarUrl,
                     avatarBase64 = chat.avatarBase64,
                     size = 56.dp,
-                    // Передаём otherUserId для стабильного цвета по пользователю
                     userId = chat.otherUserId ?: chat.chatId
                 )
                 if (chat.isOnline) {
@@ -494,7 +481,6 @@ private fun ChatListItem(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            // Верхняя строка
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     modifier = Modifier.weight(1f),
@@ -522,7 +508,7 @@ private fun ChatListItem(
                                 .clip(CircleShape).background(Color(0xFF22C55E)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Filled.Verified, contentDescription = "Верифицирован",
+                            Icon(Icons.Filled.Verified, contentDescription = stringResource(R.string.chat_list_verified_cd),
                                 tint = Color(0xFF1D9BF0), modifier = Modifier.size(12.dp))
                         }
                     }
@@ -550,7 +536,7 @@ private fun ChatListItem(
                             val isRead = chat.lastMessageStatus == "READ"
                             Icon(
                                 imageVector = if (isRead) Icons.Filled.DoneAll else Icons.Filled.Done,
-                                contentDescription = if (isRead) "Прочитано" else "Доставлено",
+                                contentDescription = if (isRead) stringResource(R.string.chat_list_read_cd) else stringResource(R.string.chat_list_delivered_cd),
                                 modifier = Modifier.size(14.dp).padding(top = 2.dp),
                                 tint = if (isRead) Color(0xFF60E6FF) else Color.Gray
                             )
@@ -561,7 +547,6 @@ private fun ChatListItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Нижняя строка
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (chat.draftText.isNotBlank()) {
                     Text(
@@ -607,12 +592,11 @@ private fun ChatListItem(
 // ---------------------------------------------------------------------------
 // Вспомогательные composable
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier) {
     when {
         chat.isOnline -> Text(
-            "в сети",
+            stringResource(R.string.chat_list_online),
             style = MaterialTheme.typography.labelMedium,
             color = YodoOnline,
             maxLines = 1,
