@@ -1777,9 +1777,10 @@ private fun VoiceRecordingBar(
             Spacer(modifier = Modifier.width(10.dp))
             val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "rec")
             val alpha by infiniteTransition.animateFloat(
-                initialValue = 1f, targetValue = 0.2f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(700),
+                initialValue = 1f,
+                targetValue = 0.2f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable<Float>(
+                    animation = androidx.compose.animation.core.tween<Float>(700),
                     repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
                 ), label = "recAlpha"
             )
