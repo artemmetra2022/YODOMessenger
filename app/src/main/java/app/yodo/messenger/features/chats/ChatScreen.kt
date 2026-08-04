@@ -992,8 +992,7 @@ fun ChatScreen(
                 val emptyText = when {
                     isChannel -> "Здесь пока ничего нет"
                     uiState.isSearchActive -> "Ничего не найдено"
-                    else -> "Сообщений пока нет.
-Напишите первым!"
+                    else -> "Сообщений пока нет.\nНапишите первым!"
                 }
                 Text(
                     text = emptyText,
