@@ -1,10 +1,11 @@
 package app.yodo.messenger.ui.locale
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.Configuration
+import android.content.res.Resources
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -12,32 +13,18 @@ import app.yodo.messenger.data.local.AppLanguage
 import java.util.Locale
 
 /**
- * Хранит исходный (Activity-based) контекст, существовавший до подмены LocalContext
- * в LocalizedApp. hiltViewModel() требует Activity в цепочке LocalContext.current,
- * а createConfigurationContext() отдаёт "голый" ContextImpl — поэтому места, вызывающие
- * hiltViewModel() (например LanguageSwitcher), должны на время восстановить
- * LocalContext provides LocalActivityContext.current.
+ * Обёртка над Activity-контекстом: getResources() отдаёт ресурсы с нужной локалью,
+ * а всё остальное (включая цепочку baseContext для Hilt findActivity()) делегируется
+ * к оригинальному Activity. Это критично: createConfigurationContext() возвращает
+ * ContextImpl без Activity в цепочке, из-за чего hiltViewModel() падает.
  */
-val LocalActivityContext = compositionLocalOf<Context?> { null }
+private class LocalizedContextWrapper(
+    base: Context,
+    private val localizedResources: Resources
+) : ContextWrapper(base) {
+    override fun getResources(): Resources = localizedResources
+}
 
-/**
- * Оборачивает контент приложения, подменяя LocalContext на контекст с нужной локалью.
- *
- * Приложение не использует AppCompatActivity/AppCompatDelegate, поэтому смена языка
- * не требует пересоздания Activity: stringResource() внутри Compose разрешает строки
- * через LocalContext.current.resources, и достаточно предоставить контекст с изменённой
- * Configuration.locale через CompositionLocalProvider. Пересборка происходит автоматически,
- * так как languageCode передаётся как ключ remember() и как параметр — при его смене
- * весь контент под LocalizedApp перекомпонуется с новыми строками.
- *
- * ВАЖНО: createConfigurationContext() возвращает обычный ContextImpl, не Activity.
- * hiltViewModel() внутри дерева ищет Activity через LocalContext.current и падает с
- * IllegalStateException, если находит "голый" ContextImpl. Поэтому исходный контекст
- * дополнительно прокидывается через LocalActivityContext — компоненты, вызывающие
- * hiltViewModel() (см. LanguageSwitcher), временно восстанавливают его перед созданием
- * ViewModel, а stringResource()/ресурсы по-прежнему разрешаются через LocalContext
- * с локализованным контекстом.
- */
 @Composable
 fun LocalizedApp(
     languageCode: String,
@@ -47,33 +34,29 @@ fun LocalizedApp(
     val baseConfiguration = LocalConfiguration.current
 
     val localizedContext = remember(languageCode, baseContext, baseConfiguration) {
-        // Безопасное разрешение локали: если код пустой или некорректный —
-        // fallback на системную локаль, чтобы избежать краша.
         val locale = runCatching {
             resolveLocale(languageCode, baseContext)
-        }.getOrElse {
-            Locale.getDefault()
-        }
+        }.getOrElse { Locale.getDefault() }
 
         Locale.setDefault(locale)
 
+        // Создаём конфигурацию с нужной локалью и получаем под неё ресурсы,
+        // но сам контекст оставляем обёрткой над Activity.
         val config = Configuration(baseContext.resources.configuration)
         config.setLocale(locale)
-        baseContext.createConfigurationContext(config)
+
+        val localizedResources = baseContext.createConfigurationContext(config).resources
+        LocalizedContextWrapper(baseContext, localizedResources)
     }
 
-    CompositionLocalProvider(
-        LocalContext provides localizedContext,
-        LocalActivityContext provides baseContext
-    ) {
+    CompositionLocalProvider(LocalContext provides localizedContext) {
         content()
     }
 }
 
 private fun resolveLocale(languageCode: String, context: Context): Locale {
-    return when (val language = AppLanguage.fromCode(languageCode)) {
+    return when (AppLanguage.fromCode(languageCode)) {
         AppLanguage.SYSTEM -> {
-            // Системная локаль устройства на момент запуска/смены настройки.
             val systemLocales = context.resources.configuration.locales
             if (!systemLocales.isEmpty) systemLocales[0] else Locale.getDefault()
         }
