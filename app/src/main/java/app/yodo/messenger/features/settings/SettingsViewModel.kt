@@ -1,10 +1,10 @@
-
 package app.yodo.messenger.features.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.AppLanguage
+import app.yodo.messenger.data.local.ChatBackgroundType
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.FontSize
 import app.yodo.messenger.data.local.LanguagePreferences
@@ -12,6 +12,7 @@ import app.yodo.messenger.data.local.PinCheckResult
 import app.yodo.messenger.data.local.PinRequirement
 import app.yodo.messenger.data.local.ThemePreferences
 import app.yodo.messenger.data.local.UserSettingsPreferences
+import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.PresenceRepository
@@ -38,7 +39,6 @@ class SettingsViewModel @Inject constructor(
     private val presenceRepository: PresenceRepository,
     private val userRepository: UserRepository
 ) : ViewModel() {
-
     val currentLanguage: StateFlow<AppLanguage> = languagePreferences.languageCode
         .map { AppLanguage.fromCode(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppLanguage.SYSTEM)
@@ -53,10 +53,21 @@ class SettingsViewModel @Inject constructor(
     val notificationSound: StateFlow<Boolean> = userSettingsPreferences.notificationSound.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val notificationVibration: StateFlow<Boolean> = userSettingsPreferences.notificationVibration.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val muteAllNotifications: StateFlow<Boolean> = userSettingsPreferences.muteAllNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-    // НОВОЕ (расширенные опросы): тот же флаг, что и на экране регистрации — общее значение.
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     val pinRequirement: StateFlow<PinRequirement> = userSettingsPreferences.pinRequirement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PinRequirement.NEVER)
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    val autoDeleteEnabled: StateFlow<Boolean> = userSettingsPreferences.autoDeleteEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val autoDeleteDays: StateFlow<Int> = userSettingsPreferences.autoDeleteDays.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 30)
+
+    // НОВОЕ (п.13): фон чата
+    val chatBackgroundType: StateFlow<ChatBackgroundType> = userSettingsPreferences.chatBackgroundType.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatBackgroundType.DEFAULT)
+    val chatBackgroundCustomPath: StateFlow<String> = userSettingsPreferences.chatBackgroundCustomPath.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    // НОВОЕ (п.4): папки чатов
+    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val currentUser: StateFlow<YodoUser?> =
         userRepository.observeCurrentUser().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -70,16 +81,13 @@ class SettingsViewModel @Inject constructor(
 
     private val _accountDeleted = MutableStateFlow(false)
     val accountDeleted: StateFlow<Boolean> = _accountDeleted
-    // errorMessage хранит либо готовую строку (например, из toUserMessage — сообщения Firebase
-    // пока не переведены, см. FirebaseErrorMapper), либо null. Для управляемых нами сообщений
-    // ("не авторизован" и т.п.) используем ресурсные строки, резолвим их уже на экране.
+
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
     private val _errorMessageResId = MutableStateFlow<Int?>(null)
     val errorMessageResId: StateFlow<Int?> = _errorMessageResId
 
     fun setLanguage(language: AppLanguage) { viewModelScope.launch { languagePreferences.setLanguage(language) } }
-
     fun setDarkTheme(enabled: Boolean) { viewModelScope.launch { themePreferences.setDarkTheme(enabled) } }
     fun setColorTheme(name: String) { viewModelScope.launch { themePreferences.setColorTheme(name) } }
     fun setSendOnEnter(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setSendOnEnter(enabled) } }
@@ -96,10 +104,8 @@ class SettingsViewModel @Inject constructor(
     fun setNotificationSound(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationSound(enabled) } }
     fun setNotificationVibration(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationVibration(enabled) } }
     fun setMuteAllNotifications(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setMuteAllNotifications(enabled) } }
-    // НОВОЕ (расширенные опросы): включает/выключает доп. параметры опросов (общий флаг с регистрацией).
     fun setAdvancedPollsEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setAdvancedPollsEnabled(enabled) } }
 
-    /** п.6: сохраняет новый PIN и сразу выставляет режим требования (по умолчанию — после закрытия). */
     fun setPin(pin: String, requirement: PinRequirement = PinRequirement.ON_CLOSE) {
         viewModelScope.launch {
             userSettingsPreferences.setPin(pin)
@@ -109,6 +115,49 @@ class SettingsViewModel @Inject constructor(
     fun setPinRequirement(requirement: PinRequirement) { viewModelScope.launch { userSettingsPreferences.setPinRequirement(requirement) } }
     fun clearPin() { viewModelScope.launch { userSettingsPreferences.clearPin() } }
     suspend fun verifyPin(pin: String): PinCheckResult = userSettingsPreferences.verifyPin(pin)
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    fun setAutoDeleteEnabled(enabled: Boolean) {
+        viewModelScope.launch { userSettingsPreferences.setAutoDeleteEnabled(enabled) }
+    }
+    fun setAutoDeleteDays(days: Int) {
+        viewModelScope.launch { userSettingsPreferences.setAutoDeleteDays(days) }
+    }
+    fun updateLastActiveTimestamp() {
+        viewModelScope.launch { userSettingsPreferences.updateLastActiveTimestamp() }
+    }
+
+    // НОВОЕ (п.13): фон чата
+    fun setChatBackgroundType(type: ChatBackgroundType) {
+        viewModelScope.launch { userSettingsPreferences.setChatBackgroundType(type) }
+    }
+    fun setChatBackgroundCustomPath(path: String) {
+        viewModelScope.launch { userSettingsPreferences.setChatBackgroundCustomPath(path) }
+    }
+
+    // НОВОЕ (п.4): папки чатов
+    fun addChatFolder(name: String) {
+        viewModelScope.launch {
+            val folder = ChatFolder(
+                id = java.util.UUID.randomUUID().toString(),
+                name = name,
+                order = chatFolders.value.size
+            )
+            userSettingsPreferences.addChatFolder(folder)
+        }
+    }
+    fun updateChatFolder(folder: ChatFolder) {
+        viewModelScope.launch { userSettingsPreferences.updateChatFolder(folder) }
+    }
+    fun deleteChatFolder(folderId: String) {
+        viewModelScope.launch { userSettingsPreferences.deleteChatFolder(folderId) }
+    }
+    fun addChatToFolder(folderId: String, chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.addChatToFolder(folderId, chatId) }
+    }
+    fun removeChatFromFolder(folderId: String, chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.removeChatFromFolder(folderId, chatId) }
+    }
 
     private fun pushPrivacySettings(
         showBirthDate: Boolean = this.showBirthDate.value,
@@ -126,7 +175,6 @@ class SettingsViewModel @Inject constructor(
             )
         }
     }
-
     fun setShowBirthDate(enabled: Boolean) = pushPrivacySettings(showBirthDate = enabled)
     fun setShowAboutMe(enabled: Boolean) = pushPrivacySettings(showAboutMe = enabled)
     fun setShowLocation(enabled: Boolean) = pushPrivacySettings(showLocation = enabled)
@@ -148,9 +196,6 @@ class SettingsViewModel @Inject constructor(
                 user.delete().await()
                 _accountDeleted.value = true
             } catch (e: Exception) {
-                // Сообщения из FirebaseErrorMapper (toUserMessage) пока не локализованы —
-                // это общая утилита на всё приложение, её перевод выходит за рамки текущей
-                // задачи (переключение языка на регистрации/в настройках).
                 _errorMessage.value = e.toUserMessage("Не удалось удалить аккаунт")
             }
         }

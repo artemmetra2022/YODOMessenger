@@ -3,6 +3,8 @@ package app.yodo.messenger.features.chats
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.data.local.DraftsPreferences
+import app.yodo.messenger.data.local.UserSettingsPreferences
+import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
 import app.yodo.messenger.domain.repository.ChatListResult
@@ -12,18 +14,22 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
 /** Фильтр списка чатов (горизонтальные табы, как в Telegram) */
-enum class ChatFilter {
-    ALL,        // Все чаты
-    PRIVATE,    // Личные (type == PRIVATE)
-    GROUPS,     // Группы (type == GROUP)
-    UNREAD      // Непрочитанные (unreadCount > 0)
+sealed class ChatFilter {
+    data object ALL : ChatFilter()
+    data object PRIVATE : ChatFilter()
+    data object GROUPS : ChatFilter()
+    data object UNREAD : ChatFilter()
+    // НОВОЕ (п.4): пользовательская папка чатов
+    data class Folder(val folderId: String) : ChatFilter()
 }
 
 sealed class ChatListUiState {
@@ -43,15 +49,19 @@ class ChatListViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val firebaseAuth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val draftsPreferences: DraftsPreferences
+    private val draftsPreferences: DraftsPreferences,
+    private val userSettingsPreferences: UserSettingsPreferences
 ) : ViewModel() {
-
     private val _uiState = MutableStateFlow<ChatListUiState>(ChatListUiState.Loading)
     val uiState: StateFlow<ChatListUiState> = _uiState
 
     /** Текущий выбранный фильтр */
-    private val _activeFilter = MutableStateFlow(ChatFilter.ALL)
+    private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
     val activeFilter: StateFlow<ChatFilter> = _activeFilter
+
+    // НОВОЕ (п.4): папки чатов — пользовательские группировки чатов
+    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         observeChats()
@@ -62,13 +72,42 @@ class ChatListViewModel @Inject constructor(
         _activeFilter.value = filter
     }
 
+    // НОВОЕ (п.4): управление папками чатов
+    fun addChatFolder(name: String) {
+        viewModelScope.launch {
+            val folder = ChatFolder(
+                id = java.util.UUID.randomUUID().toString(),
+                name = name,
+                order = chatFolders.value.size
+            )
+            userSettingsPreferences.addChatFolder(folder)
+        }
+    }
+
+    fun updateChatFolder(folder: ChatFolder) {
+        viewModelScope.launch { userSettingsPreferences.updateChatFolder(folder) }
+    }
+
+    fun deleteChatFolder(folderId: String) {
+        viewModelScope.launch { userSettingsPreferences.deleteChatFolder(folderId) }
+    }
+
+    fun addChatToFolder(folderId: String, chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.addChatToFolder(folderId, chatId) }
+    }
+
+    fun removeChatFromFolder(folderId: String, chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.removeChatFromFolder(folderId, chatId) }
+    }
+
     private fun observeChats() {
         viewModelScope.launch {
             combine(
                 chatRepository.observeChatList(),
                 draftsPreferences.observeAllDrafts(),
-                _activeFilter
-            ) { result, drafts, filter ->
+                _activeFilter,
+                chatFolders
+            ) { result, drafts, filter, folders ->
                 when (result) {
                     is ChatListResult.Success -> {
                         val chatsWithDrafts = if (drafts.isEmpty()) {
@@ -80,15 +119,24 @@ class ChatListViewModel @Inject constructor(
                             }
                         }
                         val (archived, active) = chatsWithDrafts.partition { it.isArchived }
-
+                        
                         // Применяем фильтр
                         val filtered = when (filter) {
                             ChatFilter.ALL     -> active
                             ChatFilter.PRIVATE -> active.filter { it.type == ChatType.PRIVATE }
                             ChatFilter.GROUPS  -> active.filter { it.type == ChatType.GROUP || it.type == ChatType.CHANNEL }
                             ChatFilter.UNREAD  -> active.filter { it.unreadCount > 0 }
+                            is ChatFilter.Folder -> {
+                                // НОВОЕ (п.4): фильтрация по пользовательской папке
+                                val folder = folders.find { it.id == filter.folderId }
+                                if (folder != null) {
+                                    active.filter { it.chatId in folder.chatIds }
+                                } else {
+                                    active
+                                }
+                            }
                         }
-
+                        
                         if (active.isEmpty() && archived.isEmpty()) ChatListUiState.Empty
                         else ChatListUiState.Content(
                             chats = filtered,

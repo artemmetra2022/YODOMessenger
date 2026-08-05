@@ -1,6 +1,5 @@
 package app.yodo.messenger.features.chats
 
-import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -32,11 +31,13 @@ import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -44,9 +45,11 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
 import app.yodo.messenger.ui.components.UserAvatar
@@ -83,18 +87,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
-// Конфигурация табов фильтрации — ИСПРАВЛЕНО: labelResId вместо пустых строк
+// Конфигурация табов фильтрации
 // ---------------------------------------------------------------------------
 private data class FilterTab(
     val filter: ChatFilter,
-    @StringRes val labelResId: Int
-)
-
-private val filterTabs = listOf(
-    FilterTab(ChatFilter.ALL,     R.string.chat_filter_all),
-    FilterTab(ChatFilter.PRIVATE, R.string.chat_filter_private),
-    FilterTab(ChatFilter.GROUPS,  R.string.chat_filter_groups),
-    FilterTab(ChatFilter.UNREAD,  R.string.chat_filter_unread)
+    val label: String,
+    val badge: Int = 0
 )
 
 // ---------------------------------------------------------------------------
@@ -114,8 +112,10 @@ fun ChatListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val activeFilter by viewModel.activeFilter.collectAsState()
+    val chatFolders by viewModel.chatFolders.collectAsState()
     val colorTheme = LocalColorTheme.current
     var showFabMenu by remember { mutableStateOf(false) }
+    var showFolderDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -124,6 +124,7 @@ fun ChatListScreen(
                     .fillMaxWidth()
                     .statusBarsPadding()
             ) {
+                // Заголовок + иконки
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -143,12 +144,34 @@ fun ChatListScreen(
                         Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.chat_profile_cd))
                     }
                 }
+                
+                // Горизонтальные табы фильтрации (как в Telegram) + папки чатов
                 val allActive = (uiState as? ChatListUiState.Content)?.allActiveChats ?: emptyList()
+                
+                // Строим список табов: стандартные фильтры + пользовательские папки
+                val tabs = buildList {
+                    add(FilterTab(ChatFilter.ALL, stringResource(R.string.chat_filter_all)))
+                    add(FilterTab(ChatFilter.UNREAD, stringResource(R.string.chat_filter_unread), 
+                        badge = allActive.count { it.unreadCount > 0 }))
+                    add(FilterTab(ChatFilter.PRIVATE, stringResource(R.string.chat_filter_private)))
+                    add(FilterTab(ChatFilter.GROUPS, stringResource(R.string.chat_filter_groups)))
+                    
+                    // НОВОЕ (п.4): добавляем пользовательские папки
+                    chatFolders.forEach { folder ->
+                        val folderChatsCount = allActive.count { it.chatId in folder.chatIds }
+                        add(FilterTab(
+                            filter = ChatFilter.Folder(folder.id),
+                            label = folder.name,
+                            badge = folderChatsCount
+                        ))
+                    }
+                }
+                
                 ChatFilterTabs(
-                    tabs = filterTabs,
+                    tabs = tabs,
                     activeFilter = activeFilter,
-                    allChats = allActive,
-                    onTabSelected = { viewModel.setFilter(it) }
+                    onTabSelected = { viewModel.setFilter(it) },
+                    onAddFolder = { showFolderDialog = true }
                 )
             }
         },
@@ -200,6 +223,7 @@ fun ChatListScreen(
                 }
                 is ChatListUiState.Content -> {
                     if (state.chats.isEmpty()) {
+                        // Пустой результат фильтрации
                         Text(
                             text = emptyFilterMessage(activeFilter),
                             modifier = Modifier.align(Alignment.Center).padding(24.dp),
@@ -209,6 +233,7 @@ fun ChatListScreen(
                         )
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            // Строка архива
                             if (state.archivedChats.isNotEmpty()) {
                                 item(key = "archive_row") {
                                     Row(
@@ -265,17 +290,28 @@ fun ChatListScreen(
             }
         }
     }
+
+    // НОВОЕ (п.4): диалог создания папки
+    if (showFolderDialog) {
+        AddFolderDialog(
+            onDismiss = { showFolderDialog = false },
+            onConfirm = { name ->
+                viewModel.addChatFolder(name)
+                showFolderDialog = false
+            }
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Горизонтальные табы фильтрации — ИСПРАВЛЕНО: stringResource(tab.labelResId)
+// Горизонтальные табы фильтрации + папки
 // ---------------------------------------------------------------------------
 @Composable
 private fun ChatFilterTabs(
     tabs: List<FilterTab>,
     activeFilter: ChatFilter,
-    allChats: List<ChatPreview>,
-    onTabSelected: (ChatFilter) -> Unit
+    onTabSelected: (ChatFilter) -> Unit,
+    onAddFolder: () -> Unit
 ) {
     LazyRow(
         modifier = Modifier
@@ -286,16 +322,18 @@ private fun ChatFilterTabs(
     ) {
         items(tabs) { tab ->
             val isActive = tab.filter == activeFilter
-            val badge = if (tab.filter == ChatFilter.UNREAD) {
-                allChats.count { it.unreadCount > 0 }
-            } else 0
-
+            
             FilterChip(
-                label = stringResource(tab.labelResId),
+                label = tab.label,
                 isActive = isActive,
-                badge = badge,
+                badge = tab.badge,
                 onClick = { onTabSelected(tab.filter) }
             )
+        }
+        
+        // Кнопка добавления папки
+        item {
+            AddFolderChip(onClick = onAddFolder)
         }
     }
 }
@@ -337,7 +375,7 @@ private fun FilterChip(
                 ) {
                     Text(
                         text = if (badge > 99) "99+" else badge.toString(),
-                        color = Color.White,
+                        color = if (isActive) Color.White else Color.White,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -347,12 +385,79 @@ private fun FilterChip(
     }
 }
 
+// НОВОЕ (п.4): кнопка добавления папки
+@Composable
+private fun AddFolderChip(onClick: () -> Unit) {
+    val colorTheme = LocalColorTheme.current
+    
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = colorTheme.primary.copy(alpha = 0.12f),
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = "Добавить папку",
+                tint = colorTheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = "Папка",
+                color = colorTheme.primary,
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
+    }
+}
+
+// НОВОЕ (п.4): диалог создания папки
+@Composable
+private fun AddFolderDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var folderName by remember { mutableStateOf("") }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Новая папка") },
+        text = {
+            OutlinedTextField(
+                value = folderName,
+                onValueChange = { folderName = it },
+                label = { Text("Название папки") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (folderName.isNotBlank()) onConfirm(folderName.trim()) },
+                enabled = folderName.isNotBlank()
+            ) {
+                Text("Создать")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
+}
+
 @Composable
 private fun emptyFilterMessage(filter: ChatFilter): String = when (filter) {
     ChatFilter.ALL     -> stringResource(R.string.chat_list_empty_all)
     ChatFilter.PRIVATE -> stringResource(R.string.chat_list_empty_private)
     ChatFilter.GROUPS  -> stringResource(R.string.chat_list_empty_groups)
     ChatFilter.UNREAD  -> stringResource(R.string.chat_list_empty_unread)
+    is ChatFilter.Folder -> "В этой папке пока нет чатов"
 }
 
 // ---------------------------------------------------------------------------
@@ -432,13 +537,14 @@ private fun ChatListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Аватар
         if (isSavedChat) {
             Box(
                 modifier = Modifier.size(56.dp).clip(CircleShape)
                     .background(colorTheme.primary.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Filled.Bookmark, contentDescription = stringResource(R.string.chat_list_favorite_cd),
+                Icon(Icons.Filled.Bookmark, contentDescription = "Избранное",
                     tint = colorTheme.primary, modifier = Modifier.size(28.dp))
             }
         } else if (isChannel) {
@@ -481,6 +587,7 @@ private fun ChatListItem(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
+            // Верхняя строка
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     modifier = Modifier.weight(1f),
@@ -508,7 +615,7 @@ private fun ChatListItem(
                                 .clip(CircleShape).background(Color(0xFF22C55E)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Filled.Verified, contentDescription = stringResource(R.string.chat_list_verified_cd),
+                            Icon(Icons.Filled.Verified, contentDescription = "Верифицирован",
                                 tint = Color(0xFF1D9BF0), modifier = Modifier.size(12.dp))
                         }
                     }
@@ -536,7 +643,7 @@ private fun ChatListItem(
                             val isRead = chat.lastMessageStatus == "READ"
                             Icon(
                                 imageVector = if (isRead) Icons.Filled.DoneAll else Icons.Filled.Done,
-                                contentDescription = if (isRead) stringResource(R.string.chat_list_read_cd) else stringResource(R.string.chat_list_delivered_cd),
+                                contentDescription = if (isRead) "Прочитано" else "Доставлено",
                                 modifier = Modifier.size(14.dp).padding(top = 2.dp),
                                 tint = if (isRead) Color(0xFF60E6FF) else Color.Gray
                             )
@@ -547,6 +654,7 @@ private fun ChatListItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Нижняя строка
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (chat.draftText.isNotBlank()) {
                     Text(
@@ -596,7 +704,7 @@ private fun ChatListItem(
 private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier) {
     when {
         chat.isOnline -> Text(
-            stringResource(R.string.chat_list_online),
+            "в сети",
             style = MaterialTheme.typography.labelMedium,
             color = YodoOnline,
             maxLines = 1,

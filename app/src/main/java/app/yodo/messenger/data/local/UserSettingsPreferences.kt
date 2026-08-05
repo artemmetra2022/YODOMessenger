@@ -3,42 +3,50 @@ package app.yodo.messenger.data.local
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.yodo.messenger.domain.model.ChatFolder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private val Context.settingsDataStore by preferencesDataStore(name = "yodo_user_settings")
 
-// п.33: 5 положений ползунка вместо 3
-enum class FontSize(val scale: Float, val displayName: String) {
-    VERY_SMALL(0.85f, "Очень мелкий"),
-    SMALL(0.925f, "Мелкий"),
-    MEDIUM(1.0f, "Обычный"),
-    LARGE(1.1f, "Крупный"),
-    VERY_LARGE(1.2f, "Очень крупный")
+enum class FontSize(val scale: Float) {
+    SMALL(0.9f), MEDIUM(1.0f), LARGE(1.15f)
 }
 
-// п.6: когда именно приложение требует PIN-код при входе.
 enum class PinRequirement(val displayName: String) {
     NEVER("Никогда"),
     ON_CLOSE("После закрытия приложения"),
     ON_BACKGROUND("После сворачивания приложения")
 }
 
-/** Результат проверки PIN: успех, неверный код (с числом оставшихся попыток), или блокировка. */
 sealed class PinCheckResult {
     data object Success : PinCheckResult()
     data class WrongPin(val attemptsRemaining: Int) : PinCheckResult()
     data class LockedOut(val unlockAtMillis: Long) : PinCheckResult()
 }
 
+// НОВОЕ (п.13): типы фона чата
+enum class ChatBackgroundType(val displayName: String) {
+    DEFAULT("Стандартный"),
+    GRADIENT_1("Градиент 1"),
+    GRADIENT_2("Градиент 2"),
+    GRADIENT_3("Градиент 3"),
+    GRADIENT_4("Градиент 4"),
+    CUSTOM_IMAGE("Своё фото")
+}
+
 private const val MAX_PIN_ATTEMPTS = 5
-private const val PIN_LOCKOUT_MS = 30_000L // 30 секунд блокировки после исчерпания попыток
+private const val PIN_LOCKOUT_MS = 30_000L
 
 @Singleton
 class UserSettingsPreferences @Inject constructor(
@@ -53,20 +61,25 @@ class UserSettingsPreferences @Inject constructor(
     private val notificationVibrationKey = booleanPreferencesKey("notification_vibration")
     private val muteAllNotificationsKey = booleanPreferencesKey("mute_all_notifications")
     private val hideKeyboardOnSendKey = booleanPreferencesKey("hide_keyboard_on_send")
-    // НОВОЕ (расширенные опросы): включает создание опросов с доп. параметрами
-    // (анонимность, множественный выбор, дата авто-закрытия). Один и тот же флаг
-    // доступен на экране регистрации и в настройках — значение общее для аккаунта.
     private val advancedPollsEnabledKey = booleanPreferencesKey("advanced_polls_enabled")
-    // п.6: PIN хранится не как открытый текст, а как SHA-256 хэш + соль.
-    // НОВОЕ: показываем собственный экран запроса разрешения на уведомления
-    // только один раз — сразу после первого входа пользователя.
-    private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
     private val pinHashKey = stringPreferencesKey("pin_hash")
     private val pinSaltKey = stringPreferencesKey("pin_salt")
     private val pinRequirementKey = stringPreferencesKey("pin_requirement")
-    // Лимит попыток: после MAX_PIN_ATTEMPTS неверных вводов подряд — блокировка на LOCKOUT_MS.
-    private val pinFailedAttemptsKey = androidx.datastore.preferences.core.intPreferencesKey("pin_failed_attempts")
-    private val pinLockedUntilKey = androidx.datastore.preferences.core.longPreferencesKey("pin_locked_until")
+    private val pinFailedAttemptsKey = intPreferencesKey("pin_failed_attempts")
+    private val pinLockedUntilKey = longPreferencesKey("pin_locked_until")
+    private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    private val autoDeleteEnabledKey = booleanPreferencesKey("auto_delete_enabled")
+    private val autoDeleteDaysKey = intPreferencesKey("auto_delete_days")
+    private val lastActiveTimestampKey = longPreferencesKey("last_active_timestamp")
+
+    // НОВОЕ (п.13): фон чата
+    private val chatBackgroundTypeKey = stringPreferencesKey("chat_background_type")
+    private val chatBackgroundCustomPathKey = stringPreferencesKey("chat_background_custom_path")
+
+    // НОВОЕ (п.4): папки чатов
+    private val chatFoldersJsonKey = stringPreferencesKey("chat_folders_json")
 
     val sendOnEnter: Flow<Boolean> = context.settingsDataStore.data.map { it[sendOnEnterKey] ?: true }
     val fontSize: Flow<FontSize> = context.settingsDataStore.data.map { prefs ->
@@ -79,21 +92,39 @@ class UserSettingsPreferences @Inject constructor(
     val notificationVibration: Flow<Boolean> = context.settingsDataStore.data.map { it[notificationVibrationKey] ?: true }
     val muteAllNotifications: Flow<Boolean> = context.settingsDataStore.data.map { it[muteAllNotificationsKey] ?: false }
     val hideKeyboardOnSend: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnSendKey] ?: true }
-    // НОВОЕ (расширенные опросы): по умолчанию выключено — доступно и на регистрации, и в настройках.
     val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: false }
+
     val pinRequirement: Flow<PinRequirement> = context.settingsDataStore.data.map { prefs ->
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
     }
     val isPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[pinHashKey].isNullOrBlank() }
 
-    // НОВОЕ: флаг "уже показывали диалог с запросом разрешения на уведомления".
     val notificationPermissionAsked: Flow<Boolean> =
         context.settingsDataStore.data.map { it[notificationPermissionAskedKey] ?: false }
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    val autoDeleteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[autoDeleteEnabledKey] ?: false }
+    val autoDeleteDays: Flow<Int> = context.settingsDataStore.data.map { it[autoDeleteDaysKey] ?: 30 }
+    val lastActiveTimestamp: Flow<Long> = context.settingsDataStore.data.map { it[lastActiveTimestampKey] ?: 0L }
+
+    // НОВОЕ (п.13): фон чата
+    val chatBackgroundType: Flow<ChatBackgroundType> = context.settingsDataStore.data.map { prefs ->
+        prefs[chatBackgroundTypeKey]?.let { raw ->
+            runCatching { ChatBackgroundType.valueOf(raw) }.getOrNull()
+        } ?: ChatBackgroundType.DEFAULT
+    }
+    val chatBackgroundCustomPath: Flow<String> = context.settingsDataStore.data.map { it[chatBackgroundCustomPathKey] ?: "" }
+
+    // НОВОЕ (п.4): папки чатов
+    val chatFolders: Flow<List<ChatFolder>> = context.settingsDataStore.data.map { prefs ->
+        prefs[chatFoldersJsonKey]?.let { json ->
+            runCatching { Json.decodeFromString<List<ChatFolder>>(json) }.getOrDefault(emptyList())
+        } ?: emptyList()
+    }
 
     suspend fun setNotificationPermissionAsked(asked: Boolean) {
         context.settingsDataStore.edit { it[notificationPermissionAskedKey] = asked }
     }
-
     suspend fun setSendOnEnter(enabled: Boolean) { context.settingsDataStore.edit { it[sendOnEnterKey] = enabled } }
     suspend fun setFontSize(size: FontSize) { context.settingsDataStore.edit { it[fontSizeKey] = size.name } }
     suspend fun setShowOnlineStatus(enabled: Boolean) { context.settingsDataStore.edit { it[showOnlineStatusKey] = enabled } }
@@ -103,15 +134,8 @@ class UserSettingsPreferences @Inject constructor(
     suspend fun setNotificationVibration(enabled: Boolean) { context.settingsDataStore.edit { it[notificationVibrationKey] = enabled } }
     suspend fun setMuteAllNotifications(enabled: Boolean) { context.settingsDataStore.edit { it[muteAllNotificationsKey] = enabled } }
     suspend fun setHideKeyboardOnSend(enabled: Boolean) { context.settingsDataStore.edit { it[hideKeyboardOnSendKey] = enabled } }
-    // НОВОЕ (расширенные опросы): сеттер общий — вызывается и из RegisterScreen/AuthViewModel
-    // (сразу после регистрации), и из SettingsViewModel, пишет в один и тот же ключ DataStore.
     suspend fun setAdvancedPollsEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[advancedPollsEnabledKey] = enabled } }
 
-    suspend fun setPinRequirement(requirement: PinRequirement) {
-        context.settingsDataStore.edit { it[pinRequirementKey] = requirement.name }
-    }
-
-    /** Задаёт новый 4-значный PIN (или меняет существующий). Хранится только хэш + соль. */
     suspend fun setPin(pin: String) {
         val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()
         val hash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
@@ -121,7 +145,6 @@ class UserSettingsPreferences @Inject constructor(
         }
     }
 
-    /** Полностью отключает PIN (например, при выключении в настройках). */
     suspend fun clearPin() {
         context.settingsDataStore.edit {
             it.remove(pinHashKey)
@@ -130,11 +153,10 @@ class UserSettingsPreferences @Inject constructor(
         }
     }
 
-    /**
-     * Сверяет введённый PIN с сохранённым хэшем, учитывая лимит попыток.
-     * При исчерпании MAX_PIN_ATTEMPTS подряд — блокировка на PIN_LOCKOUT_MS.
-     * Успешный ввод сбрасывает счётчик попыток.
-     */
+    suspend fun setPinRequirement(requirement: PinRequirement) {
+        context.settingsDataStore.edit { it[pinRequirementKey] = requirement.name }
+    }
+
     suspend fun verifyPin(pin: String): PinCheckResult {
         val prefs = context.settingsDataStore.data.first()
         val now = System.currentTimeMillis()
@@ -142,14 +164,11 @@ class UserSettingsPreferences @Inject constructor(
         if (lockedUntil > now) {
             return PinCheckResult.LockedOut(lockedUntil)
         }
-
         val salt = prefs[pinSaltKey]
         val storedHash = prefs[pinHashKey]
         if (salt == null || storedHash == null) {
-            // PIN не установлен — считаем это успехом, чтобы не блокировать вход.
             return PinCheckResult.Success
         }
-
         val candidateHash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
         return if (candidateHash == storedHash) {
             context.settingsDataStore.edit {
@@ -171,5 +190,73 @@ class UserSettingsPreferences @Inject constructor(
                 PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failedAttempts)
             }
         }
+    }
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    suspend fun setAutoDeleteEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[autoDeleteEnabledKey] = enabled }
+    }
+    suspend fun setAutoDeleteDays(days: Int) {
+        context.settingsDataStore.edit { it[autoDeleteDaysKey] = days }
+    }
+    suspend fun updateLastActiveTimestamp() {
+        context.settingsDataStore.edit { it[lastActiveTimestampKey] = System.currentTimeMillis() }
+    }
+
+    // НОВОЕ (п.13): фон чата
+    suspend fun setChatBackgroundType(type: ChatBackgroundType) {
+        context.settingsDataStore.edit { it[chatBackgroundTypeKey] = type.name }
+    }
+    suspend fun setChatBackgroundCustomPath(path: String) {
+        context.settingsDataStore.edit { it[chatBackgroundCustomPathKey] = path }
+    }
+
+    // НОВОЕ (п.4): папки чатов
+    suspend fun setChatFolders(folders: List<ChatFolder>) {
+        context.settingsDataStore.edit { it[chatFoldersJsonKey] = Json.encodeToString(folders) }
+    }
+    suspend fun addChatFolder(folder: ChatFolder) {
+        val current = chatFolders.first().toMutableList()
+        current.add(folder)
+        setChatFolders(current)
+    }
+    suspend fun updateChatFolder(folder: ChatFolder) {
+        val current = chatFolders.first().toMutableList()
+        val index = current.indexOfFirst { it.id == folder.id }
+        if (index >= 0) {
+            current[index] = folder
+            setChatFolders(current)
+        }
+    }
+    suspend fun deleteChatFolder(folderId: String) {
+        val current = chatFolders.first().filter { it.id != folderId }
+        setChatFolders(current)
+    }
+    suspend fun addChatToFolder(folderId: String, chatId: String) {
+        val current = chatFolders.first().toMutableList()
+        val index = current.indexOfFirst { it.id == folderId }
+        if (index >= 0) {
+            val folder = current[index]
+            if (chatId !in folder.chatIds) {
+                current[index] = folder.copy(chatIds = folder.chatIds + chatId)
+                setChatFolders(current)
+            }
+        }
+    }
+    suspend fun removeChatFromFolder(folderId: String, chatId: String) {
+        val current = chatFolders.first().toMutableList()
+        val index = current.indexOfFirst { it.id == folderId }
+        if (index >= 0) {
+            val folder = current[index]
+            current[index] = folder.copy(chatIds = folder.chatIds - chatId)
+            setChatFolders(current)
+        }
+    }
+
+    private suspend fun <T> Flow<T>.first(): T {
+        var result: T? = null
+        collect { result = it; return@collect }
+        @Suppress("UNCHECKED_CAST")
+        return result as T
     }
 }

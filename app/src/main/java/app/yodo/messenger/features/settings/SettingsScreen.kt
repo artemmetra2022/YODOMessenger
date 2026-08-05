@@ -1,13 +1,8 @@
 package app.yodo.messenger.features.settings
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
@@ -37,6 +33,7 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Keyboard
@@ -47,10 +44,10 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.RemoveRedEye
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -82,7 +79,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -92,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.data.local.AppLanguage
+import app.yodo.messenger.data.local.ChatBackgroundType
 import app.yodo.messenger.data.local.FontSize
 import app.yodo.messenger.data.local.PinRequirement
 import app.yodo.messenger.ui.theme.ColorTheme
@@ -126,7 +123,6 @@ fun SettingsScreen(
     val showEmail by viewModel.showEmail.collectAsState()
     val autoDownloadImages by viewModel.autoDownloadImages.collectAsState()
     val hideKeyboardOnSend by viewModel.hideKeyboardOnSend.collectAsState()
-    // НОВОЕ (расширенные опросы): переключатель также доступен на экране регистрации (общее значение).
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
     val notificationSound by viewModel.notificationSound.collectAsState()
     val notificationVibration by viewModel.notificationVibration.collectAsState()
@@ -134,14 +130,27 @@ fun SettingsScreen(
     val accountDeleted by viewModel.accountDeleted.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val errorMessageResId by viewModel.errorMessageResId.collectAsState()
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    val autoDeleteEnabled by viewModel.autoDeleteEnabled.collectAsState()
+    val autoDeleteDays by viewModel.autoDeleteDays.collectAsState()
+
+    // НОВОЕ (п.13): фон чата
+    val chatBackgroundType by viewModel.chatBackgroundType.collectAsState()
+    val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
+
+    // НОВОЕ (п.4): папки чатов
+    val chatFolders by viewModel.chatFolders.collectAsState()
+
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var showAutoDeleteDialog by remember { mutableStateOf(false) }
+    var showChatBackgroundDialog by remember { mutableStateOf(false) }
+    var showChatFoldersDialog by remember { mutableStateOf(false) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val colorTheme = LocalColorTheme.current
 
-    // Резолвим ресурсные строки ошибок здесь (в composable-контексте), т.к. ViewModel
-    // хранит только resId — сам текст зависит от текущего выбранного языка.
     val notAuthorizedText = stringResource(R.string.settings_not_authorized)
-
     LaunchedEffect(accountDeleted) { if (accountDeleted) onLoggedOut() }
     LaunchedEffect(errorMessage) {
         errorMessage?.let { snackbarHostState.showSnackbar(it); viewModel.consumeError() }
@@ -165,6 +174,42 @@ fun SettingsScreen(
                 }
             },
             dismissButton = { TextButton(onClick = { showDeleteAccountDialog = false }) { Text(stringResource(R.string.action_cancel)) } }
+        )
+    }
+
+    // НОВОЕ (п.18): диалог автоудаления аккаунта
+    if (showAutoDeleteDialog) {
+        AutoDeleteDialog(
+            enabled = autoDeleteEnabled,
+            days = autoDeleteDays,
+            onDismiss = { showAutoDeleteDialog = false },
+            onSave = { enabled, days ->
+                viewModel.setAutoDeleteEnabled(enabled)
+                viewModel.setAutoDeleteDays(days)
+                showAutoDeleteDialog = false
+            }
+        )
+    }
+
+    // НОВОЕ (п.13): диалог выбора фона чата
+    if (showChatBackgroundDialog) {
+        ChatBackgroundDialog(
+            currentType = chatBackgroundType,
+            onDismiss = { showChatBackgroundDialog = false },
+            onSelect = { type ->
+                viewModel.setChatBackgroundType(type)
+                showChatBackgroundDialog = false
+            }
+        )
+    }
+
+    // НОВОЕ (п.4): диалог управления папками чатов
+    if (showChatFoldersDialog) {
+        ChatFoldersDialog(
+            folders = chatFolders,
+            onDismiss = { showChatFoldersDialog = false },
+            onAddFolder = { name -> viewModel.addChatFolder(name) },
+            onDeleteFolder = { folderId -> viewModel.deleteChatFolder(folderId) }
         )
     }
 
@@ -201,7 +246,6 @@ fun SettingsScreen(
                 )
                 .padding(padding)
         ) {
-
             // ════════════════════════════════════════
             // ОФОРМЛЕНИЕ
             // ════════════════════════════════════════
@@ -212,7 +256,6 @@ fun SettingsScreen(
                     colorTheme = colorTheme
                 )
             }
-
             item {
                 SettingsCard {
                     SettingsToggleRow(
@@ -237,8 +280,6 @@ fun SettingsScreen(
                     colorTheme = colorTheme
                 )
             }
-
-            // Цветовая тема
             item {
                 SettingsCard {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -313,14 +354,14 @@ fun SettingsScreen(
                             onValueChangeFinished = {
                                 viewModel.setFontSize(FontSize.entries[sliderPosition.roundToInt()])
                             },
-                            valueRange = 0f..4f,
-                            steps = 3,
+                            valueRange = 0f..2f,
+                            steps = 1,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                         )
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             FontSize.entries.forEach { size ->
                                 Text(
-                                    text = size.displayName,
+                                    text = size.name,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (fontSize == size) colorTheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant
@@ -419,9 +460,6 @@ fun SettingsScreen(
                         colorTheme = colorTheme
                     )
                     HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
-                    // НОВОЕ (расширенные опросы): включает доп. параметры при создании опроса —
-                    // множественный выбор ответов и дату автоматического закрытия голосования.
-                    // Тот же переключатель показывается и на экране регистрации.
                     SettingsToggleRow(
                         icon = Icons.Filled.Poll,
                         title = stringResource(R.string.register_advanced_polls_title),
@@ -429,6 +467,34 @@ fun SettingsScreen(
                         checked = advancedPollsEnabled,
                         onCheckedChange = { viewModel.setAdvancedPollsEnabled(it) },
                         colorTheme = colorTheme
+                    )
+                }
+            }
+
+            // НОВОЕ (п.13): фон чата
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Image,
+                        title = "Фон чата",
+                        subtitle = chatBackgroundType.displayName,
+                        colorTheme = colorTheme,
+                        onClick = { showChatBackgroundDialog = true }
+                    )
+                }
+            }
+
+            // НОВОЕ (п.4): папки чатов
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Folder,
+                        title = "Папки чатов",
+                        subtitle = if (chatFolders.isEmpty()) "Нет папок" else "${chatFolders.size} папок",
+                        colorTheme = colorTheme,
+                        onClick = { showChatFoldersDialog = true }
                     )
                 }
             }
@@ -462,6 +528,20 @@ fun SettingsScreen(
                         checked = showReadReceipts,
                         onCheckedChange = { viewModel.setShowReadReceipts(it) },
                         colorTheme = colorTheme
+                    )
+                }
+            }
+
+            // НОВОЕ (п.18): автоудаление аккаунта
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Timer,
+                        title = "Автоудаление аккаунта",
+                        subtitle = if (autoDeleteEnabled) "Через $autoDeleteDays дней неактивности" else "Выключено",
+                        colorTheme = colorTheme,
+                        onClick = { showAutoDeleteDialog = true }
                     )
                 }
             }
@@ -517,7 +597,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Расширенный профиль — видимость полей
+            // Расширенный профиль
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
                 SettingsCard {
@@ -630,7 +710,7 @@ fun SettingsScreen(
                     )
                     AnimatedVisibility(
                         visible = !muteAllNotifications,
-                        enter = fadeIn(tween(200)) + slideInVertically(tween(200))
+                        enter = fadeIn(androidx.compose.animation.core.tween(200)) + slideInVertically(androidx.compose.animation.core.tween(200))
                     ) {
                         Column {
                             HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
@@ -688,17 +768,180 @@ fun SettingsScreen(
                     )
                 }
             }
-
             item { Spacer(modifier = Modifier.height(32.dp)) }
         }
     }
 }
 
 // ══════════════════════════════════════════════════════════
+// НОВОЕ (п.18): диалог автоудаления аккаунта
+// ══════════════════════════════════════════════════════════
+@Composable
+private fun AutoDeleteDialog(
+    enabled: Boolean,
+    days: Int,
+    onDismiss: () -> Unit,
+    onSave: (Boolean, Int) -> Unit
+) {
+    var localEnabled by remember { mutableStateOf(enabled) }
+    var localDays by remember { mutableFloatStateOf(days.toFloat()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Автоудаление аккаунта") },
+        text = {
+            Column {
+                Text(
+                    "Если вы не будете заходить в приложение в течение указанного времени, аккаунт будет автоматически удалён.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Включить автоудаление", modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = localEnabled,
+                        onCheckedChange = { localEnabled = it }
+                    )
+                }
+                if (localEnabled) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Период неактивности: ${localDays.roundToInt()} дней")
+                    Slider(
+                        value = localDays,
+                        onValueChange = { localDays = it },
+                        valueRange = 7f..365f,
+                        steps = 51
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(localEnabled, localDays.roundToInt()) }) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+// ══════════════════════════════════════════════════════════
+// НОВОЕ (п.13): диалог выбора фона чата
+// ══════════════════════════════════════════════════════════
+@Composable
+private fun ChatBackgroundDialog(
+    currentType: ChatBackgroundType,
+    onDismiss: () -> Unit,
+    onSelect: (ChatBackgroundType) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Фон чата") },
+        text = {
+            Column {
+                ChatBackgroundType.entries.forEach { type ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(type) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = currentType == type,
+                            onClick = { onSelect(type) }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(type.displayName)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+// ══════════════════════════════════════════════════════════
+// НОВОЕ (п.4): диалог управления папками чатов
+// ══════════════════════════════════════════════════════════
+@Composable
+private fun ChatFoldersDialog(
+    folders: List<app.yodo.messenger.domain.model.ChatFolder>,
+    onDismiss: () -> Unit,
+    onAddFolder: (String) -> Unit,
+    onDeleteFolder: (String) -> Unit
+) {
+    var newFolderName by remember { mutableStateOf("") }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text("Новая папка") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    label = { Text("Название папки") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newFolderName.isNotBlank()) {
+                        onAddFolder(newFolderName)
+                        newFolderName = ""
+                        showAddDialog = false
+                    }
+                }) { Text("Создать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) { Text("Отмена") }
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Папки чатов") },
+        text = {
+            Column {
+                if (folders.isEmpty()) {
+                    Text("Нет папок. Создайте первую папку, чтобы организовать чаты.")
+                } else {
+                    folders.forEach { folder ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(folder.name, modifier = Modifier.weight(1f))
+                            Text("${folder.chatIds.size} чатов", style = MaterialTheme.typography.labelSmall)
+                            IconButton(onClick = { onDeleteFolder(folder.id) }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Удалить", tint = YodoError)
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                TextButton(onClick = { showAddDialog = true }) {
+                    Text("Добавить папку")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+// ══════════════════════════════════════════════════════════
 // Переиспользуемые компоненты
 // ══════════════════════════════════════════════════════════
-
-/** Диалог настройки PIN-кода: ввод/смена PIN, выбор режима требования, отключение защиты. */
 @Composable
 private fun PinSetupDialog(
     isPinSet: Boolean,
@@ -712,10 +955,8 @@ private fun PinSetupDialog(
     var confirmPin by remember { mutableStateOf("") }
     var selectedRequirement by remember { mutableStateOf(currentRequirement) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-
     val minDigitsError = stringResource(R.string.pin_dialog_min_digits)
     val mismatchError = stringResource(R.string.pin_dialog_mismatch)
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isPinSet) stringResource(R.string.pin_dialog_change_title) else stringResource(R.string.pin_dialog_set_title)) },
@@ -798,7 +1039,6 @@ private fun PinSetupDialog(
     )
 }
 
-/** Заголовок секции с иконкой и градиентной линией-акцентом. */
 @Composable
 private fun SettingsSectionHeader(
     icon: ImageVector,
@@ -831,7 +1071,6 @@ private fun SettingsSectionHeader(
     }
 }
 
-/** Карточка-контейнер для группы настроек (поднятая тень, скруглённые углы). */
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
     Column(
@@ -846,7 +1085,6 @@ private fun SettingsCard(content: @Composable () -> Unit) {
     }
 }
 
-/** Строка настройки с переключателем. */
 @Composable
 private fun SettingsToggleRow(
     icon: ImageVector,
@@ -904,7 +1142,6 @@ private fun SettingsToggleRow(
     }
 }
 
-/** Строка-навигация (тап → действие, стрелка справа). */
 @Composable
 private fun SettingsNavigateRow(
     icon: ImageVector,
