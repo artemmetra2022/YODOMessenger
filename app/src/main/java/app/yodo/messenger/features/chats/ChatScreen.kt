@@ -1,9 +1,12 @@
 package app.yodo.messenger.features.chats
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -25,10 +28,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -39,11 +40,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -56,10 +57,10 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.ContentCopy
@@ -140,6 +141,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.domain.model.Message
@@ -147,34 +150,28 @@ import app.yodo.messenger.domain.model.MessageStatus
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.components.swipeToGoBack
 import app.yodo.messenger.ui.theme.LocalColorTheme
+import app.yodo.messenger.util.AudioUtils
 import app.yodo.messenger.util.ChatScreenshotUtils
 import app.yodo.messenger.util.FileUtils
 import app.yodo.messenger.util.ImageUtils
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import kotlin.math.roundToInt
-
-// НОВОЕ: вложения "Файл" и "Геопозиция"
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration as OsmConfiguration
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import org.osmdroid.events.MapListener
-import org.osmdroid.events.ScrollEvent
-import org.osmdroid.events.ZoomEvent
-import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.roundToInt
 
 private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
@@ -190,7 +187,6 @@ fun ChatScreen(
     onOpenChannelProfile: (String) -> Unit,
     onOpenComments: (chatId: String, messageId: String) -> Unit,
     onInviteToChannel: (String) -> Unit = {},
-    // НОВОЕ (этап 10): статистика канала для админа/владельца.
     onOpenChannelStats: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
@@ -208,8 +204,6 @@ fun ChatScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
-    // НОВОЕ (этап 9): состояние списка отложенных постов вынесено на уровень ChatScreen,
-    // чтобы его можно было открыть и из пункта меню topBar, и из тапа по плашке-счётчику.
     var showScheduledList by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.initialDraft) {
@@ -470,7 +464,6 @@ fun ChatScreen(
                                             onClick = { showChatMenu = false; onInviteToChannel(chatId) }
                                         )
                                     }
-                                    // НОВОЕ (этап 9): отложенные посты канала — для админа.
                                     if (isChannel && uiState.isAdmin) {
                                         DropdownMenuItem(
                                             text = { Text("Отложенные посты") },
@@ -478,7 +471,6 @@ fun ChatScreen(
                                             onClick = { showChatMenu = false; showScheduledList = true }
                                         )
                                     }
-                                    // НОВОЕ (этап 10): статистика канала — для админа.
                                     if (isChannel && uiState.isAdmin) {
                                         DropdownMenuItem(
                                             text = { Text("Статистика канала") },
@@ -634,7 +626,6 @@ fun ChatScreen(
         },
         bottomBar = {
             Column {
-                // НОВОЕ (этап 9): плашка-счётчик отложенных постов/сообщений.
                 if (uiState.scheduledMessages.isNotEmpty()) {
                     Row(
                         modifier = Modifier.fillMaxWidth()
@@ -733,7 +724,7 @@ fun ChatScreen(
                     var micPressHeld by remember { mutableStateOf(false) }
 
                     fun beginRecordingInternal() {
-                        val result = app.yodo.messenger.util.AudioUtils.startRecording(context)
+                        val result = AudioUtils.startRecording(context)
                         if (result != null) {
                             activeRecorder = result.first
                             activeRecordingFile = result.second
@@ -756,34 +747,36 @@ fun ChatScreen(
                     }
                     fun startVoiceRecording() {
                         micPressHeld = true
-                        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                            context, android.Manifest.permission.RECORD_AUDIO
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        val hasPermission = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
                         if (hasPermission) {
                             beginRecordingInternal()
                         } else {
-                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }
                     fun discardRecordingInternal() {
                         val recorder = activeRecorder
                         val file = activeRecordingFile
                         if (recorder != null && file != null) {
-                            app.yodo.messenger.util.AudioUtils.cancelRecording(recorder, file)
+                            AudioUtils.cancelRecording(recorder, file)
                         }
                         activeRecorder = null
                         activeRecordingFile = null
                         isRecording = false
                         recordingElapsedMs = 0L
                     }
-                    fun cancelVoiceRecording() { discardRecordingInternal() }
+                    fun cancelVoiceRecording() {
+                        discardRecordingInternal()
+                    }
                     fun stopVoiceRecordingToPreview() {
                         micPressHeld = false
                         val recorder = activeRecorder
                         val file = activeRecordingFile
                         isRecording = false
                         if (recorder == null || file == null) return
-                        val stopped = app.yodo.messenger.util.AudioUtils.stopRecording(recorder)
+                        val stopped = AudioUtils.stopRecording(recorder)
                         activeRecorder = null
                         activeRecordingFile = null
                         if (!stopped) {
@@ -804,7 +797,7 @@ fun ChatScreen(
                         recordedVoiceFile = null
                         coroutineScope.launch {
                             val encoded = withContext(Dispatchers.Default) {
-                                app.yodo.messenger.util.AudioUtils.fileToBase64(file)
+                                AudioUtils.fileToBase64(file)
                             }
                             if (encoded != null) {
                                 viewModel.sendVoice(encoded.first, encoded.second)
@@ -823,7 +816,7 @@ fun ChatScreen(
                             val startedAt = System.currentTimeMillis()
                             while (isRecording) {
                                 recordingElapsedMs = System.currentTimeMillis() - startedAt
-                                if (recordingElapsedMs >= app.yodo.messenger.util.AudioUtils.MAX_RECORDING_MS) {
+                                if (recordingElapsedMs >= AudioUtils.MAX_RECORDING_MS) {
                                     stopVoiceRecordingToPreview()
                                     break
                                 }
@@ -1369,8 +1362,6 @@ private fun MessageBubble(
             }
 
             // ═══════════════ ЭТАП 14: АНИМИРОВАННЫЕ РЕАКЦИИ ═══════════════
-            // Анимация «вспышки» при изменении числа голосов (scale 1 → 1.35 → 1)
-            // и плавное появление/исчезновение чипов реакций.
             if (message.reactions.isNotEmpty()) {
                 Row(
                     modifier = Modifier.padding(top = 2.dp),
@@ -1388,13 +1379,11 @@ private fun MessageBubble(
                             ),
                             label = "reaction_burst"
                         )
-                        // При изменении числа голосов — запускаем «вспышку»
                         LaunchedEffect(reactionCount) {
                             burstScale = 1.35f
                             kotlinx.coroutines.delay(120)
                             burstScale = 1f
                         }
-                        // Плавное появление/исчезновение чипа
                         AnimatedVisibility(
                             visible = true,
                             enter = scaleIn(
@@ -1727,6 +1716,11 @@ private fun ChannelBottomBar(
     }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// VoiceRecordingBar (находится внутри этого файла, не является отдельным файлом)
+// ИСПРАВЛЕНО: используем Animatable вместо infiniteTransition.animateFloat 
+// для обхода бага компилятора Compose с выводом типов.
+// ══════════════════════════════════════════════════════════════════
 @Composable
 private fun VoiceRecordingBar(
     elapsedMs: Long,
@@ -1750,20 +1744,22 @@ private fun VoiceRecordingBar(
                 Icon(Icons.Filled.Delete, contentDescription = "Отменить запись", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
             }
             Spacer(modifier = Modifier.width(10.dp))
-            val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "rec")
-            val alpha by infiniteTransition.animateFloat(
-                initialValue = 1f, targetValue = 0.2f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(700),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-                ), label = "recAlpha"
-            )
+            
+            // Пульсирующая точка-индикатор записи (исправлено через Animatable)
+            val alphaAnim = remember { androidx.compose.animation.core.Animatable(1f) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    alphaAnim.animateTo(0.2f, animationSpec = tween(700))
+                    alphaAnim.animateTo(1f, animationSpec = tween(700))
+                }
+            }
             Box(
                 modifier = Modifier.size(10.dp).clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.error.copy(alpha = alpha))
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = alphaAnim.value))
             )
+            
             Text(
-                app.yodo.messenger.util.AudioUtils.formatDuration(elapsedMs),
+                AudioUtils.formatDuration(elapsedMs),
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(start = 8.dp).weight(1f)
             )
@@ -1866,7 +1862,7 @@ private fun VoicePreviewBar(
                     )
                 }
                 Text(
-                    app.yodo.messenger.util.AudioUtils.formatDuration(durationMs),
+                    AudioUtils.formatDuration(durationMs),
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(start = 10.dp).weight(1f)
                 )
@@ -2235,7 +2231,7 @@ private fun VoicePlayerBubble(
             }
             return
         }
-        val file = app.yodo.messenger.util.AudioUtils.base64ToTempFile(context, voiceBase64, messageId) ?: return
+        val file = AudioUtils.base64ToTempFile(context, voiceBase64, messageId) ?: return
         try {
             val player = android.media.MediaPlayer()
             player.setDataSource(file.absolutePath)
@@ -2281,7 +2277,7 @@ private fun VoicePlayerBubble(
                 modifier = Modifier.height(24.dp)
             )
             Text(
-                app.yodo.messenger.util.AudioUtils.formatDuration(
+                AudioUtils.formatDuration(
                     if (isPlaying || currentPositionMs > 0) currentPositionMs.toLong() else durationMs
                 ),
                 style = MaterialTheme.typography.labelSmall,
@@ -2513,7 +2509,7 @@ private fun FileAttachmentBubble(
             .clip(RoundedCornerShape(12.dp))
             .background(textColor.copy(alpha = 0.08f))
             .clickable {
-                val file = app.yodo.messenger.util.FileUtils.base64ToTempFile(context, fileBase64, messageId, fileName)
+                val file = FileUtils.base64ToTempFile(context, fileBase64, messageId, fileName)
                 if (file == null) return@clickable
                 val uri = androidx.core.content.FileProvider.getUriForFile(
                     context, "${context.packageName}.fileprovider", file
@@ -2542,7 +2538,7 @@ private fun FileAttachmentBubble(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                app.yodo.messenger.util.FileUtils.extensionLabel(fileName),
+                FileUtils.extensionLabel(fileName),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = accentColor
@@ -2555,7 +2551,7 @@ private fun FileAttachmentBubble(
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             Text(
-                app.yodo.messenger.util.FileUtils.formatSize(sizeBytes),
+                FileUtils.formatSize(sizeBytes),
                 color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall
             )
         }
