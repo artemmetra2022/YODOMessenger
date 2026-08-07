@@ -24,6 +24,7 @@ sealed class Routes(val route: String) {
     // НОВОЕ: экраны-заглушки для блока профиля (История/QR-код/Звонки/Устройства)
     data object ProfileHistory : Routes("profile_history")
     data object QrCode : Routes("qr_code")
+    data object ScanContact : Routes("scan_contact")
     data object RecentCalls : Routes("recent_calls")
     data object Devices : Routes("devices")
 

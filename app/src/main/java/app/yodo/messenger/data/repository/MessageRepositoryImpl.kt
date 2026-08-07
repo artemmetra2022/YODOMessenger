@@ -1,5 +1,6 @@
 package app.yodo.messenger.data.repository
 
+import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.Comment
@@ -31,7 +32,8 @@ import javax.inject.Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val firebaseAuth: FirebaseAuth,
-    private val userSettingsPreferences: UserSettingsPreferences
+    private val userSettingsPreferences: UserSettingsPreferences,
+    private val cryptoManager: CryptoManager
 ) : MessageRepository {
 
     override fun observeMessages(chatId: String): Flow<List<Message>> = callbackFlow {
@@ -89,7 +91,7 @@ class MessageRepositoryImpl @Inject constructor(
                 data["expiresAt"] = now + ttlSeconds * 1000L
             }
             val newDocRef = chatRef.collection("messages").add(data).await()
-            val previewText = (data["text"] as? String)?.takeIf { it.isNotBlank() }
+            val previewText = if (data["encrypted"] == true) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
                 ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
                 else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
                 else if (data.containsKey("imageBase64")) "📷 Фото"
@@ -120,7 +122,35 @@ class MessageRepositoryImpl @Inject constructor(
             data["replyToSenderName"] = replyTo.senderName
             data["replyToText"] = replyTo.text
         }
+        // НОВОЕ (сквозное шифрование): для личных чатов шифруем текст под ключи участников.
+        tryEncryptTextData(chatId, data)
         return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds)
+    }
+
+    /**
+     * НОВОЕ (сквозное шифрование, E2EE). Пытается зашифровать текст сообщения для личного
+     * (1-на-1) чата под публичные ключи ОБОИХ участников. При успехе кладёт encByUid
+     * (карту uid -> шифртекст base64), флаг encrypted=true и очищает открытый text, чтобы
+     * на сервере не оставалось читаемого текста. Если чат не личный, участников не двое или
+     * у кого-то нет опубликованного ключа — оставляет обычный текст (плавная деградация).
+     */
+    private suspend fun tryEncryptTextData(chatId: String, data: MutableMap<String, Any?>) {
+        try {
+            val text = data["text"] as? String
+            if (text.isNullOrEmpty()) return
+            val chatSnap = firestore.collection("chats").document(chatId).get().await()
+            val type = chatSnap.getString("type")
+            if (type != null && type != "private") return
+            val participantIds = (chatSnap.get("participantIds") as? List<*>)
+                ?.filterIsInstance<String>() ?: return
+            if (participantIds.size != 2) return
+            val encMap = cryptoManager.encryptForParticipants(participantIds, text) ?: return
+            data["encByUid"] = encMap
+            data["encrypted"] = true
+            data["text"] = ""
+        } catch (e: Exception) {
+            android.util.Log.w("MessageRepositoryImpl", "tryEncryptTextData failed; sending plaintext", e)
+        }
     }
 
     override suspend fun sendImageMessage(
@@ -223,7 +253,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     // НОВОЕ (расширенные опросы): голосование хранится по индексам вариантов, чтобы
     // избежать проблем с одинаковыми/изменёнными текстами вариантов (как votesByOption
-    // в модели Poll). Транзакция гарантирует атомарность при одновременном голосовании.
+    // в модели Poll). Транзакция гарантирует атомарность при од��овременном голосовании.
     override suspend fun voteOnPoll(chatId: String, messageId: String, optionIndex: Int): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
         val messageRef = firestore.collection("chats").document(chatId)
@@ -710,6 +740,20 @@ class MessageRepositoryImpl @Inject constructor(
 
     /** НОВОЕ: общий маппинг документа в Message — используется в observeMessages,
      *  observeMessage и getRecentMessages, чтобы не дублировать разбор полей. */
+    /**
+     * НОВОЕ (сквозное шифрование, E2EE). Возвращает отображаемый текст сообщения. Если оно
+     * зашифровано (encrypted=true), достаёт наш шифртекст из encByUid по нашему uid и
+     * расшифровывает локальным приватным ключом. Плейсхолдеры — если ключа/данных нет.
+     */
+    private fun decryptMessageText(doc: DocumentSnapshot): String {
+        val encrypted = doc.getBoolean("encrypted") ?: false
+        if (!encrypted) return doc.getString("text") ?: ""
+        val myUid = firebaseAuth.currentUser?.uid
+        val encMap = doc.get("encByUid") as? Map<*, *>
+        val cipher = encMap?.get(myUid) as? String ?: return "🔒 Зашифрованное сообщение"
+        return cryptoManager.decrypt(cipher) ?: "🔒 Не удалось расшифровать"
+    }
+
     private fun mapDocToMessage(doc: DocumentSnapshot, chatId: String): Message? {
         return try {
             val reactionsRaw = doc.get("reactions") as? Map<*, *>
@@ -721,7 +765,7 @@ class MessageRepositoryImpl @Inject constructor(
             Message(
                 id = doc.id, chatId = chatId,
                 senderId = doc.getString("senderId") ?: return null,
-                text = doc.getString("text") ?: "",
+                text = decryptMessageText(doc),
                 timestamp = doc.getLong("timestamp") ?: 0L,
                 status = doc.getString("status")?.let { raw ->
                     runCatching { MessageStatus.valueOf(raw) }.getOrDefault(MessageStatus.SENT)

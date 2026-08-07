@@ -951,8 +951,8 @@ fun ChatScreen(
                             advancedPollsEnabled = advancedPollsEnabled,
                             colorTheme = colorTheme,
                             onDismiss = { showPollCreation = false },
-                            onConfirm = { question, options, isAnonymous, allowMultiple, closesAtMillis ->
-                                viewModel.sendPoll(question, options, isAnonymous, allowMultiple, closesAtMillis)
+                            onConfirm = { question, options, isAnonymous, allowMultiple, closesAtMillis, isQuiz, correctOptionIndex, explanation ->
+                                viewModel.sendPoll(question, options, isAnonymous, allowMultiple, closesAtMillis, isQuiz, correctOptionIndex, explanation)
                                 showPollCreation = false
                             }
                         )
@@ -2807,7 +2807,12 @@ private fun PollMessageBubble(
             Icon(Icons.Filled.Poll, contentDescription = null, tint = textColor.copy(alpha = 0.85f), modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                if (isClosed) "Опрос завершён" else "Опрос",
+                when {
+                    poll.isQuiz && isClosed -> "Викторина завершена"
+                    poll.isQuiz -> "Викторина"
+                    isClosed -> "Опрос завершён"
+                    else -> "Опрос"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = textColor.copy(alpha = 0.7f)
             )
@@ -2824,6 +2829,17 @@ private fun PollMessageBubble(
             val votesForOption = poll.votesFor(index)
             val fraction = if (totalVotes > 0) votesForOption.toFloat() / totalVotes.toFloat() else 0f
             val isSelected = index in votedOptions
+            // НОВОЕ (викторина): после показа результатов подсвечиваем правильный вариант
+            // зелёным, а ошибочно выбранный пользователем — красным.
+            val isCorrect = poll.isCorrectOption(index)
+            val quizReveal = poll.isQuiz && showResults
+            val correctColor = Color(0xFF2E7D32)
+            val wrongColor = Color(0xFFC62828)
+            val barColor = when {
+                quizReveal && isCorrect -> correctColor
+                quizReveal && isSelected && !isCorrect -> wrongColor
+                else -> accentColor
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2837,7 +2853,7 @@ private fun PollMessageBubble(
                         modifier = Modifier
                             .fillMaxWidth(fraction.coerceIn(0f, 1f))
                             .fillMaxHeight()
-                            .background(accentColor.copy(alpha = if (isSelected) 0.35f else 0.18f))
+                            .background(barColor.copy(alpha = if (isSelected || isCorrect) 0.35f else 0.18f))
                     )
                 }
                 Row(
@@ -2846,7 +2862,23 @@ private fun PollMessageBubble(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (isSelected) {
+                    if (quizReveal && isCorrect) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = "Правильный ответ",
+                            tint = correctColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else if (quizReveal && isSelected && !isCorrect) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Неверный ответ",
+                            tint = wrongColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else if (isSelected) {
                         Icon(
                             Icons.Filled.CheckCircle,
                             contentDescription = "Ваш выбор",
@@ -2870,6 +2902,27 @@ private fun PollMessageBubble(
                         )
                     }
                 }
+            }
+        }
+        // НОВОЕ (викторина): итог для проголосовавшего и пояснение после голосования.
+        if (poll.isQuiz && showResults) {
+            Spacer(modifier = Modifier.height(6.dp))
+            val answeredRight = currentUserId?.let { poll.answeredCorrectly(it) } ?: false
+            if (hasVoted) {
+                Text(
+                    if (answeredRight) "✓ Правильно!" else "✗ Неверно",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (answeredRight) Color(0xFF2E7D32) else Color(0xFFC62828)
+                )
+            }
+            poll.explanation?.takeIf { it.isNotBlank() }?.let { exp ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    exp,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textColor.copy(alpha = 0.8f)
+                )
             }
         }
         Spacer(modifier = Modifier.height(4.dp))
@@ -2902,15 +2955,20 @@ private fun PollCreationDialog(
     advancedPollsEnabled: Boolean,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onDismiss: () -> Unit,
-    onConfirm: (question: String, options: List<String>, isAnonymous: Boolean, allowMultiple: Boolean, closesAtMillis: Long?) -> Unit
+    onConfirm: (question: String, options: List<String>, isAnonymous: Boolean, allowMultiple: Boolean, closesAtMillis: Long?, isQuiz: Boolean, correctOptionIndex: Int?, explanation: String?) -> Unit
 ) {
     var question by remember { mutableStateOf("") }
     var options by remember { mutableStateOf(listOf("", "")) }
     var isAnonymous by remember { mutableStateOf(true) }
     var allowMultiple by remember { mutableStateOf(false) }
     var closesInHours by remember { mutableStateOf<Int?>(null) }
+    // НОВОЕ (викторина): режим викторины с правильным ответом и пояснением.
+    var isQuiz by remember { mutableStateOf(false) }
+    var correctIndex by remember { mutableStateOf<Int?>(null) }
+    var explanation by remember { mutableStateOf("") }
     val validOptionsCount = options.count { it.isNotBlank() }
-    val canSubmit = question.isNotBlank() && validOptionsCount >= 2
+    val correctIsValid = correctIndex?.let { it in options.indices && options[it].isNotBlank() } ?: false
+    val canSubmit = question.isNotBlank() && validOptionsCount >= 2 && (!isQuiz || correctIsValid)
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(20.dp),
@@ -2994,6 +3052,68 @@ private fun PollCreationDialog(
                         colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colorTheme.primary)
                     )
                 }
+                // НОВОЕ (викторина): переключатель режима викторины и выбор правильного ответа.
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            isQuiz = !isQuiz
+                            if (isQuiz) allowMultiple = false else correctIndex = null
+                        }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Режим викторины", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Отметьте правильный ответ — участники увидят его после голосования",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isQuiz,
+                        onCheckedChange = {
+                            isQuiz = it
+                            if (it) allowMultiple = false else correctIndex = null
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colorTheme.primary)
+                    )
+                }
+                if (isQuiz) {
+                    Text(
+                        "Правильный ответ",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                    )
+                    options.forEachIndexed { index, optionText ->
+                        val label = optionText.trim().ifEmpty { "Вариант ${index + 1}" }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { correctIndex = index }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = correctIndex == index,
+                                onClick = { correctIndex = index }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = explanation,
+                        onValueChange = { explanation = it },
+                        label = { Text("Пояснение (необязательно)") },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
                 if (advancedPollsEnabled) {
                     HorizontalDivider()
                     Row(
@@ -3062,12 +3182,21 @@ private fun PollCreationDialog(
                             val closesAtMillis = closesInHours?.let {
                                 System.currentTimeMillis() + it.toLong() * 60 * 60 * 1000
                             }
+                            // Индекс правильного ответа нужно пересчитать относительно
+                            // очищенного списка (без пустых вариантов).
+                            val remappedCorrect = if (isQuiz) correctIndex?.let { ci ->
+                                if (options.getOrNull(ci)?.isBlank() != false) null
+                                else options.take(ci).count { it.isNotBlank() }
+                            } else null
                             onConfirm(
                                 question.trim(),
                                 options.map { it.trim() }.filter { it.isNotEmpty() },
                                 isAnonymous,
                                 if (advancedPollsEnabled) allowMultiple else false,
-                                if (advancedPollsEnabled) closesAtMillis else null
+                                if (advancedPollsEnabled) closesAtMillis else null,
+                                isQuiz,
+                                remappedCorrect,
+                                if (isQuiz) explanation.trim().ifEmpty { null } else null
                             )
                         }
                     ) {

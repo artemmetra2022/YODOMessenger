@@ -62,9 +62,20 @@ data class Poll(
     val isClosed: Boolean = false,
     // НОВОЕ (расширенные опросы): если задано — опрос автоматически считается закрытым
     // после этого момента времени (мс), независимо от isClosed.
-    val closesAt: Long? = null
+    val closesAt: Long? = null,
+    // НОВОЕ (викторина): режим викторины. isQuiz=true — у опроса есть один правильный
+    // ответ (correctOptionIndex) и необязательное пояснение (explanation), которое
+    // показывается участнику после голосования.
+    val isQuiz: Boolean = false,
+    val correctOptionIndex: Int? = null,
+    val explanation: String? = null
 ) {
     fun totalVotes(): Int = votesByOption.values.sumOf { it.size }
+    /** Викторина: является ли вариант правильным ответом. */
+    fun isCorrectOption(optionIndex: Int): Boolean = isQuiz && correctOptionIndex == optionIndex
+    /** Викторина: ответил ли пользователь правильно (проголосовал за верный вариант). */
+    fun answeredCorrectly(uid: String): Boolean =
+        isQuiz && correctOptionIndex != null && correctOptionIndex in votedOptions(uid)
     fun votesFor(optionIndex: Int): Int = votesByOption[optionIndex]?.size ?: 0
     fun hasVoted(uid: String): Boolean = votesByOption.values.any { uid in it }
     fun votedOptions(uid: String): Set<Int> =

@@ -2,6 +2,7 @@ package app.yodo.messenger.features.chats
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.ChatFolder
@@ -51,7 +52,8 @@ class ChatListViewModel @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val draftsPreferences: DraftsPreferences,
-    private val userSettingsPreferences: UserSettingsPreferences
+    private val userSettingsPreferences: UserSettingsPreferences,
+    private val cryptoManager: CryptoManager
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<ChatListUiState>(ChatListUiState.Loading)
     val uiState: StateFlow<ChatListUiState> = _uiState
@@ -64,9 +66,16 @@ class ChatListViewModel @Inject constructor(
     val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // НОВОЕ (скрытые чаты): множество ID скрытых чатов (для пунктов меню).
+    val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     init {
         observeChats()
         syncFcmToken()
+        // НОВОЕ (сквозное шифрование): гарантируем ключи и публикуем публичный ключ после входа
+        // (список чатов открывается всегда после авторизации, в т.ч. сразу после регистрации).
+        viewModelScope.launch { runCatching { cryptoManager.ensureInitialized() } }
     }
 
     fun setFilter(filter: ChatFilter) {
@@ -111,12 +120,18 @@ class ChatListViewModel @Inject constructor(
             // не появляется, помогает только перезаход". .onStart{} даёт им значение по
             // умолчанию сразу же, не дожидаясь диска — черновики/папки просто "доедут"
             // следующим обновлением, когда будут готовы.
+            // НОВОЕ (скрытые чаты): пятый источник — ID скрытых чатов и признак decoy-режима.
+            val hiddenInfo = combine(
+                userSettingsPreferences.hiddenChatIds.onStart { emit(emptySet()) },
+                userSettingsPreferences.decoyMode.onStart { emit(false) }
+            ) { ids, decoy -> ids to decoy }
             combine(
                 chatRepository.observeChatList(),
                 draftsPreferences.observeAllDrafts().onStart { emit(emptyMap()) },
                 _activeFilter,
-                chatFolders.onStart { emit(emptyList()) }
-            ) { result, drafts, filter, folders ->
+                chatFolders.onStart { emit(emptyList()) },
+                hiddenInfo
+            ) { result, drafts, filter, folders, hidden ->
                 when (result) {
                     is ChatListResult.Success -> {
                         val chatsWithDrafts = if (drafts.isEmpty()) {
@@ -127,7 +142,14 @@ class ChatListViewModel @Inject constructor(
                                 if (draft != null) chat.copy(draftText = draft) else chat
                             }
                         }
-                        val (archived, active) = chatsWithDrafts.partition { it.isArchived }
+                        // НОВОЕ (скрытые чаты): в decoy-режиме полностью убираем скрытые чаты из списка.
+                        val (hiddenIds, decoyMode) = hidden
+                        val visibleChats = if (decoyMode) {
+                            chatsWithDrafts.filter { it.chatId !in hiddenIds }
+                        } else {
+                            chatsWithDrafts
+                        }
+                        val (archived, active) = visibleChats.partition { it.isArchived }
                         
                         // Применяем фильтр
                         val filtered = when (filter) {
@@ -180,6 +202,14 @@ class ChatListViewModel @Inject constructor(
     fun clearChatHistory(chatId: String) {
         viewModelScope.launch {
             try { chatRepository.clearChatHistory(chatId) } catch (e: Exception) { }
+        }
+    }
+
+    // НОВОЕ (скрытые чаты): переключить скрытие чата.
+    fun toggleChatHidden(chatId: String) {
+        viewModelScope.launch {
+            val hidden = hiddenChatIds.value.contains(chatId)
+            userSettingsPreferences.setChatHidden(chatId, !hidden)
         }
     }
 

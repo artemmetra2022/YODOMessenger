@@ -268,6 +268,7 @@ class UserRepositoryImpl @Inject constructor(
         showLocation = getBoolean("showLocation") ?: true,
         showWebsite = getBoolean("showWebsite") ?: true,
         showPhoneNumber = getBoolean("showPhoneNumber") ?: false,
-        showEmail = getBoolean("showEmail") ?: false
+        showEmail = getBoolean("showEmail") ?: false,
+        publicKey = getString("publicKey")
     )
 }

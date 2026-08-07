@@ -529,12 +529,16 @@ class ChatViewModel @Inject constructor(
         options: List<String>,
         isAnonymous: Boolean,
         allowMultipleAnswers: Boolean,
-        closesAtMillis: Long? = null
+        closesAtMillis: Long? = null,
+        isQuiz: Boolean = false,
+        correctOptionIndex: Int? = null,
+        explanation: String? = null
     ) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendPollMessage(
-                chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis
+                chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis,
+                isQuiz, correctOptionIndex, explanation
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)

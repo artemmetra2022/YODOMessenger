@@ -50,7 +50,10 @@ interface MessageRepository {
         options: List<String>,
         isAnonymous: Boolean,
         allowMultipleAnswers: Boolean,
-        closesAtMillis: Long? = null
+        closesAtMillis: Long? = null,
+        isQuiz: Boolean = false,
+        correctOptionIndex: Int? = null,
+        explanation: String? = null
     ): SendMessageResult
     // НОВОЕ (расширенные опросы): голосование/переголосование по варианту опроса.
     // Повторный вызов по тому же варианту снимает голос (переключатель), как toggleReaction.

@@ -121,6 +121,8 @@ fun SettingsScreen(
     val showReadReceipts by viewModel.showReadReceipts.collectAsState()
     val pinRequirement by viewModel.pinRequirement.collectAsState()
     val isPinSet by viewModel.isPinSet.collectAsState()
+    // НОВОЕ (скрытые чаты): установлен ли ложный PIN.
+    val isDecoyPinSet by viewModel.isDecoyPinSet.collectAsState()
     val showBirthDate by viewModel.showBirthDate.collectAsState()
     val showAboutMe by viewModel.showAboutMe.collectAsState()
     val showLocation by viewModel.showLocation.collectAsState()
@@ -620,6 +622,35 @@ fun SettingsScreen(
                         onDisablePin = { viewModel.clearPin(); showPinDialog = false }
                     )
                 }
+
+                // НОВОЕ (скрытые чаты): ложный (decoy) PIN — доступен только когда задан основной PIN.
+                if (isPinSet) {
+                    var showDecoyDialog by remember { mutableStateOf(false) }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SettingsCard {
+                        SettingsNavigateRow(
+                            icon = Icons.Filled.Lock,
+                            title = if (isDecoyPinSet) "Ложный PIN задан" else "Настроить ложный PIN",
+                            subtitle = "Вход по этому коду скрывает выбранные чаты",
+                            colorTheme = colorTheme,
+                            onClick = { showDecoyDialog = true }
+                        )
+                    }
+                    if (showDecoyDialog) {
+                        DecoyPinDialog(
+                            isDecoyPinSet = isDecoyPinSet,
+                            onDismiss = { showDecoyDialog = false },
+                            onSavePin = { pin ->
+                                viewModel.setDecoyPin(pin)
+                                showDecoyDialog = false
+                            },
+                            onDisablePin = {
+                                viewModel.clearDecoyPin()
+                                showDecoyDialog = false
+                            }
+                        )
+                    }
+                }
             }
 
             // Заблокированные
@@ -636,7 +667,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Расширенный профиль
+            // Рас��иренный профиль
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
                 SettingsCard {
@@ -1168,6 +1199,78 @@ private fun PinSetupDialog(
         dismissButton = {
             Row {
                 if (isPinSet) {
+                    TextButton(onClick = onDisablePin) {
+                        Text(stringResource(R.string.pin_dialog_disable), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        }
+    )
+}
+
+// НОВОЕ (скрытые чаты): диалог настройки ложного (decoy) PIN-кода.
+@Composable
+private fun DecoyPinDialog(
+    isDecoyPinSet: Boolean,
+    onDismiss: () -> Unit,
+    onSavePin: (String) -> Unit,
+    onDisablePin: () -> Unit
+) {
+    var pin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isDecoyPinSet) "Изменить ложный PIN" else "Ложный PIN") },
+        text = {
+            Column {
+                Text(
+                    "Введите отдельный PIN-код. При входе по нему приложение откроется без скрытых чатов — как будто их нет. Он должен отличаться от основного PIN.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it },
+                    label = { Text("Ложный PIN") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = confirmPin,
+                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) confirmPin = it },
+                    label = { Text("Повторите ложный PIN") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                errorMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                when {
+                    pin.length < 4 -> errorMessage = "Минимум 4 цифры"
+                    pin != confirmPin -> errorMessage = "PIN-коды не совпадают"
+                    else -> onSavePin(pin)
+                }
+            }) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            Row {
+                if (isDecoyPinSet) {
                     TextButton(onClick = onDisablePin) {
                         Text(stringResource(R.string.pin_dialog_disable), color = MaterialTheme.colorScheme.error)
                     }

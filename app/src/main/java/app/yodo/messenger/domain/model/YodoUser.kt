@@ -18,5 +18,7 @@ data class YodoUser(
     val showLocation: Boolean = true,
     val showWebsite: Boolean = true,
     val showPhoneNumber: Boolean = false,
-    val showEmail: Boolean = false
+    val showEmail: Boolean = false,
+    // НОВОЕ (сквозное шифрование): публичный ключ пользователя (base64 keyset), публикуется в Firestore.
+    val publicKey: String? = null
 )

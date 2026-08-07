@@ -113,6 +113,8 @@ fun ChatListScreen(
     val uiState by viewModel.uiState.collectAsState()
     val activeFilter by viewModel.activeFilter.collectAsState()
     val chatFolders by viewModel.chatFolders.collectAsState()
+    // НОВОЕ (скрытые чаты): множество ID скрытых чатов для подписей меню.
+    val hiddenChatIds by viewModel.hiddenChatIds.collectAsState()
     val colorTheme = LocalColorTheme.current
     var showFabMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
@@ -272,7 +274,9 @@ fun ChatListScreen(
                                     onToggleMute = { viewModel.toggleMuteChat(chat.chatId) },
                                     onDelete = { viewModel.deleteChat(chat.chatId) },
                                     onClearHistory = { viewModel.clearChatHistory(chat.chatId) },
-                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) }
+                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
+                                    isHidden = chat.chatId in hiddenChatIds,
+                                    onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) }
                                 )
                             }
                         }
@@ -472,7 +476,9 @@ internal fun SwipeableChatListItem(
     onToggleMute: () -> Unit,
     onDelete: () -> Unit,
     onClearHistory: () -> Unit,
-    onToggleArchive: () -> Unit = {}
+    onToggleArchive: () -> Unit = {},
+    isHidden: Boolean = false,
+    onToggleHidden: () -> Unit = {}
 ) {
     var offsetX by remember { mutableFloatStateOf(0f) }
     var showMenu by remember { mutableStateOf(false) }
@@ -499,6 +505,8 @@ internal fun SwipeableChatListItem(
             DropdownMenuItem(text = { Text(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute)) }, onClick = { showMenu = false; onToggleMute() })
             DropdownMenuItem(text = { Text(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action)) }, onClick = { showMenu = false; onToggleArchive() })
             DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_clear)) }, onClick = { showMenu = false; onClearHistory() })
+            // НОВОЕ (скрытые чаты): скрыть/показать чат (виден только под основным PIN).
+            DropdownMenuItem(text = { Text(if (isHidden) "Показать чат" else "Скрыть чат") }, onClick = { showMenu = false; onToggleHidden() })
             DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_delete), color = Color.Red) }, onClick = { showMenu = false; onDelete() })
         }
     }

@@ -55,7 +55,8 @@ private const val PIN_LOCKOUT_MS = 30_000L
 
 @Singleton
 class UserSettingsPreferences @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val appLockState: AppLockState
 ) {
     private val sendOnEnterKey = booleanPreferencesKey("send_on_enter")
     private val fontSizeKey = stringPreferencesKey("font_size")
@@ -72,6 +73,10 @@ class UserSettingsPreferences @Inject constructor(
     private val pinRequirementKey = stringPreferencesKey("pin_requirement")
     private val pinFailedAttemptsKey = intPreferencesKey("pin_failed_attempts")
     private val pinLockedUntilKey = longPreferencesKey("pin_locked_until")
+    // НОВОЕ (скрытые чаты): ложный (decoy) PIN-код и набор ID скрытых чатов.
+    private val decoyPinHashKey = stringPreferencesKey("decoy_pin_hash")
+    private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
+    private val hiddenChatIdsKey = stringSetPreferencesKey("hidden_chat_ids")
     private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
 
     // НОВОЕ (п.18): автоудаление аккаунта
@@ -103,6 +108,11 @@ class UserSettingsPreferences @Inject constructor(
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
     }
     val isPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[pinHashKey].isNullOrBlank() }
+    // НОВОЕ (скрытые чаты): установлен ли ложный PIN и множество скрытых чатов.
+    val isDecoyPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[decoyPinHashKey].isNullOrBlank() }
+    val hiddenChatIds: Flow<Set<String>> = context.settingsDataStore.data.map { it[hiddenChatIdsKey] ?: emptySet() }
+    /** НОВОЕ (скрытые чаты): активен ли сейчас режим ложного PIN (только runtime). */
+    val decoyMode: kotlinx.coroutines.flow.StateFlow<Boolean> = appLockState.decoyMode
 
     val notificationPermissionAsked: Flow<Boolean> =
         context.settingsDataStore.data.map { it[notificationPermissionAskedKey] ?: false }
@@ -154,7 +164,36 @@ class UserSettingsPreferences @Inject constructor(
         context.settingsDataStore.edit {
             it.remove(pinHashKey)
             it.remove(pinSaltKey)
+            // Снимаем и ложный PIN — он не имеет смысла без основного.
+            it.remove(decoyPinHashKey)
+            it.remove(decoyPinSaltKey)
             it[pinRequirementKey] = PinRequirement.NEVER.name
+        }
+        appLockState.setDecoyMode(false)
+    }
+
+    // НОВОЕ (скрытые чаты): установка/снятие ложного (decoy) PIN-кода.
+    suspend fun setDecoyPin(pin: String) {
+        val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val hash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
+        context.settingsDataStore.edit {
+            it[decoyPinSaltKey] = salt
+            it[decoyPinHashKey] = hash
+        }
+    }
+
+    suspend fun clearDecoyPin() {
+        context.settingsDataStore.edit {
+            it.remove(decoyPinHashKey)
+            it.remove(decoyPinSaltKey)
+        }
+    }
+
+    // НОВОЕ (скрытые чаты): пометить/снять пометку "скрытый" для чата.
+    suspend fun setChatHidden(chatId: String, hidden: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[hiddenChatIdsKey] ?: emptySet()
+            prefs[hiddenChatIdsKey] = if (hidden) current + chatId else current - chatId
         }
     }
 
@@ -175,25 +214,40 @@ class UserSettingsPreferences @Inject constructor(
             return PinCheckResult.Success
         }
         val candidateHash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
-        return if (candidateHash == storedHash) {
+        if (candidateHash == storedHash) {
+            // Введён основной PIN — обычный режим (скрытые чаты видны).
+            appLockState.setDecoyMode(false)
             context.settingsDataStore.edit {
                 it[pinFailedAttemptsKey] = 0
                 it.remove(pinLockedUntilKey)
             }
-            PinCheckResult.Success
-        } else {
-            val failedAttempts = (prefs[pinFailedAttemptsKey] ?: 0) + 1
-            if (failedAttempts >= MAX_PIN_ATTEMPTS) {
-                val unlockAt = now + PIN_LOCKOUT_MS
-                context.settingsDataStore.edit {
-                    it[pinFailedAttemptsKey] = 0
-                    it[pinLockedUntilKey] = unlockAt
-                }
-                PinCheckResult.LockedOut(unlockAt)
-            } else {
-                context.settingsDataStore.edit { it[pinFailedAttemptsKey] = failedAttempts }
-                PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failedAttempts)
+            return PinCheckResult.Success
+        }
+        // НОВОЕ (скрытые чаты): если основной PIN не подошёл, проверяем ложный (decoy) PIN.
+        // При его вводе приложение открывается в decoy-режиме, где скрытые чаты не видны.
+        val decoySalt = prefs[decoyPinSaltKey]
+        val decoyHash = prefs[decoyPinHashKey]
+        if (decoySalt != null && decoyHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, decoySalt) == decoyHash
+        ) {
+            appLockState.setDecoyMode(true)
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it.remove(pinLockedUntilKey)
             }
+            return PinCheckResult.Success
+        }
+        val failedAttempts = (prefs[pinFailedAttemptsKey] ?: 0) + 1
+        return if (failedAttempts >= MAX_PIN_ATTEMPTS) {
+            val unlockAt = now + PIN_LOCKOUT_MS
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it[pinLockedUntilKey] = unlockAt
+            }
+            PinCheckResult.LockedOut(unlockAt)
+        } else {
+            context.settingsDataStore.edit { it[pinFailedAttemptsKey] = failedAttempts }
+            PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failedAttempts)
         }
     }
 

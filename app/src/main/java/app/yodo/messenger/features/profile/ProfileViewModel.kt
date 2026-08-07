@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.ChatRepository
@@ -32,7 +33,8 @@ data class ProfileUiState(
 class ProfileViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val chatRepository: ChatRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val cryptoManager: CryptoManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
@@ -41,6 +43,10 @@ class ProfileViewModel @Inject constructor(
     // п.35: id чата "Избранное" — для навигации из профиля
     private val _savedChatId = MutableStateFlow<String?>(null)
     val savedChatId: StateFlow<String?> = _savedChatId
+
+    // НОВОЕ (сквозное шифрование): публичный ключ этого устройства для вшивания в QR-код контакта.
+    suspend fun getMyPublicKey(): String? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cryptoManager.myPublicKey() }
 
     init {
         viewModelScope.launch {

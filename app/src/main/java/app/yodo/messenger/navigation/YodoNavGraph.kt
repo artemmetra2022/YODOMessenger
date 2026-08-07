@@ -160,7 +160,19 @@ fun YodoNavGraph(
         }
         composable(Routes.QrCode.route) {
             app.yodo.messenger.features.profile.QrCodeScreen(
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                onScanClick = { navController.navigate(Routes.ScanContact.route) }
+            )
+        }
+        // НОВОЕ (офлайн обмен контактами по QR): экран сканирования QR-кода контакта.
+        composable(Routes.ScanContact.route) {
+            app.yodo.messenger.features.contacts.ScanContactScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenChat = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId)) {
+                        popUpTo(Routes.ScanContact.route) { inclusive = true }
+                    }
+                }
             )
         }
         composable(Routes.RecentCalls.route) {
