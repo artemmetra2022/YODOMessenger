@@ -121,6 +121,19 @@ fun YodoNavGraph(
                 // НОВОЕ (архивация чатов)
                 onOpenArchive = {
                     navController.navigate(Routes.ArchivedChats.route)
+                },
+                // НОВОЕ (чат поддержки): открытие админ-панели поддержки (только для админов).
+                onOpenAdminPanel = {
+                    navController.navigate(Routes.AdminPanel.route)
+                }
+            )
+        }
+        // НОВОЕ (чат поддержки): админ-панель со списком обращений в поддержку.
+        composable(Routes.AdminPanel.route) {
+            app.yodo.messenger.features.chats.AdminPanelScreen(
+                onBack = { navController.popBackStack() },
+                onOpenConversation = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId))
                 }
             )
         }
@@ -225,6 +238,10 @@ fun YodoNavGraph(
                 // НОВОЕ: "Пригласить в канал" из меню чата → экран выбора контактов.
                 onInviteToChannel = { cId ->
                     navController.navigate(Routes.InviteToChannel.createRoute(cId))
+                },
+                // НОВОЕ (QR в личном чате): "Поделиться контактом" → мой QR-код контакта.
+                onShareContactQr = {
+                    navController.navigate(Routes.QrCode.route)
                 }
             )
         }
@@ -478,7 +495,7 @@ fun YodoNavGraph(
             app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
                 title = "Звонок",
                 icon = androidx.compose.material.icons.Icons.Filled.Call,
-                description = "Функция звонков находится в разработке.",
+                description = "Функция звонков находится �� разработке.",
                 onBackClick = { navController.popBackStack() }
             )
         }

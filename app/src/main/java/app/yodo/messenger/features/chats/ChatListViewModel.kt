@@ -70,6 +70,10 @@ class ChatListViewModel @Inject constructor(
     val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
+    // НОВОЕ (чат поддержки): является ли текущий пользователь админом поддержки —
+    // тогда в меню показывается пункт "Админ-панель поддержки".
+    val isSupportAdmin: Boolean get() = chatRepository.isSupportAdmin()
+
     init {
         observeChats()
         syncFcmToken()

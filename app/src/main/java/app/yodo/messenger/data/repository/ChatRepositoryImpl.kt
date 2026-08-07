@@ -22,6 +22,7 @@ import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.CreateChatResult
 import app.yodo.messenger.domain.repository.GroupInfo
 import app.yodo.messenger.domain.repository.PresenceRepository
+import app.yodo.messenger.domain.repository.SupportConversation
 import app.yodo.messenger.util.ImageUtils
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -86,6 +87,15 @@ class ChatRepositoryImpl @Inject constructor(
         // точно валиден и не будет молчаливого зависания стрима.
         launch {
             try { currentUser.getIdToken(true).await() } catch (e: Exception) { }
+        }
+
+        // НОВОЕ (чат поддержки): гарантируем, что у каждого пользователя есть личная
+        // беседа поддержки — тогда она сразу появляется в списке чатов (как
+        // официальный канал, с галочкой), а не только после первого открытия. Админы свою
+        // беседу поддержки не создают (они отвечают, а не пишут в поддержку).
+        val myEmailForSupport = currentUser.email?.lowercase()
+        if (myEmailForSupport == null || myEmailForSupport !in ChatRepository.ADMIN_EMAILS.map { it.lowercase() }) {
+            launch { try { getOrCreateSupportChat() } catch (e: Exception) { } }
         }
 
         data class PresenceData(val rawOnline: Boolean, val lastSeen: Long, val hidden: Boolean)
@@ -586,8 +596,13 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
-    // НОВОЕ (переработка каналов): поиск каналов по префиксу названия.
-    // Требует composite index (type + titleLowercase) — см. firestore.indexes.json.
+    // НОВОЕ (переработка каналов): поиск каналов по подстроке названия/описания.
+    // РАНЬШЕ использовался range-запрос (type + orderBy titleLowercase + startAt/endAt),
+    // который требует составного индекса Firestore. Если индекс не создан — запрос падает,
+    // и каналы вообще не находились. Теперь фильтруем по одному полю (type == CHANNEL —
+    // это одиночный индекс, всегда доступен), а совпадение по названию/описанию считаем
+    // на клиенте. Заодно ищем по подстроке (contains), а не только по префиксу, и
+    // гарантированно включаем официальный канал.
     override suspend fun searchChannels(query: String): List<ChannelSearchItem> {
         val normalized = query.trim().lowercase()
         if (normalized.isBlank()) return emptyList()
@@ -595,23 +610,30 @@ class ChatRepositoryImpl @Inject constructor(
         return try {
             val snapshot = firestore.collection("chats")
                 .whereEqualTo("type", "CHANNEL")
-                .orderBy("titleLowercase")
-                .startAt(normalized)
-                .endAt(normalized + "\uf8ff")
-                .limit(20)
+                .limit(300)
                 .get().await()
-            snapshot.documents.mapNotNull { doc ->
-                val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                ChannelSearchItem(
-                    chatId = doc.id,
-                    title = doc.getString("title") ?: "Без названия",
-                    description = doc.getString("description").orEmpty(),
-                    avatarBase64 = doc.getString("avatarBase64"),
-                    subscriberCount = participantIds.size,
-                    isVerified = doc.getBoolean("isVerified") ?: false,
-                    isSubscribed = uid != null && uid in participantIds
-                )
-            }
+            snapshot.documents
+                .filter { doc ->
+                    val title = (doc.getString("title") ?: "").lowercase()
+                    val titleLc = doc.getString("titleLowercase") ?: title
+                    val desc = (doc.getString("description") ?: "").lowercase()
+                    titleLc.contains(normalized) || title.contains(normalized) || desc.contains(normalized)
+                }
+                .map { doc ->
+                    val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    ChannelSearchItem(
+                        chatId = doc.id,
+                        title = doc.getString("title") ?: "Без названия",
+                        description = doc.getString("description").orEmpty(),
+                        avatarBase64 = doc.getString("avatarBase64"),
+                        subscriberCount = participantIds.size,
+                        isVerified = doc.getBoolean("isVerified") ?: false,
+                        isSubscribed = uid != null && uid in participantIds
+                    )
+                }
+                // Верифицированные каналы (в т.ч. официальный) — выше в выдаче.
+                .sortedWith(compareByDescending<ChannelSearchItem> { it.isVerified }.thenByDescending { it.subscriberCount })
+                .take(30)
         } catch (e: Exception) { emptyList() }
     }
 
@@ -667,6 +689,83 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             ChannelUpdateResult.Error(e.toUserMessage("Не удалось загрузить фото"))
         }
+    }
+
+    // === НОВОЕ (чат поддержки) ===
+
+    override fun isSupportAdmin(): Boolean {
+        val email = firebaseAuth.currentUser?.email?.lowercase() ?: return false
+        return email in ChatRepository.ADMIN_EMAILS.map { it.lowercase() }
+    }
+
+    // Каждый пользователь имеет единственную беседу поддержки support_<uid>.
+    // Документ — обычный чат (тот же конвейер сообщений), но с type == "SUPPORT",
+    // верифицированный (галочка) и фиксированным названием. participantIds = [uid] —
+    // админы получают доступ по firestore.rules (по email), не через участие.
+    override suspend fun getOrCreateSupportChat(): CreateChatResult {
+        val user = firebaseAuth.currentUser ?: return CreateChatResult.Error("Вы не авторизованы")
+        val uid = user.uid
+        val chatId = ChatRepository.supportChatIdFor(uid)
+        return try {
+            val ref = firestore.collection("chats").document(chatId)
+            val doc = ref.get().await()
+            if (!doc.exists()) {
+                val userDoc = firestore.collection("users").document(uid).get().await()
+                val name = userDoc.getString("displayName") ?: user.displayName ?: "Пользователь"
+                val email = user.email ?: userDoc.getString("email") ?: ""
+                val now = System.currentTimeMillis()
+                ref.set(
+                    mapOf(
+                        "participantIds" to listOf(uid),
+                        "type" to "SUPPORT",
+                        "title" to ChatRepository.SUPPORT_TITLE,
+                        "isVerified" to true,
+                        // служебные поля для админ-панели
+                        "supportUserId" to uid,
+                        "supportUserName" to name,
+                        "supportUserEmail" to email,
+                        "supportUserAvatar" to userDoc.getString("photoBase64"),
+                        "lastMessage" to "",
+                        "lastMessageTimestamp" to now,
+                        "lastMessageSenderId" to uid,
+                        "lastMessageStatus" to "SENT",
+                        "unreadCounts" to mapOf(uid to 0),
+                        "isOnline" to false,
+                        "createdBy" to uid,
+                        "createdAt" to now
+                    )
+                ).await()
+            }
+            CreateChatResult.Success(chatId)
+        } catch (e: Exception) {
+            CreateChatResult.Error(e.toUserMessage("Не удалось открыть чат поддержки"))
+        }
+    }
+
+    override fun observeSupportConversations(): Flow<List<SupportConversation>> = callbackFlow {
+        if (!isSupportAdmin()) { trySend(emptyList()); close(); return@callbackFlow }
+        val listener = firestore.collection("chats")
+            .whereEqualTo("type", "SUPPORT")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { trySend(emptyList()); return@addSnapshotListener }
+                val list = snapshot?.documents.orEmpty().mapNotNull { doc ->
+                    val userId = doc.getString("supportUserId") ?: return@mapNotNull null
+                    SupportConversation(
+                        chatId = doc.id,
+                        userId = userId,
+                        userName = doc.getString("supportUserName") ?: "Пользователь",
+                        userEmail = doc.getString("supportUserEmail") ?: "",
+                        avatarBase64 = doc.getString("supportUserAvatar"),
+                        lastMessage = doc.getString("lastMessage") ?: "",
+                        lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
+                        lastMessageSenderId = doc.getString("lastMessageSenderId"),
+                        awaitingReply = doc.getString("lastMessageSenderId") == userId &&
+                            (doc.getString("lastMessage").orEmpty().isNotBlank())
+                    )
+                }.sortedByDescending { it.lastMessageTimestamp }
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
     }
 
     override suspend fun getGroupInfo(chatId: String): GroupInfo? {
@@ -1071,7 +1170,7 @@ class ChatRepositoryImpl @Inject constructor(
             logAdminAction(chatId, AdminActionType.USER_BANNED, targetUserId = userId, targetUserName = targetName)
             ChannelUpdateResult.Success
         } catch (e: Exception) {
-            ChannelUpdateResult.Error(e.toUserMessage("Не удалось забанить пользователя"))
+            ChannelUpdateResult.Error(e.toUserMessage("��е удалось забанить пользователя"))
         }
     }
 

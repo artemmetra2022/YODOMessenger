@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
@@ -194,6 +195,7 @@ fun ChatScreen(
     onOpenComments: (chatId: String, messageId: String) -> Unit,
     onInviteToChannel: (String) -> Unit = {},
     onOpenChannelStats: (String) -> Unit = {},
+    onShareContactQr: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -205,7 +207,7 @@ fun ChatScreen(
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
     var inputText by remember { mutableStateOf("") }
-    // НОВОЕ (система жалоб): сообщение, на которое сейчас открыт диалог "Пожаловаться".
+    // НОВОЕ (система жалоб): сообщение, на которое сейчас ��ткрыт диалог "Пожаловаться".
     var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -515,6 +517,14 @@ fun ChatScreen(
                                             text = { Text("Исчезающие сообщения" + if (uiState.disappearingTtlSeconds != null) " (${disappearingTtlLabel(uiState.disappearingTtlSeconds)})" else "") },
                                             leadingIcon = { Icon(Icons.Filled.Timer, contentDescription = null) },
                                             onClick = { showChatMenu = false; showDisappearingDialog = true }
+                                        )
+                                    }
+                                    // НОВОЕ (QR в личном чате): поделиться своим контактом через QR-код.
+                                    if (uiState.chatType == "PRIVATE") {
+                                        DropdownMenuItem(
+                                            text = { Text("Поделиться контактом (QR)") },
+                                            leadingIcon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
+                                            onClick = { showChatMenu = false; onShareContactQr() }
                                         )
                                     }
                                     DropdownMenuItem(text = { Text("Очистить историю") }, onClick = { showChatMenu = false; viewModel.clearChatHistory() })

@@ -33,7 +33,8 @@ fun MainScreen(
     onCreateGroupClick: () -> Unit = {},
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
-    onOpenArchive: () -> Unit = {}
+    onOpenArchive: () -> Unit = {},
+    onOpenAdminPanel: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -77,7 +78,8 @@ fun MainScreen(
                 onCreateGroupClick = onCreateGroupClick,
                 onCreateChannelClick = onCreateChannelClick,
                 onOpenContacts = onOpenContacts,
-                onOpenArchive = onOpenArchive
+                onOpenArchive = onOpenArchive,
+                onOpenAdminPanel = onOpenAdminPanel
             )
         }
     }

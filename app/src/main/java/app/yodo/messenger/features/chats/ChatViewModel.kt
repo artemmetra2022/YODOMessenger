@@ -111,7 +111,7 @@ class ChatViewModel @Inject constructor(
     // НОВОЕ (расширенные опросы): управляет тем, показывать ли в диалоге создания опроса
     // доп. параметры (множественный выбор, дата авто-закрытия).
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(
-        scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = false
+        scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = true
     )
     // Фон чата, выбранный в настройках
     val chatBackgroundType: StateFlow<app.yodo.messenger.data.local.ChatBackgroundType> =
@@ -363,6 +363,14 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             messageRepository.observeMessages(chatId).collect { messages ->
                 _uiState.value = _uiState.value.copy(messages = messages)
+                // ФИКС (бейдж непрочитанных): markAsRead() раньше вызывался только при
+                // открытии чата. Если сообщение (например одноразовое фото) приходило, пока
+                // чат уже открыт, счётчик непрочитанных на сервере рос, а в главном меню бейдж
+                // оставался. Теперь помечаем как прочитанное при каждом входящем сообщении,
+                // пока экран чата открыт.
+                val myUid = firebaseAuth.currentUser?.uid
+                val lastFromOther = messages.lastOrNull()?.senderId?.let { it != myUid } ?: false
+                if (lastFromOther) markAsRead()
             }
         }
     }
@@ -468,7 +476,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    // НОВОЕ (одноразовые медиа): вызывается экраном сразу после полноэкранного показа
+    // НОВОЕ (одноразовые ��едиа): вызывается экраном сразу после полноэкранного показа
     // view-once фото — стирает imageBase64 на сервере, чтобы повторно открыть было нельзя.
     fun markViewOnceImageOpened(messageId: String) {
         viewModelScope.launch {

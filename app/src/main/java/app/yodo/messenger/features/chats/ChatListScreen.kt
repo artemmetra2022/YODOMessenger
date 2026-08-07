@@ -206,6 +206,14 @@ fun ChatListScreen(
                         leadingIcon = { Icon(Icons.Filled.Contacts, contentDescription = null) },
                         onClick = { showFabMenu = false; onOpenContacts() }
                     )
+                    // НОВОЕ (чат поддержки): пункт "Админ-панель поддержки" — только для админов.
+                    if (viewModel.isSupportAdmin) {
+                        DropdownMenuItem(
+                            text = { Text("Админ-панель поддержки") },
+                            leadingIcon = { Icon(Icons.Filled.SupportAgent, contentDescription = null) },
+                            onClick = { showFabMenu = false; onOpenAdminPanel() }
+                        )
+                    }
                 }
             }
         }
@@ -308,7 +316,7 @@ fun ChatListScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Горизонтальные табы фильтрации + папки
+// Го��изонтальные табы фильтрации + папки
 // ---------------------------------------------------------------------------
 @Composable
 private fun ChatFilterTabs(

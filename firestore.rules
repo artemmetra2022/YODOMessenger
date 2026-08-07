@@ -30,6 +30,16 @@ service cloud.firestore {
           ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru'];
     }
 
+    // НОВОЕ (чат поддержки): беседы поддержки имеют id вида support_<uid>.
+    // Доступ: сам владелец (support_<его uid>) либо админ поддержки (те же email).
+    function isSupportChat(chatId) {
+      return chatId.matches('support_.*');
+    }
+    function canAccessSupportChat(chatId) {
+      return isSignedIn() &&
+        (chatId == 'support_' + request.auth.uid || isOfficialChannelAdmin());
+    }
+
     match /users/{userId} {
       // Публичное чтение нужно для входа по username (email резолвится ДО
       // авторизации в FirebaseAuth) и для профилей пользователей.
@@ -86,7 +96,9 @@ service cloud.firestore {
       // а не только participantIds. Писать в сам документ чата (title,
       // lastMessage и т.п.) могут только админы канала.
       allow read: if isSignedIn() &&
-        (chatId == 'yodo_official_channel' || request.auth.uid in resource.data.participantIds);
+        (chatId == 'yodo_official_channel'
+          || request.auth.uid in resource.data.participantIds
+          || (isSupportChat(chatId) && canAccessSupportChat(chatId)));
 
       allow create: if isSignedIn();
 
@@ -99,21 +111,23 @@ service cloud.firestore {
       //    возможность обычного участника назначить себя администратором
       //    напрямую через Firestore SDK, в обход клиентских проверок прав.
       allow update: if isSignedIn() &&
-        (chatId == 'yodo_official_channel'
-          ? isOfficialChannelAdmin()
-          : (
-              request.auth.uid in resource.data.participantIds &&
-              (
-                // Поля управления доступом не меняются в этом запросе —
-                // обычное редактирование чата (сообщения, черновики и т.д.)
-                !request.resource.data.diff(resource.data).affectedKeys()
-                  .hasAny(['roles', 'adminIds', 'customRoles', 'participantIds'])
-                ||
-                // ...либо меняет их владелец чата или уже действующий админ.
-                request.auth.uid == resource.data.createdBy ||
-                request.auth.uid in (resource.data.adminIds is list ? resource.data.adminIds : [])
+        (isSupportChat(chatId)
+          ? canAccessSupportChat(chatId)
+          : chatId == 'yodo_official_channel'
+            ? isOfficialChannelAdmin()
+            : (
+                request.auth.uid in resource.data.participantIds &&
+                (
+                  // Поля управления доступом не меняются в этом запросе —
+                  // обычное редактирование чата (сообщения, черновики и т.д.)
+                  !request.resource.data.diff(resource.data).affectedKeys()
+                    .hasAny(['roles', 'adminIds', 'customRoles', 'participantIds'])
+                  ||
+                  // ...либо меняет их владелец чата или уже действующий админ.
+                  request.auth.uid == resource.data.createdBy ||
+                  request.auth.uid in (resource.data.adminIds is list ? resource.data.adminIds : [])
+                )
               )
-            )
         );
 
       allow delete: if isSignedIn() &&

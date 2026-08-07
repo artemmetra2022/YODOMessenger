@@ -56,6 +56,22 @@ sealed class ChatListResult {
     data class Error(val message: String) : ChatListResult()
 }
 
+// НОВОЕ (чат поддержки): одна беседа поддержки в админ-панели.
+// Каждый пользователь пишет в свою единственную беседу поддержки (support_<uid>);
+// админы (ADMIN_EMAILS) видят все беседы и отвечают в тот же чат.
+data class SupportConversation(
+    val chatId: String,
+    val userId: String,
+    val userName: String,
+    val userEmail: String,
+    val avatarBase64: String?,
+    val lastMessage: String,
+    val lastMessageTimestamp: Long,
+    val lastMessageSenderId: String?,
+    // true, если последнее сообщение от пользователя (требует ответа админа).
+    val awaitingReply: Boolean
+)
+
 data class GroupInfo(
     val title: String,
     val members: List<YodoUser>,
@@ -70,6 +86,10 @@ interface ChatRepository {
             "artemmetra2022spb@gmail.com",
             "artemmelnik2@yandex.ru"
         )
+        // НОВОЕ (чат поддержки): id беседы поддержки детерминирован по uid.
+        const val SUPPORT_CHAT_PREFIX = "support_"
+        const val SUPPORT_TITLE = "Поддержка YodoMessenger"
+        fun supportChatIdFor(uid: String) = SUPPORT_CHAT_PREFIX + uid
     }
 
     fun observeChatList(): Flow<ChatListResult>
@@ -103,6 +123,14 @@ interface ChatRepository {
     suspend fun updateChannelInfo(chatId: String, title: String, description: String): ChannelUpdateResult
     /** Загрузка аватарки канала — сжатый Base64 прямо в документ чата. */
     suspend fun uploadChannelAvatar(chatId: String, bitmap: Bitmap): ChannelUpdateResult
+
+    // === НОВОЕ (чат поддержки) ===
+    /** Является ли текущий пользователь админом поддержки (по email). */
+    fun isSupportAdmin(): Boolean
+    /** Создаёт (при необходимости) и возвращает id личной беседы поддержки текущего пользователя. */
+    suspend fun getOrCreateSupportChat(): CreateChatResult
+    /** Для админ-панели: поток всех бесед поддержки (новые сверху). */
+    fun observeSupportConversations(): Flow<List<SupportConversation>>
 
     suspend fun getChatInfo(chatId: String): ChatInfo?
     suspend fun getGroupInfo(chatId: String): GroupInfo?

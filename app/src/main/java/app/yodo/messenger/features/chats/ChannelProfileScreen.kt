@@ -407,9 +407,10 @@ private fun ChannelHero(
 /** Плоский аватар канала на белой подложке с тонкой обводкой — без вращающегося кольца. */
 @Composable
 private fun ChannelAvatarFlat(avatarBase64: String?, title: String) {
+    // Увеличенный аватар канала (переработка каналов — крупнее интерфейс).
     Box(
         modifier = Modifier
-            .size(96.dp)
+            .size(120.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)
             .shadow(4.dp, CircleShape)
@@ -420,7 +421,7 @@ private fun ChannelAvatarFlat(avatarBase64: String?, title: String) {
             displayName = title,
             photoUrl = null,
             avatarBase64 = avatarBase64,
-            size = 88.dp
+            size = 110.dp
         )
     }
 }
