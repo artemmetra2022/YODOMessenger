@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.chats
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Campaign
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -69,6 +72,7 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.LocationOn
@@ -195,8 +199,12 @@ fun ChatScreen(
     val autoDownloadImages by viewModel.autoDownloadImages.collectAsState()
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
     val hideKeyboardOnSend by viewModel.hideKeyboardOnSend.collectAsState()
+    val chatBackgroundType by viewModel.chatBackgroundType.collectAsState()
+    val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
     var inputText by remember { mutableStateOf("") }
+    // НОВОЕ (система жалоб): сообщение, на которое сейчас открыт диалог "Пожаловаться".
+    var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -948,16 +956,25 @@ fun ChatScreen(
                         boundsInWindow.bottom.toInt()
                     )
                 }
-                .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(
-                            colorTheme.primary.copy(alpha = 0.05f),
-                            MaterialTheme.colorScheme.background
-                        )
-                    )
+                .then(
+                    if (chatBackgroundType != app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE) {
+                        Modifier.background(chatBackgroundBrush(chatBackgroundType, colorTheme))
+                    } else Modifier
                 )
                 .swipeToGoBack(onBack = onBackClick)
         ) {
+            if (chatBackgroundType == app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE &&
+                chatBackgroundCustomPath.isNotBlank()
+            ) {
+                coil.compose.AsyncImage(
+                    model = chatBackgroundCustomPath,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                )
+            }
             if (displayedMessages.isEmpty()) {
                 val emptyText = when {
                     isChannel -> "Здесь пока ничего нет"
@@ -999,6 +1016,7 @@ fun ChatScreen(
                                 onEdit = { viewModel.setEditingMessage(message) },
                                 onDelete = { viewModel.deleteMessage(message) },
                                 onForward = { viewModel.prepareForward(message); onForwardMessage() },
+                                onReport = { reportTargetMessage = message },
                                 onReact = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                                 onPin = { viewModel.togglePinMessage(message.id) },
                                 onSaveToFavorite = { viewModel.saveToFavorite(message) },
@@ -1021,6 +1039,22 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    // НОВОЕ (система жалоб, п.5 ТЗ): диалог подачи жалобы на сообщение.
+    reportTargetMessage?.let { message ->
+        ReportDialog(
+            chatId = chatId,
+            targetUserId = message.senderId,
+            targetUserName = "",
+            messageId = message.id,
+            messagePreview = message.previewText(),
+            onDismiss = { reportTargetMessage = null },
+            onSubmitted = {
+                reportTargetMessage = null
+                coroutineScope.launch { snackbarHostState.showSnackbar("Жалоба отправлена") }
+            }
+        )
     }
 }
 
@@ -1055,6 +1089,7 @@ private fun SwipeableMessageBubble(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onForward: () -> Unit,
+    onReport: () -> Unit,
     onReact: (String) -> Unit,
     onPin: () -> Unit,
     onSaveToFavorite: () -> Unit,
@@ -1117,6 +1152,7 @@ private fun SwipeableMessageBubble(
                 isChannel = isChannel, onCommentsClick = onCommentsClick,
                 onReply = onReply, onEdit = onEdit, onDelete = onDelete,
                 onForward = onForward, onReact = onReact, onPin = onPin,
+                onReport = onReport,
                 onSaveToFavorite = onSaveToFavorite,
                 onVotePoll = onVotePoll,
                 onClosePoll = onClosePoll,
@@ -1140,6 +1176,7 @@ private fun MessageBubble(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onForward: () -> Unit,
+    onReport: () -> Unit,
     onReact: (String) -> Unit,
     onPin: () -> Unit,
     onSaveToFavorite: () -> Unit,
@@ -1357,6 +1394,13 @@ private fun MessageBubble(
                     if (isOwnMessage) {
                         DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
                         DropdownMenuItem(text = { Text("Удалить") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
+                    } else {
+                        // НОВОЕ (система жалоб, п.5 ТЗ): жалоба на чужое сообщение.
+                        DropdownMenuItem(
+                            text = { Text("Пожаловаться") },
+                            leadingIcon = { Icon(Icons.Filled.Flag, contentDescription = null) },
+                            onClick = { showMenu = false; onReport() }
+                        )
                     }
                 }
             }
@@ -2952,5 +2996,57 @@ private fun FullscreenLocationViewer(lat: Double, lng: Double, onDismiss: () -> 
                 }
             }
         }
+    }
+}
+
+
+internal fun chatBackgroundPreviewBrush(
+    type: app.yodo.messenger.data.local.ChatBackgroundType
+): androidx.compose.ui.graphics.Brush {
+    return when (type) {
+        app.yodo.messenger.data.local.ChatBackgroundType.DEFAULT ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color(0xFFECECEC), Color(0xFFF7F7F7))
+            )
+        app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color.Transparent, Color.Transparent)
+            )
+        else -> chatBackgroundBrush(type, null)
+    }
+}
+
+private fun chatBackgroundBrush(
+    type: app.yodo.messenger.data.local.ChatBackgroundType,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme?
+): androidx.compose.ui.graphics.Brush {
+    return when (type) {
+        app.yodo.messenger.data.local.ChatBackgroundType.DEFAULT ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(
+                    (colorTheme?.primary ?: Color(0xFF667EEA)).copy(alpha = 0.05f),
+                    Color.Transparent
+                )
+            )
+        app.yodo.messenger.data.local.ChatBackgroundType.GRADIENT_1 ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color(0xFF667EEA), Color(0xFF764BA2))
+            )
+        app.yodo.messenger.data.local.ChatBackgroundType.GRADIENT_2 ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color(0xFFF093FB), Color(0xFFF5576C))
+            )
+        app.yodo.messenger.data.local.ChatBackgroundType.GRADIENT_3 ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color(0xFF4FACFE), Color(0xFF00F2FE))
+            )
+        app.yodo.messenger.data.local.ChatBackgroundType.GRADIENT_4 ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color(0xFF43E97B), Color(0xFF38F9D7))
+            )
+        app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE ->
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                colors = listOf(Color.Transparent, Color.Transparent)
+            )
     }
 }

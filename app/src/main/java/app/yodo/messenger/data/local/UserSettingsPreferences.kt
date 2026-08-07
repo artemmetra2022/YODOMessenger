@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.yodo.messenger.domain.model.ChatFolder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -19,8 +20,12 @@ import javax.inject.Singleton
 
 private val Context.settingsDataStore by preferencesDataStore(name = "yodo_user_settings")
 
-enum class FontSize(val scale: Float) {
-    SMALL(0.9f), MEDIUM(1.0f), LARGE(1.15f)
+enum class FontSize(val scale: Float, val displayName: String) {
+    EXTRA_SMALL(0.8f, "XS"),
+    SMALL(0.9f, "S"),
+    MEDIUM(1.0f, "M"),
+    LARGE(1.15f, "L"),
+    EXTRA_LARGE(1.3f, "XL")
 }
 
 enum class PinRequirement(val displayName: String) {
@@ -253,10 +258,4 @@ class UserSettingsPreferences @Inject constructor(
         }
     }
 
-    private suspend fun <T> Flow<T>.first(): T {
-        var result: T? = null
-        collect { result = it; return@collect }
-        @Suppress("UNCHECKED_CAST")
-        return result as T
-    }
 }

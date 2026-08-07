@@ -147,6 +147,7 @@
     <string name="group_info_not_found">Группа не найдена</string>
     <string name="group_info_members">Участники (%1$d)</string>
     <string name="group_info_creator">Создатель группы</string>
+    <string name="group_info_manage_roles">Роли и права</string>
     <string name="group_info_leave">Покинуть группу</string>
 
     <!-- InviteToChannel -->

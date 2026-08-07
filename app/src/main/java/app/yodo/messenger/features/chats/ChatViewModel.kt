@@ -113,6 +113,15 @@ class ChatViewModel @Inject constructor(
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(
         scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = false
     )
+    // Фон чата, выбранный в настройках
+    val chatBackgroundType: StateFlow<app.yodo.messenger.data.local.ChatBackgroundType> =
+        userSettingsPreferences.chatBackgroundType.stateIn(
+            scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000),
+            initialValue = app.yodo.messenger.data.local.ChatBackgroundType.DEFAULT
+        )
+    val chatBackgroundCustomPath: StateFlow<String> = userSettingsPreferences.chatBackgroundCustomPath.stateIn(
+        scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = ""
+    )
 
     private var typingResetJob: Job? = null
     private var isCurrentlyMarkedTyping = false

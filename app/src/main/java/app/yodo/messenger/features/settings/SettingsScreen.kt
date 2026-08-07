@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.settings
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -32,6 +35,9 @@ import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FormatSize
@@ -192,13 +198,34 @@ fun SettingsScreen(
     }
 
     // НОВОЕ (п.13): диалог выбора фона чата
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val chatBackgroundImagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            viewModel.setChatBackgroundCustomPath(uri.toString())
+            viewModel.setChatBackgroundType(ChatBackgroundType.CUSTOM_IMAGE)
+        }
+        showChatBackgroundDialog = false
+    }
     if (showChatBackgroundDialog) {
         ChatBackgroundDialog(
             currentType = chatBackgroundType,
+            customPath = chatBackgroundCustomPath,
             onDismiss = { showChatBackgroundDialog = false },
             onSelect = { type ->
-                viewModel.setChatBackgroundType(type)
-                showChatBackgroundDialog = false
+                if (type == ChatBackgroundType.CUSTOM_IMAGE) {
+                    chatBackgroundImagePicker.launch("image/*")
+                } else {
+                    viewModel.setChatBackgroundType(type)
+                    showChatBackgroundDialog = false
+                }
             }
         )
     }
@@ -209,7 +236,19 @@ fun SettingsScreen(
             folders = chatFolders,
             onDismiss = { showChatFoldersDialog = false },
             onAddFolder = { name -> viewModel.addChatFolder(name) },
-            onDeleteFolder = { folderId -> viewModel.deleteChatFolder(folderId) }
+            onDeleteFolder = { folderId -> viewModel.deleteChatFolder(folderId) },
+            onRenameFolder = { folder, newName -> viewModel.updateChatFolder(folder.copy(name = newName)) },
+            onReorderFolder = { folder, direction ->
+                val sorted = chatFolders.sortedBy { it.order }.toMutableList()
+                val currentIndex = sorted.indexOfFirst { it.id == folder.id }
+                val targetIndex = currentIndex + direction
+                if (currentIndex >= 0 && targetIndex in sorted.indices) {
+                    val a = sorted[currentIndex]
+                    val b = sorted[targetIndex]
+                    viewModel.updateChatFolder(a.copy(order = b.order))
+                    viewModel.updateChatFolder(b.copy(order = a.order))
+                }
+            }
         )
     }
 
@@ -354,14 +393,14 @@ fun SettingsScreen(
                             onValueChangeFinished = {
                                 viewModel.setFontSize(FontSize.entries[sliderPosition.roundToInt()])
                             },
-                            valueRange = 0f..2f,
-                            steps = 1,
+                            valueRange = 0f..4f,
+                            steps = 3,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                         )
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             FontSize.entries.forEach { size ->
                                 Text(
-                                    text = size.name,
+                                    text = size.displayName,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (fontSize == size) colorTheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant
@@ -832,6 +871,7 @@ private fun AutoDeleteDialog(
 @Composable
 private fun ChatBackgroundDialog(
     currentType: ChatBackgroundType,
+    customPath: String,
     onDismiss: () -> Unit,
     onSelect: (ChatBackgroundType) -> Unit
 ) {
@@ -853,6 +893,8 @@ private fun ChatBackgroundDialog(
                             onClick = { onSelect(type) }
                         )
                         Spacer(modifier = Modifier.width(8.dp))
+                        ChatBackgroundPreview(type = type, customPath = customPath)
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(type.displayName)
                     }
                 }
@@ -864,6 +906,42 @@ private fun ChatBackgroundDialog(
     )
 }
 
+@Composable
+private fun ChatBackgroundPreview(type: ChatBackgroundType, customPath: String) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+    val boxModifier = Modifier
+        .size(32.dp)
+        .clip(shape)
+        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), shape)
+
+    if (type == ChatBackgroundType.CUSTOM_IMAGE) {
+        if (customPath.isNotBlank()) {
+            coil.compose.AsyncImage(
+                model = customPath,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = boxModifier
+            )
+        } else {
+            Box(
+                modifier = boxModifier.background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Image,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    } else {
+        Box(
+            modifier = boxModifier.background(app.yodo.messenger.features.chats.chatBackgroundPreviewBrush(type))
+        )
+    }
+}
+
 // ══════════════════════════════════════════════════════════
 // НОВОЕ (п.4): диалог управления папками чатов
 // ══════════════════════════════════════════════════════════
@@ -872,10 +950,14 @@ private fun ChatFoldersDialog(
     folders: List<app.yodo.messenger.domain.model.ChatFolder>,
     onDismiss: () -> Unit,
     onAddFolder: (String) -> Unit,
-    onDeleteFolder: (String) -> Unit
+    onDeleteFolder: (String) -> Unit,
+    onRenameFolder: (app.yodo.messenger.domain.model.ChatFolder, String) -> Unit,
+    onReorderFolder: (app.yodo.messenger.domain.model.ChatFolder, Int) -> Unit
 ) {
     var newFolderName by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
+    var folderBeingRenamed by remember { mutableStateOf<app.yodo.messenger.domain.model.ChatFolder?>(null) }
+    var renameText by remember { mutableStateOf("") }
 
     if (showAddDialog) {
         AlertDialog(
@@ -904,23 +986,82 @@ private fun ChatFoldersDialog(
         )
     }
 
+    folderBeingRenamed?.let { folder ->
+        AlertDialog(
+            onDismissRequest = { folderBeingRenamed = null },
+            title = { Text("Переименовать папку") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    label = { Text("Название папки") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (renameText.isNotBlank()) {
+                        onRenameFolder(folder, renameText.trim())
+                        folderBeingRenamed = null
+                    }
+                }) { Text("Сохранить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderBeingRenamed = null }) { Text("Отмена") }
+            }
+        )
+    }
+
+    val sortedFolders = folders.sortedBy { it.order }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Папки чатов") },
         text = {
             Column {
-                if (folders.isEmpty()) {
+                if (sortedFolders.isEmpty()) {
                     Text("Нет папок. Создайте первую папку, чтобы организовать чаты.")
                 } else {
-                    folders.forEach { folder ->
+                    sortedFolders.forEachIndexed { index, folder ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(folder.name, modifier = Modifier.weight(1f))
+                            Column {
+                                IconButton(
+                                    onClick = { onReorderFolder(folder, -1) },
+                                    enabled = index > 0,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Выше", modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(
+                                    onClick = { onReorderFolder(folder, 1) },
+                                    enabled = index < sortedFolders.lastIndex,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Ниже", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                folder.name,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        renameText = folder.name
+                                        folderBeingRenamed = folder
+                                    }
+                            )
                             Text("${folder.chatIds.size} чатов", style = MaterialTheme.typography.labelSmall)
+                            IconButton(onClick = {
+                                renameText = folder.name
+                                folderBeingRenamed = folder
+                            }) {
+                                Icon(Icons.Filled.Edit, contentDescription = "Переименовать")
+                            }
                             IconButton(onClick = { onDeleteFolder(folder.id) }) {
                                 Icon(Icons.Filled.Delete, contentDescription = "Удалить", tint = YodoError)
                             }

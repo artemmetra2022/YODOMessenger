@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +41,7 @@ import app.yodo.messenger.ui.theme.YodoError
 fun GroupInfoScreen(
     onBackClick: () -> Unit,
     onLeftGroup: () -> Unit,
+    onOpenManageRoles: (String) -> Unit = {},
     viewModel: GroupInfoViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -86,6 +89,24 @@ fun GroupInfoScreen(
                         style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
+
+                    if (viewModel.myUid != null && viewModel.myUid == state.info.createdBy) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenManageRoles(viewModel.chatId) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                stringResource(R.string.group_info_manage_roles),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
 
                     LazyColumn(modifier = Modifier.weight(1f)) {
                         items(state.info.members, key = { it.uid }) { member ->

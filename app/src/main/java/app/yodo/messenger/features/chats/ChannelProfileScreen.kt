@@ -1,7 +1,6 @@
 package app.yodo.messenger.features.chats
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -9,7 +8,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -19,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +32,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -93,6 +93,8 @@ fun ChannelProfileScreen(
     onChatOpened: (String) -> Unit,
     onEditChannel: (String) -> Unit,
     onOpenUserProfile: (String) -> Unit,
+    // НОВОЕ (система ролей + журнал администраторов): переход к экрану управления ролями.
+    onManageRoles: (String) -> Unit = {},
     // НОВОЕ: канал удалён владельцем — экран должен закрыться в список чатов.
     onChannelDeleted: () -> Unit = onBackClick,
     viewModel: ChannelProfileViewModel = hiltViewModel()
@@ -158,101 +160,12 @@ fun ChannelProfileScreen(
                     Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                     ) {
-                        // ═══ Шапка ═══
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(colorTheme.primary.copy(alpha = 0.12f), Color.Transparent)
-                                    )
-                                )
-                                .padding(horizontal = 24.dp, vertical = 20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            ChannelAvatarRing(
-                                avatarBase64 = profile.avatarBase64,
-                                title = profile.title,
-                                colorTheme = colorTheme
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    profile.title,
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                    textAlign = TextAlign.Center
-                                )
-                                if (profile.isVerified) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Box(
-                                        modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0xFF22C55E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Filled.Verified, contentDescription = "Верифицирован",
-                                            tint = Color(0xFF1D9BF0), modifier = Modifier.size(15.dp))
-                                    }
-                                }
-                            }
-                            if (profile.description.isNotBlank()) {
-                                Text(
-                                    profile.description,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 4,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 6.dp)
-                                )
-                            }
-                            Text(
-                                buildString {
-                                    if (profile.isVerified) append("Официальный канал")
-                                    if (profile.createdAt > 0) {
-                                        if (isNotEmpty()) append(" · ")
-                                        append("создан ${formatChannelDate(profile.createdAt)}")
-                                    }
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color.Gray,
-                                modifier = Modifier.padding(top = 6.dp)
-                            )
-                        }
-
-                        // ═══ Статистика ═══
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            ChannelStat(
-                                value = profile.subscriberCount,
-                                label = pluralRu(profile.subscriberCount, "подписчик", "подписчика", "подписчиков"),
-                                colorTheme = colorTheme,
-                                modifier = Modifier.weight(1f)
-                            )
-                            StatDivider()
-                            ChannelStat(
-                                value = uiState.postsCount,
-                                label = pluralRu(uiState.postsCount, "пост", "поста", "постов"),
-                                colorTheme = colorTheme,
-                                modifier = Modifier.weight(1f)
-                            )
-                            StatDivider()
-                            ChannelStat(
-                                value = uiState.admins.size + (if (uiState.owner != null) 1 else 0),
-                                label = pluralRu(uiState.admins.size + 1, "админ", "админа", "админов"),
-                                colorTheme = colorTheme,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
+                        // ═══ Hero-шапка ═══
+                        ChannelHero(
+                            profile = profile,
+                            uiState = uiState,
+                            colorTheme = colorTheme
+                        )
 
                         // ═══ Кнопки подписки ═══
                         // У официального канала подписки нет — он виден всем и закреплён в списке.
@@ -331,6 +244,16 @@ fun ChannelProfileScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Редактировать канал")
                             }
+                            // НОВОЕ (система ролей + журнал администраторов): переход к управлению
+                            // ролями участников канала и просмотру журнала действий администраторов.
+                            OutlinedButton(
+                                onClick = { onManageRoles(viewModel.chatId) },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Роли и права")
+                            }
                             // НОВОЕ: удаление канала владельцем — необратимое действие,
                             // требует явного подтверждения в диалоге.
                             OutlinedButton(
@@ -369,31 +292,135 @@ fun ChannelProfileScreen(
     }
 }
 
-/** Аватар канала в медленно вращающемся градиентном кольце (primary → accent). */
+/**
+ * Hero-шапка канала: полноширинный градиентный фон "от края до края",
+ * аватар со смещением вниз (тень выходит за пределы градиента), заголовок
+ * и статистика в одном визуальном блоке — без разрывов между секциями.
+ */
 @Composable
-private fun ChannelAvatarRing(avatarBase64: String?, title: String, colorTheme: ColorTheme) {
-    val transition = rememberInfiniteTransition(label = "channel_ring")
-    val angle by transition.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(8000, easing = LinearEasing)),
-        label = "ring_angle"
-    )
-    Box(modifier = Modifier.size(126.dp), contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.size(126.dp).graphicsLayer { rotationZ = angle }) {
-            val stroke = 3.dp.toPx()
-            drawCircle(
-                brush = Brush.sweepGradient(
-                    listOf(colorTheme.primary, colorTheme.accent, colorTheme.primary)
-                ),
-                radius = size.minDimension / 2 - stroke / 2,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(stroke)
-            )
+private fun ChannelHero(
+    profile: app.yodo.messenger.domain.model.ChannelProfile,
+    uiState: ChannelProfileUiState,
+    colorTheme: ColorTheme
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(colorTheme.primary, colorTheme.accent),
+                    )
+                )
+                .padding(top = 28.dp, bottom = 56.dp, start = 24.dp, end = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        profile.title,
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                        textAlign = TextAlign.Center
+                    )
+                    if (profile.isVerified) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier.size(22.dp).clip(CircleShape).background(Color.White),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Verified, contentDescription = "Верифицирован",
+                                tint = Color(0xFF1D9BF0), modifier = Modifier.size(15.dp))
+                        }
+                    }
+                }
+                if (profile.description.isNotBlank()) {
+                    Text(
+                        profile.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.85f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+                Text(
+                    buildString {
+                        if (profile.isVerified) append("Официальный канал")
+                        if (profile.createdAt > 0) {
+                            if (isNotEmpty()) append(" · ")
+                            append("создан ${formatChannelDate(profile.createdAt)}")
+                        }
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.65f),
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
         }
+        // Аватар и статистика внахлёст на границу градиента и фона — единая композиция.
+        Column(
+            modifier = Modifier.fillMaxWidth().offset(y = (-40).dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            ChannelAvatarFlat(avatarBase64 = profile.avatarBase64, title = profile.title)
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .shadow(2.dp, RoundedCornerShape(18.dp))
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ChannelStat(
+                    value = profile.subscriberCount,
+                    label = pluralRu(profile.subscriberCount, "подписчик", "подписчика", "подписчиков"),
+                    colorTheme = colorTheme,
+                    modifier = Modifier.weight(1f)
+                )
+                StatDivider()
+                ChannelStat(
+                    value = uiState.postsCount,
+                    label = pluralRu(uiState.postsCount, "пост", "поста", "постов"),
+                    colorTheme = colorTheme,
+                    modifier = Modifier.weight(1f)
+                )
+                StatDivider()
+                ChannelStat(
+                    value = uiState.admins.size + (if (uiState.owner != null) 1 else 0),
+                    label = pluralRu(uiState.admins.size + 1, "админ", "админа", "админов"),
+                    colorTheme = colorTheme,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+/** Плоский аватар канала на белой подложке с тонкой обводкой — без вращающегося кольца. */
+@Composable
+private fun ChannelAvatarFlat(avatarBase64: String?, title: String) {
+    Box(
+        modifier = Modifier
+            .size(96.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface)
+            .shadow(4.dp, CircleShape)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center
+    ) {
         UserAvatar(
             displayName = title,
             photoUrl = null,
             avatarBase64 = avatarBase64,
-            size = 110.dp
+            size = 88.dp
         )
     }
 }
@@ -474,47 +501,61 @@ private fun ChannelSectionTitle(title: String) {
     )
 }
 
-/** Карточка поста в профиле канала — форма повторяет язык пузырей чата (острый уголок). */
+/** Карточка поста в профиле канала — редакторский стиль: акцентная плашка, крупный текст. */
 @Composable
 private fun ChannelPostPreviewCard(post: Message, colorTheme: ColorTheme, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp)
+    val shape = RoundedCornerShape(16.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .shadow(1.dp, shape)
+            .padding(horizontal = 16.dp, vertical = 5.dp)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(MaterialTheme.colorScheme.surface)
+            .shadow(1.dp, shape)
             .clickable(onClick = onClick)
-            .padding(12.dp)
+            .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Campaign, contentDescription = null,
-                tint = colorTheme.primary, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(colorTheme.primary.copy(alpha = 0.12f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Campaign, contentDescription = null,
+                        tint = colorTheme.primary, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("ПОСТ", style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold, color = colorTheme.primary)
+                }
+            }
+            Spacer(modifier = Modifier.weight(1f))
             Text(
                 formatChannelDateTime(post.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.Gray
             )
         }
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
             post.previewText(),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis
         )
         if (post.commentsCount > 0) {
-            Spacer(modifier = Modifier.height(6.dp))
+            HorizontalDivider(modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null,
-                    tint = colorTheme.primary, modifier = Modifier.size(13.dp))
-                Spacer(modifier = Modifier.width(5.dp))
+                    tint = colorTheme.primary, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     "${post.commentsCount} ${pluralRu(post.commentsCount, "комментарий", "комментария", "комментариев")}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorTheme.primary
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colorTheme.primary,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -526,8 +567,11 @@ private fun ChannelAdminRow(user: YodoUser, role: String, colorTheme: ColorTheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         UserAvatar(

@@ -1,8 +1,14 @@
 package app.yodo.messenger.domain.repository
 
 import android.graphics.Bitmap
+import app.yodo.messenger.domain.model.AdminLogEntry
+import app.yodo.messenger.domain.model.AdminLogFilter
+import app.yodo.messenger.domain.model.AssignedRole
+import app.yodo.messenger.domain.model.BuiltInRole
 import app.yodo.messenger.domain.model.ChannelProfile
 import app.yodo.messenger.domain.model.ChatPreview
+import app.yodo.messenger.domain.model.CustomRole
+import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.YodoUser
 import kotlinx.coroutines.flow.Flow
 
@@ -111,4 +117,45 @@ interface ChatRepository {
     suspend fun getOrCreateSavedChat(): String
     fun observeDisappearingTtl(chatId: String): Flow<Long?>
     suspend fun setDisappearingTtl(chatId: String, ttlSeconds: Long?)
+
+    // === НОВОЕ (система ролей с гранулярными правами, п.1 ТЗ) ===
+
+    /** Роли, назначенные всем участникам чата (userId -> AssignedRole). Владелец не входит. */
+    suspend fun getAssignedRoles(chatId: String): List<AssignedRole>
+    /** Кастомные роли, созданные для этого чата. */
+    suspend fun getCustomRoles(chatId: String): List<CustomRole>
+    /** Итоговые права конкретного участника (учитывает встроенную/кастомную роль и owner). */
+    suspend fun getMemberPermissions(chatId: String, userId: String): MemberPermissions
+    /** Назначить участнику встроенную роль (Модератор/Помощник/Редактор контента). */
+    suspend fun assignBuiltInRole(chatId: String, userId: String, role: BuiltInRole): ChannelUpdateResult
+    /** Назначить участнику кастомную роль. */
+    suspend fun assignCustomRole(chatId: String, userId: String, customRoleId: String): ChannelUpdateResult
+    /** Снять роль с участника (возврат к обычному участнику без прав). */
+    suspend fun revokeRole(chatId: String, userId: String): ChannelUpdateResult
+    /** Создать новую кастомную роль с заданным набором прав. */
+    suspend fun createCustomRole(chatId: String, name: String, permissions: Set<app.yodo.messenger.domain.model.Permission>): ChannelUpdateResult
+    /** Изменить название/права существующей кастомной роли. */
+    suspend fun updateCustomRole(chatId: String, roleId: String, name: String, permissions: Set<app.yodo.messenger.domain.model.Permission>): ChannelUpdateResult
+    /** Удалить кастомную роль (участники с этой ролью теряют права). */
+    suspend fun deleteCustomRole(chatId: String, roleId: String): ChannelUpdateResult
+
+    // === НОВОЕ (журнал действий администраторов, п.2 ТЗ) ===
+
+    /** Записать действие в журнал администраторов чата (вызывается после успешного действия). */
+    suspend fun logAdminAction(
+        chatId: String,
+        actionType: app.yodo.messenger.domain.model.AdminActionType,
+        details: String = "",
+        targetUserId: String? = null,
+        targetUserName: String? = null
+    )
+    /** Постранично получить записи журнала с фильтрацией по типу/автору/периоду. */
+    suspend fun getAdminLog(chatId: String, filter: AdminLogFilter, limit: Int = 50, startAfterTimestamp: Long? = null): List<AdminLogEntry>
+
+    // === НОВОЕ (система жалоб, п.5 ТЗ): бан участника чата/канала ===
+
+    /** Исключить и заблокировать участника — он теряет доступ к чату и не может вернуться по приглашению. */
+    suspend fun banMember(chatId: String, userId: String): ChannelUpdateResult
+    suspend fun unbanMember(chatId: String, userId: String): ChannelUpdateResult
+    suspend fun getBannedMemberIds(chatId: String): List<String>
 }

@@ -157,7 +157,7 @@ fun ChatListScreen(
                     add(FilterTab(ChatFilter.GROUPS, stringResource(R.string.chat_filter_groups)))
                     
                     // НОВОЕ (п.4): добавляем пользовательские папки
-                    chatFolders.forEach { folder ->
+                    chatFolders.sortedBy { it.order }.forEach { folder ->
                         val folderChatsCount = allActive.count { it.chatId in folder.chatIds }
                         add(FilterTab(
                             filter = ChatFilter.Folder(folder.id),

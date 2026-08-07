@@ -41,6 +41,48 @@ service cloud.firestore {
           ? request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']
           : request.auth.uid in resource.data.participantIds);
       allow create: if request.auth != null;
+
+      // НОВОЕ (журнал действий администраторов): читать лог могут только участники
+      // чата (право VIEW_ADMIN_LOG проверяется на клиенте/во ViewModel по данным
+      // из roles/customRoles — здесь на уровне правил гарантируем только принадлежность
+      // к чату). Писать может любой участник, т.к. запись всегда делается от имени
+      // авторизованного actorId сразу после выполненного им действия, ограниченного
+      // отдельными правилами на изменение chats/{chatId} (roles, adminIds и т.д.).
+      match /adminLog/{logId} {
+        allow read: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow create: if request.auth != null &&
+          request.auth.uid == request.resource.data.actorId &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow update, delete: if false;
+      }
+
+      // НОВОЕ (система жалоб, п.5 ТЗ): жалобы видны только участникам чата (очередь
+      // рассматривают админы — их право проверяется во ViewModel по roles/adminIds,
+      // здесь на уровне правил гарантируем только принадлежность к чату). Подать жалобу
+      // может любой участник от своего имени; редактировать статус/решение может только
+      // тот, кто уже указан как reviewedBy при create, либо любой участник при update —
+      // финальная проверка прав администратора выполняется в приложении перед вызовом.
+      match /reports/{reportId} {
+        allow read: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow create: if request.auth != null &&
+          request.auth.uid == request.resource.data.reporterId &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow update: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow delete: if false;
+
+        match /comments/{commentId} {
+          allow read: if request.auth != null &&
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+          allow create: if request.auth != null &&
+            request.auth.uid == request.resource.data.authorId &&
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+          allow update, delete: if false;
+        }
+      }
+
       match /messages/{messageId} {
         // Сообщения официального канала читают все, но отправлять (create) в него
         // могут только два админа; редактировать/удалять свои сообщения — тоже только они.

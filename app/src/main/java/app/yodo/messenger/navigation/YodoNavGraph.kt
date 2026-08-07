@@ -237,6 +237,9 @@ fun YodoNavGraph(
                 onOpenUserProfile = { userId ->
                     navController.navigate(Routes.UserProfile.createRoute(userId))
                 },
+                onManageRoles = { chatId ->
+                    navController.navigate(Routes.ManageRoles.createRoute(chatId))
+                },
                 // НОВОЕ: после удаления канала владельцем — назад в список чатов.
                 onChannelDeleted = {
                     navController.navigate(Routes.ChatList.route) {
@@ -286,6 +289,9 @@ fun YodoNavGraph(
                     navController.navigate(Routes.ChatList.route) {
                         popUpTo(Routes.ChatList.route) { inclusive = true }
                     }
+                },
+                onOpenManageRoles = { chatId ->
+                    navController.navigate(Routes.ManageRoles.createRoute(chatId))
                 }
             )
         }
@@ -294,6 +300,51 @@ fun YodoNavGraph(
             arguments = listOf(navArgument(Routes.ChatStats.ARG_CHAT_ID) { type = NavType.StringType })
         ) {
             ChatStatsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (система ролей с гранулярными правами): управление ролями участников.
+        composable(
+            route = Routes.ManageRoles.route,
+            arguments = listOf(navArgument(Routes.ManageRoles.ARG_CHAT_ID) { type = NavType.StringType })
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString(Routes.ManageRoles.ARG_CHAT_ID).orEmpty()
+            app.yodo.messenger.features.chats.ManageRolesScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenAdminLog = { navController.navigate(Routes.AdminLog.createRoute(chatId)) },
+                onOpenReportQueue = { navController.navigate(Routes.ReportQueue.createRoute(chatId)) }
+            )
+        }
+        // НОВОЕ (журнал действий администраторов): просмотр и фильтрация лога.
+        composable(
+            route = Routes.AdminLog.route,
+            arguments = listOf(navArgument(Routes.AdminLog.ARG_CHAT_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.chats.AdminLogScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (система жалоб с очередью, п.5 ТЗ): очередь жалоб и детальный просмотр.
+        composable(
+            route = Routes.ReportQueue.route,
+            arguments = listOf(navArgument(Routes.ReportQueue.ARG_CHAT_ID) { type = NavType.StringType })
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString(Routes.ReportQueue.ARG_CHAT_ID).orEmpty()
+            app.yodo.messenger.features.chats.ReportQueueScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenReport = { reportId ->
+                    navController.navigate(Routes.ReportDetail.createRoute(chatId, reportId))
+                }
+            )
+        }
+        composable(
+            route = Routes.ReportDetail.route,
+            arguments = listOf(
+                navArgument(Routes.ReportDetail.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument(Routes.ReportDetail.ARG_REPORT_ID) { type = NavType.StringType }
+            )
+        ) {
+            app.yodo.messenger.features.chats.ReportDetailScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }

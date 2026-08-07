@@ -68,4 +68,24 @@ sealed class Routes(val route: String) {
         const val ARG_USER_ID = "userId"
     }
     data object ImageViewer : Routes("image_viewer")
+
+    // НОВОЕ (система ролей + журнал администраторов):
+    data object ManageRoles : Routes("manage_roles/{chatId}") {
+        fun createRoute(chatId: String) = "manage_roles/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    data object AdminLog : Routes("admin_log/{chatId}") {
+        fun createRoute(chatId: String) = "admin_log/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    // НОВОЕ (система жалоб с очередью, п.5 ТЗ):
+    data object ReportQueue : Routes("report_queue/{chatId}") {
+        fun createRoute(chatId: String) = "report_queue/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    data object ReportDetail : Routes("report_detail/{chatId}/{reportId}") {
+        fun createRoute(chatId: String, reportId: String) = "report_detail/$chatId/$reportId"
+        const val ARG_CHAT_ID = "chatId"
+        const val ARG_REPORT_ID = "reportId"
+    }
 }

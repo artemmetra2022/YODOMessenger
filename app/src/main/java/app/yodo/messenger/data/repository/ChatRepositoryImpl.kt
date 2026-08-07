@@ -2,9 +2,17 @@ package app.yodo.messenger.data.repository
 
 import android.graphics.Bitmap
 import app.yodo.messenger.core.util.toUserMessage
+import app.yodo.messenger.domain.model.AdminActionType
+import app.yodo.messenger.domain.model.AdminLogEntry
+import app.yodo.messenger.domain.model.AdminLogFilter
+import app.yodo.messenger.domain.model.AssignedRole
+import app.yodo.messenger.domain.model.BuiltInRole
 import app.yodo.messenger.domain.model.ChannelProfile
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
+import app.yodo.messenger.domain.model.CustomRole
+import app.yodo.messenger.domain.model.MemberPermissions
+import app.yodo.messenger.domain.model.Permission
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
 import app.yodo.messenger.domain.repository.ChannelUpdateResult
@@ -487,6 +495,9 @@ class ChatRepositoryImpl @Inject constructor(
         try {
             firestore.collection("chats").document(chatId)
                 .update("adminIds", FieldValue.arrayUnion(userId)).await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.ADMIN_ADDED, targetUserId = userId, targetUserName = targetName)
         } catch (e: Exception) { }
     }
 
@@ -494,6 +505,9 @@ class ChatRepositoryImpl @Inject constructor(
         try {
             firestore.collection("chats").document(chatId)
                 .update("adminIds", FieldValue.arrayRemove(userId)).await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.ADMIN_REMOVED, targetUserId = userId, targetUserName = targetName)
         } catch (e: Exception) { }
     }
 
@@ -560,6 +574,7 @@ class ChatRepositoryImpl @Inject constructor(
                     "description" to description.trim()
                 )
             ).await()
+            logAdminAction(chatId, AdminActionType.CHAT_INFO_CHANGED, details = "Название: $trimmed")
             ChannelUpdateResult.Success
         } catch (e: Exception) {
             ChannelUpdateResult.Error(e.toUserMessage("Не удалось сохранить изменения"))
@@ -713,5 +728,295 @@ class ChatRepositoryImpl @Inject constructor(
                 chatRef.update("disappearingTtlSeconds", ttlSeconds).await()
             }
         } catch (e: Exception) { }
+    }
+
+    // === НОВОЕ (система ролей с гранулярными правами, п.1 ТЗ) ===
+    //
+    // Схема хранения в Firestore, документ chats/{chatId}:
+    //   roles: Map<userId, Map{ "builtIn": String?, "customRoleId": String? }>
+    //   customRoles: Map<roleId, Map{ "name": String, "permissions": List<String>, "colorHex": String }>
+    // Владелец (createdBy) всегда имеет полный набор прав и не хранится в roles.
+
+    private fun parseCustomRole(id: String, data: Map<*, *>): CustomRole {
+        val name = data["name"] as? String ?: "Роль"
+        val perms = (data["permissions"] as? List<*>)?.filterIsInstance<String>()
+            ?.mapNotNull { runCatching { Permission.valueOf(it) }.getOrNull() }
+            ?.toSet() ?: emptySet()
+        val color = data["colorHex"] as? String ?: "#FF7C4DFF"
+        return CustomRole(id = id, name = name, permissions = perms, colorHex = color)
+    }
+
+    override suspend fun getCustomRoles(chatId: String): List<CustomRole> {
+        return try {
+            val doc = firestore.collection("chats").document(chatId).get().await()
+            val map = doc.get("customRoles") as? Map<*, *> ?: return emptyList()
+            map.entries.mapNotNull { (key, value) ->
+                val id = key as? String ?: return@mapNotNull null
+                val data = value as? Map<*, *> ?: return@mapNotNull null
+                parseCustomRole(id, data)
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    override suspend fun getAssignedRoles(chatId: String): List<AssignedRole> {
+        return try {
+            val doc = firestore.collection("chats").document(chatId).get().await()
+            val map = doc.get("roles") as? Map<*, *> ?: return emptyList()
+            map.entries.mapNotNull { (key, value) ->
+                val userId = key as? String ?: return@mapNotNull null
+                val data = value as? Map<*, *> ?: return@mapNotNull null
+                val builtInName = data["builtIn"] as? String
+                val builtIn = builtInName?.let { runCatching { BuiltInRole.valueOf(it) }.getOrNull() }
+                val customRoleId = data["customRoleId"] as? String
+                AssignedRole(userId = userId, builtIn = builtIn, customRoleId = customRoleId)
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    override suspend fun getMemberPermissions(chatId: String, userId: String): MemberPermissions {
+        return try {
+            val doc = firestore.collection("chats").document(chatId).get().await()
+            if (doc.getString("createdBy") == userId) {
+                return MemberPermissions(
+                    userId = userId,
+                    roleName = BuiltInRole.OWNER.displayName,
+                    isOwner = true,
+                    permissions = Permission.entries.toSet()
+                )
+            }
+            val rolesMap = doc.get("roles") as? Map<*, *>
+            val assignment = rolesMap?.get(userId) as? Map<*, *>
+                ?: return MemberPermissions(userId, "Участник", false, emptySet())
+            val customRoleId = assignment["customRoleId"] as? String
+            if (customRoleId != null) {
+                val customRolesMap = doc.get("customRoles") as? Map<*, *>
+                val roleData = customRolesMap?.get(customRoleId) as? Map<*, *>
+                val role = roleData?.let { parseCustomRole(customRoleId, it) }
+                return MemberPermissions(
+                    userId = userId,
+                    roleName = role?.name ?: "Роль",
+                    isOwner = false,
+                    permissions = role?.permissions ?: emptySet()
+                )
+            }
+            val builtInName = assignment["builtIn"] as? String
+            val builtIn = builtInName?.let { runCatching { BuiltInRole.valueOf(it) }.getOrNull() }
+            MemberPermissions(
+                userId = userId,
+                roleName = builtIn?.displayName ?: "Участник",
+                isOwner = false,
+                permissions = builtIn?.let { Permission.defaultSetFor(it) } ?: emptySet()
+            )
+        } catch (e: Exception) {
+            MemberPermissions(userId, "Участник", false, emptySet())
+        }
+    }
+
+    override suspend fun assignBuiltInRole(chatId: String, userId: String, role: BuiltInRole): ChannelUpdateResult {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("roles.$userId", mapOf("builtIn" to role.name, "customRoleId" to null)).await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.ROLE_ASSIGNED, details = role.displayName, targetUserId = userId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось назначить роль"))
+        }
+    }
+
+    override suspend fun assignCustomRole(chatId: String, userId: String, customRoleId: String): ChannelUpdateResult {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("roles.$userId", mapOf("builtIn" to null, "customRoleId" to customRoleId)).await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            val roleName = getCustomRoles(chatId).firstOrNull { it.id == customRoleId }?.name ?: "Роль"
+            logAdminAction(chatId, AdminActionType.ROLE_ASSIGNED, details = roleName, targetUserId = userId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось назначить роль"))
+        }
+    }
+
+    override suspend fun revokeRole(chatId: String, userId: String): ChannelUpdateResult {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("roles.$userId", FieldValue.delete()).await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.ROLE_REMOVED, targetUserId = userId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось снять роль"))
+        }
+    }
+
+    override suspend fun createCustomRole(chatId: String, name: String, permissions: Set<Permission>): ChannelUpdateResult {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return ChannelUpdateResult.Error("Введите название роли")
+        return try {
+            val roleId = firestore.collection("chats").document().id
+            val data = mapOf(
+                "name" to trimmed,
+                "permissions" to permissions.map { it.name },
+                "colorHex" to "#FF7C4DFF"
+            )
+            firestore.collection("chats").document(chatId)
+                .update("customRoles.$roleId", data).await()
+            logAdminAction(chatId, AdminActionType.CUSTOM_ROLE_CREATED, details = trimmed)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось создать роль"))
+        }
+    }
+
+    override suspend fun updateCustomRole(chatId: String, roleId: String, name: String, permissions: Set<Permission>): ChannelUpdateResult {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return ChannelUpdateResult.Error("Введите название роли")
+        return try {
+            val data = mapOf(
+                "name" to trimmed,
+                "permissions" to permissions.map { it.name },
+                "colorHex" to "#FF7C4DFF"
+            )
+            firestore.collection("chats").document(chatId)
+                .update("customRoles.$roleId", data).await()
+            logAdminAction(chatId, AdminActionType.CUSTOM_ROLE_EDITED, details = trimmed)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось изменить роль"))
+        }
+    }
+
+    override suspend fun deleteCustomRole(chatId: String, roleId: String): ChannelUpdateResult {
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val doc = chatRef.get().await()
+            val roleName = (doc.get("customRoles") as? Map<*, *>)
+                ?.get(roleId)?.let { (it as? Map<*, *>)?.get("name") as? String } ?: "Роль"
+            // Снимаем эту роль у всех, кому она была назначена, чтобы не остались "битые" ссылки.
+            val rolesMap = doc.get("roles") as? Map<*, *> ?: emptyMap<String, Any>()
+            val affectedUserIds = rolesMap.entries.filter { (_, value) ->
+                (value as? Map<*, *>)?.get("customRoleId") == roleId
+            }.mapNotNull { it.key as? String }
+            val batch = firestore.batch()
+            batch.update(chatRef, "customRoles.$roleId", FieldValue.delete())
+            affectedUserIds.forEach { uid -> batch.update(chatRef, "roles.$uid", FieldValue.delete()) }
+            batch.commit().await()
+            logAdminAction(chatId, AdminActionType.CUSTOM_ROLE_DELETED, details = roleName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось удалить роль"))
+        }
+    }
+
+    // === НОВОЕ (журнал действий администраторов, п.2 ТЗ) ===
+    //
+    // Подколлекция chats/{chatId}/adminLog. Каждая запись — одно действие.
+    // Композитные индексы для фильтрации заданы в firestore.indexes.json.
+
+    override suspend fun logAdminAction(
+        chatId: String,
+        actionType: AdminActionType,
+        details: String,
+        targetUserId: String?,
+        targetUserName: String?
+    ) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        try {
+            val actorName = firestore.collection("users").document(uid).get().await()
+                .getString("displayName") ?: "Пользователь"
+            val entry = mapOf(
+                "actorId" to uid,
+                "actorName" to actorName,
+                "actionType" to actionType.name,
+                "details" to details,
+                "targetUserId" to targetUserId,
+                "targetUserName" to targetUserName,
+                "timestamp" to System.currentTimeMillis()
+            )
+            firestore.collection("chats").document(chatId)
+                .collection("adminLog").add(entry).await()
+        } catch (e: Exception) { }
+    }
+
+    override suspend fun getAdminLog(
+        chatId: String,
+        filter: AdminLogFilter,
+        limit: Int,
+        startAfterTimestamp: Long?
+    ): List<AdminLogEntry> {
+        return try {
+            var query: Query = firestore.collection("chats").document(chatId)
+                .collection("adminLog")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+            filter.actionType?.let { query = query.whereEqualTo("actionType", it.name) }
+            filter.actorId?.let { query = query.whereEqualTo("actorId", it) }
+            filter.fromMillis?.let { query = query.whereGreaterThanOrEqualTo("timestamp", it) }
+            filter.toMillis?.let { query = query.whereLessThanOrEqualTo("timestamp", it) }
+            startAfterTimestamp?.let { query = query.startAfter(it) }
+            query = query.limit(limit.toLong())
+            val snapshot = query.get().await()
+            snapshot.documents.mapNotNull { doc ->
+                val actionTypeName = doc.getString("actionType") ?: return@mapNotNull null
+                val actionType = runCatching { AdminActionType.valueOf(actionTypeName) }.getOrNull()
+                    ?: return@mapNotNull null
+                AdminLogEntry(
+                    id = doc.id,
+                    chatId = chatId,
+                    actorId = doc.getString("actorId") ?: "",
+                    actorName = doc.getString("actorName") ?: "Пользователь",
+                    actionType = actionType,
+                    details = doc.getString("details").orEmpty(),
+                    targetUserId = doc.getString("targetUserId"),
+                    targetUserName = doc.getString("targetUserName"),
+                    timestamp = doc.getLong("timestamp") ?: 0L
+                )
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    // === НОВОЕ (система жалоб, п.5 ТЗ): бан участника чата/канала ===
+    //
+    // bannedUserIds хранится отдельным полем (не в participantIds), чтобы после разбана
+    // можно было восстановить факт "когда-то был участником" при необходимости; здесь же
+    // забаненный сразу удаляется из participantIds, теряя доступ к чату.
+
+    override suspend fun banMember(chatId: String, userId: String): ChannelUpdateResult {
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val batch = firestore.batch()
+            batch.update(chatRef, "bannedUserIds", FieldValue.arrayUnion(userId))
+            batch.update(chatRef, "participantIds", FieldValue.arrayRemove(userId))
+            batch.update(chatRef, "adminIds", FieldValue.arrayRemove(userId))
+            batch.commit().await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.USER_BANNED, targetUserId = userId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось забанить пользователя"))
+        }
+    }
+
+    override suspend fun unbanMember(chatId: String, userId: String): ChannelUpdateResult {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("bannedUserIds", FieldValue.arrayRemove(userId)).await()
+            val targetName = firestore.collection("users").document(userId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.USER_UNBANNED, targetUserId = userId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось разбанить пользователя"))
+        }
+    }
+
+    override suspend fun getBannedMemberIds(chatId: String): List<String> {
+        return try {
+            val doc = firestore.collection("chats").document(chatId).get().await()
+            (doc.get("bannedUserIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+        } catch (e: Exception) { emptyList() }
     }
 }
