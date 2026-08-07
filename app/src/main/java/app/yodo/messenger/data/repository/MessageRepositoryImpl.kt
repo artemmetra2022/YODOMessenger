@@ -107,7 +107,7 @@ class MessageRepositoryImpl @Inject constructor(
             }
             chatRef.update(unreadUpdates).await()
             SendMessageResult.Success(messageId = newDocRef.id)
-        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отправить сообщение")) }
+        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не ��далось отправить сообщение")) }
     }
 
     override suspend fun sendMessage(
@@ -226,13 +226,19 @@ class MessageRepositoryImpl @Inject constructor(
         options: List<String>,
         isAnonymous: Boolean,
         allowMultipleAnswers: Boolean,
-        closesAtMillis: Long?
+        closesAtMillis: Long?,
+        isQuiz: Boolean,
+        correctOptionIndex: Int?,
+        explanation: String?
     ): SendMessageResult {
         val trimmedQuestion = question.trim()
         val cleanOptions = options.map { it.trim() }.filter { it.isNotEmpty() }
         if (trimmedQuestion.isEmpty()) return SendMessageResult.Error("Введите вопрос опроса")
         if (cleanOptions.size < 2) return SendMessageResult.Error("Добавьте минимум 2 варианта ответа")
         if (cleanOptions.size > 10) return SendMessageResult.Error("Максимум 10 вариантов ответа")
+        if (isQuiz && (correctOptionIndex == null || correctOptionIndex !in cleanOptions.indices)) {
+            return SendMessageResult.Error("Укажите правильный вариант ответа для викторины")
+        }
 
         val pollMap = mutableMapOf<String, Any?>(
             "question" to trimmedQuestion,
@@ -240,9 +246,14 @@ class MessageRepositoryImpl @Inject constructor(
             "votesByOption" to emptyMap<String, List<String>>(),
             "isAnonymous" to isAnonymous,
             "allowMultipleAnswers" to allowMultipleAnswers,
-            "isClosed" to false
+            "isClosed" to false,
+            "isQuiz" to isQuiz
         )
         closesAtMillis?.let { pollMap["closesAt"] = it }
+        if (isQuiz) {
+            correctOptionIndex?.let { pollMap["correctOptionIndex"] = it }
+            explanation?.trim()?.takeIf { it.isNotEmpty() }?.let { pollMap["explanation"] = it }
+        }
 
         val data = mutableMapOf<String, Any?>(
             "text" to "",

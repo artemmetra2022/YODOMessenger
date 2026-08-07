@@ -28,6 +28,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -269,7 +271,7 @@ class ChatRepositoryImpl @Inject constructor(
                     // старте — с 10 чатами выходит легко в секунду-две задержки перед тем как
                     // список вообще закончит рендериться с корректными аватарками.
                     val jobs = missingIds.map { otherId ->
-                        kotlinx.coroutines.async {
+                        async {
                             try {
                                 val otherDoc = firestore.collection("users").document(otherId).get().await()
                                 avatarCache[otherId] = Triple(

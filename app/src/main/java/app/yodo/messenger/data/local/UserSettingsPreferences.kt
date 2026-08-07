@@ -102,7 +102,9 @@ class UserSettingsPreferences @Inject constructor(
     val notificationVibration: Flow<Boolean> = context.settingsDataStore.data.map { it[notificationVibrationKey] ?: true }
     val muteAllNotifications: Flow<Boolean> = context.settingsDataStore.data.map { it[muteAllNotificationsKey] ?: false }
     val hideKeyboardOnSend: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnSendKey] ?: true }
-    val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: false }
+    // НОВОЕ: расширенные опросы (включая викторины) включены по умолчанию —
+    // пользователю не нужно включать их вручную в настройках.
+    val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: true }
 
     val pinRequirement: Flow<PinRequirement> = context.settingsDataStore.data.map { prefs ->
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER

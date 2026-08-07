@@ -121,6 +121,10 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.3.4")
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
+    // НОВОЕ (офлайн обмен контактами по QR): полноценный Guava, а не только пустышка
+    // listenablefuture:1.0 — иначе Kotlin не может разрешить тип ListenableFuture,
+    // который возвращает ProcessCameraProvider.getInstance(...) из camera-lifecycle.
+    implementation("com.google.guava:guava:31.0.1-android")
 
     // Firebase (Auth / FCM / Storage) — временный backend до готовности своего сервера
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
