@@ -1,82 +1,158 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
+    // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
+    // сразу после полноэкранного просмотра — иначе фото так и останется читаемым на
+    // сервере. Разрешаем ТОЛЬКО такое узкое обновление: сообщение уже было view-once
+    // и ещё не открыто, изменяются исключительно поля imageBase64 (стирается) и
+    // viewOnceOpened (ставится в true), автор/текст/время и т.п. остаются нетронутыми.
+    function isViewOnceOpenUpdate() {
+      return isSignedIn() &&
+        resource.data.isViewOnce == true &&
+        resource.data.viewOnceOpened != true &&
+        request.resource.data.viewOnceOpened == true &&
+        !("imageBase64" in request.resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["imageBase64", "viewOnceOpened"]);
+    }
+
+    function isOfficialChannelAdmin() {
+      // Только два доверенных email-адреса (аккаунты создателей приложения)
+      // могут писать в официальный канал рассылок.
+      return isSignedIn() &&
+        request.auth.token.email.lower() in
+          ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru'];
+    }
+
     match /users/{userId} {
-      // Публичное чтение нужно для входа по username (email резолвится ДО авторизации
-      // в FirebaseAuth) и для профилей пользователей. Секретных полей (пароль и т.п.)
-      // в этой коллекции нет — пароли хранит сам Firebase Auth, а не Firestore.
+      // Публичное чтение нужно для входа по username (email резолвится ДО
+      // авторизации в FirebaseAuth) и для профилей пользователей.
+      // ВАЖНО: секретные/чувствительные поля (в т.ч. twoFactor.hash/salt)
+      // больше НЕ хранятся в этом документе — см. подколлекцию /security ниже.
       allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      // Дополнительно запрещаем клиенту писать поле twoFactor напрямую сюда,
+      // даже владельцу документа — 2FA обслуживается только через /security.
+      allow write: if isSignedIn() && request.auth.uid == userId &&
+        !("twoFactor" in request.resource.data);
 
       // Сессии (устройства) — только владелец аккаунта может читать и писать.
       match /sessions/{sessionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // НОВОЕ: приватные данные пользователя, которые нельзя раскрывать
+      // публично (в частности PBKDF2 hash/salt второго пароля, 2FA).
+      // Читать и писать может только сам владелец аккаунта.
+      match /security/{docId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
     }
+
     match /posts/{postId} {
-      // Посты стены профиля — читают все авторизованные пользователи (лента видна
-      // на чужих профилях так же, как на своём); создавать/менять/удалять может
-      // только автор поста, и только от своего имени (authorId == uid).
-      allow read: if request.auth != null;
-      allow create: if request.auth != null &&
+      // Посты стены профиля — читают все авторизованные пользователи (лента
+      // видна на чужих профилях так же, как на своём); создавать/менять/
+      // удалять может только автор поста, и только от своего имени.
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
         request.auth.uid == request.resource.data.authorId;
-      allow update, delete: if request.auth != null &&
+      allow update, delete: if isSignedIn() &&
         request.auth.uid == resource.data.authorId;
     }
-    match /usernames/{username} {
-      // Хранит только { uid }, публичное чтение необходимо, чтобы найти email
-      // по username при входе (до того, как пользователь аутентифицирован).
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    match /chats/{chatId} {
-      // п.41: официальный канал YodoMessenger должен быть виден и открываем ВСЕМ
-      // авторизованным пользователям (это рассылка от админов, а не приватный чат),
-      // поэтому для него read разрешён всем, а не только участникам participantIds.
-      // Писать в сам документ чата (title, lastMessage и т.п.) могут только админы канала.
-      allow read: if request.auth != null &&
-        (chatId == 'yodo_official_channel' || request.auth.uid in resource.data.participantIds);
-      allow write: if request.auth != null &&
-        (chatId == 'yodo_official_channel'
-          ? request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']
-          : request.auth.uid in resource.data.participantIds);
-      allow create: if request.auth != null;
 
-      // НОВОЕ (журнал действий администраторов): читать лог могут только участники
-      // чата (право VIEW_ADMIN_LOG проверяется на клиенте/во ViewModel по данным
-      // из roles/customRoles — здесь на уровне правил гарантируем только принадлежность
-      // к чату). Писать может любой участник, т.к. запись всегда делается от имени
-      // авторизованного actorId сразу после выполненного им действия, ограниченного
-      // отдельными правилами на изменение chats/{chatId} (roles, adminIds и т.д.).
+    match /usernames/{username} {
+      // Хранит только { uid }, публичное чтение необходимо, чтобы найти
+      // email по username при входе (до того, как пользователь
+      // аутентифицирован).
+      // Запись разрешена, только если создаваемая/изменяемая запись
+      // указывает на самого вызывающего — иначе любой авторизованный
+      // пользователь мог бы переписать чужой username → uid маппинг.
+      allow read: if true;
+      allow create, update: if isSignedIn() &&
+        request.resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn() &&
+        resource.data.uid == request.auth.uid;
+    }
+
+    match /chats/{chatId} {
+      // п.41: официальный канал YodoMessenger должен быть виден и открываем
+      // ВСЕМ авторизованным пользователям (это рассылка от админов, а не
+      // приватный чат), поэтому для него read разрешён всем участникам,
+      // а не только participantIds. Писать в сам документ чата (title,
+      // lastMessage и т.п.) могут только админы канала.
+      allow read: if isSignedIn() &&
+        (chatId == 'yodo_official_channel' || request.auth.uid in resource.data.participantIds);
+
+      allow create: if isSignedIn();
+
+      // Обновление документа чата разбито на два случая:
+      //  - официальный канал: только два доверенных админ-аккаунта;
+      //  - обычный чат: участник может обновлять чат, НО не может сам себе
+      //    (или кому-либо ещё) изменить поля roles/adminIds/customRoles —
+      //    эти поля меняются только владельцем чата (createdBy) либо
+      //    пользователем, уже присутствующим в adminIds. Это закрывает
+      //    возможность обычного участника назначить себя администратором
+      //    напрямую через Firestore SDK, в обход клиентских проверок прав.
+      allow update: if isSignedIn() &&
+        (chatId == 'yodo_official_channel'
+          ? isOfficialChannelAdmin()
+          : (
+              request.auth.uid in resource.data.participantIds &&
+              (
+                // Поля управления доступом не меняются в этом запросе —
+                // обычное редактирование чата (сообщения, черновики и т.д.)
+                !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['roles', 'adminIds', 'customRoles', 'participantIds'])
+                ||
+                // ...либо меняет их владелец чата или уже действующий админ.
+                request.auth.uid == resource.data.createdBy ||
+                request.auth.uid in (resource.data.adminIds is list ? resource.data.adminIds : [])
+              )
+            )
+        );
+
+      allow delete: if isSignedIn() &&
+        chatId != 'yodo_official_channel' &&
+        request.auth.uid == resource.data.createdBy;
+
+      // Журнал действий администраторов: читать могут только участники чата
+      // (право VIEW_ADMIN_LOG дополнительно проверяется на клиенте по
+      // roles/customRoles — здесь на уровне правил гарантируем только
+      // принадлежность к чату). Писать может только сам участник от своего
+      // имени, сразу после выполненного им действия.
       match /adminLog/{logId} {
-        allow read: if request.auth != null &&
+        allow read: if isSignedIn() &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
-        allow create: if request.auth != null &&
+        allow create: if isSignedIn() &&
           request.auth.uid == request.resource.data.actorId &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
         allow update, delete: if false;
       }
 
-      // НОВОЕ (система жалоб, п.5 ТЗ): жалобы видны только участникам чата (очередь
-      // рассматривают админы — их право проверяется во ViewModel по roles/adminIds,
-      // здесь на уровне правил гарантируем только принадлежность к чату). Подать жалобу
-      // может любой участник от своего имени; редактировать статус/решение может только
-      // тот, кто уже указан как reviewedBy при create, либо любой участник при update —
-      // финальная проверка прав администратора выполняется в приложении перед вызовом.
+      // Система жалоб (п.5 ТЗ): жалобы видны только участникам чата (очередь
+      // рассматривают админы — их право проверяется во ViewModel по
+      // roles/adminIds, здесь на уровне правил гарантируем только
+      // принадлежность к чату). Подать жалобу может любой участник от
+      // своего имени.
       match /reports/{reportId} {
-        allow read: if request.auth != null &&
+        allow read: if isSignedIn() &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
-        allow create: if request.auth != null &&
+        allow create: if isSignedIn() &&
           request.auth.uid == request.resource.data.reporterId &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
-        allow update: if request.auth != null &&
+        allow update: if isSignedIn() &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
         allow delete: if false;
 
         match /comments/{commentId} {
-          allow read: if request.auth != null &&
+          allow read: if isSignedIn() &&
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
-          allow create: if request.auth != null &&
+          allow create: if isSignedIn() &&
             request.auth.uid == request.resource.data.authorId &&
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
           allow update, delete: if false;
@@ -84,15 +160,24 @@ service cloud.firestore {
       }
 
       match /messages/{messageId} {
-        // Сообщения официального канала читают все, но отправлять (create) в него
-        // могут только два админа; редактировать/удалять свои сообщения — тоже только они.
-        allow read: if request.auth != null;
-        allow create: if request.auth != null &&
-          (chatId != 'yodo_official_channel' ||
-            request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']);
-        allow update, delete: if request.auth != null &&
-          (chatId != 'yodo_official_channel' ||
-            request.auth.token.email.lower() in ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru']);
+        // Сообщения официального канала читают все, но отправлять (create)
+        // в него могут только два админа.
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          (chatId != 'yodo_official_channel' || isOfficialChannelAdmin()) &&
+          // Отправитель сообщения обязан совпадать с текущим пользователем —
+          // запрещает отправку сообщений от чужого имени.
+          request.auth.uid == request.resource.data.senderId;
+
+        // Редактировать/удалять сообщение может только его автор
+        // (senderId == текущий пользователь), либо один из двух
+        // администраторов — если это официальный канал.
+        allow update, delete: if isSignedIn() &&
+          (
+            (chatId == 'yodo_official_channel' && isOfficialChannelAdmin()) ||
+            (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||
+            isViewOnceOpenUpdate()
+          );
       }
     }
   }

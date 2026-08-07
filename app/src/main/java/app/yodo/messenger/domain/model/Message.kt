@@ -31,12 +31,18 @@ data class Message(
     // НОВОЕ (переработка каналов): число комментариев под постом канала.
     val commentsCount: Int = 0,
     // НОВОЕ (опросы): если не null — это сообщение-опрос.
-    val poll: Poll? = null
+    val poll: Poll? = null,
+    // НОВОЕ (одноразовые медиа): фото "на один просмотр" — как только получатель открыл его
+    // полноэкранно один раз, imageBase64 удаляется на сервере (см. MessageRepositoryImpl.
+    // markViewOnceImageOpened) и локально показывается только заглушка "Фото открыто".
+    val isViewOnce: Boolean = false,
+    val viewOnceOpened: Boolean = false
 ) {
     fun previewText(): String = when {
         text.isNotBlank() -> text
         poll != null -> "📊 ${poll.question}"
         voiceBase64 != null -> "Голосовое сообщение"
+        isViewOnce -> if (viewOnceOpened) "Фото открыто" else "📷 Фото (один просмотр)"
         imageBase64 != null -> "Картинка"
         locationLat != null && locationLng != null -> "Геопозиция"
         fileBase64 != null || fileName != null -> "📎 ${fileName ?: "Файл"}"

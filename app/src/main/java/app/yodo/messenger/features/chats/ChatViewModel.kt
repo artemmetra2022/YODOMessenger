@@ -458,13 +458,21 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun sendImage(base64: String) {
+    fun sendImage(base64: String, isViewOnce: Boolean = false) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendImageMessage(chatId, base64)) {
+            when (val result = messageRepository.sendImageMessage(chatId, base64, isViewOnce = isViewOnce)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
+        }
+    }
+
+    // НОВОЕ (одноразовые медиа): вызывается экраном сразу после полноэкранного показа
+    // view-once фото — стирает imageBase64 на сервере, чтобы повторно открыть было нельзя.
+    fun markViewOnceImageOpened(messageId: String) {
+        viewModelScope.launch {
+            messageRepository.markViewOnceImageOpened(chatId, messageId)
         }
     }
 

@@ -84,6 +84,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Photo
+import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
@@ -239,15 +240,25 @@ fun ChatScreen(
         }
     }
 
+    // НОВОЕ (одноразовые медиа): true, если следующее выбранное фото нужно отправить как
+    // "на один просмотр" — флаг выставляется перед запуском imagePicker в AttachMenuDialog
+    // и сбрасывается сразу после отправки.
+    var pendingImageIsViewOnce by remember { mutableStateOf(false) }
+    // НОВОЕ (одноразовые медиа): id сообщения, чьё view-once фото сейчас показано на весь
+    // экран поверх чата. Null — оверлей закрыт.
+    var viewOnceOverlayMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
+
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
+            val asViewOnce = pendingImageIsViewOnce
+            pendingImageIsViewOnce = false
             coroutineScope.launch {
                 val base64 = withContext(Dispatchers.Default) {
                     ImageUtils.compressChatImageToBase64(context, it)
                 }
-                if (base64 != null) viewModel.sendImage(base64)
+                if (base64 != null) viewModel.sendImage(base64, isViewOnce = asViewOnce)
                 else snackbarHostState.showSnackbar("Не удалось обработать фото")
             }
         }
@@ -897,6 +908,12 @@ fun ChatScreen(
                             onDismiss = { showAttachMenu = false },
                             onPickPhoto = {
                                 showAttachMenu = false
+                                pendingImageIsViewOnce = false
+                                imagePicker.launch("image/*")
+                            },
+                            onPickViewOncePhoto = {
+                                showAttachMenu = false
+                                pendingImageIsViewOnce = true
                                 imagePicker.launch("image/*")
                             },
                             onPickFile = {
@@ -1025,6 +1042,14 @@ fun ChatScreen(
                                 onImageClick = { base64 ->
                                     onOpenImageViewer(base64, uiState.chatTitle, message.timestamp)
                                 },
+                                // НОВОЕ (одноразовые медиа): открываем фото в оверлее ПОВЕРХ
+                                // чата (не через onOpenImageViewer/навигацию — там есть общий
+                                // держатель картинки и повторные открытия), и только для чужих
+                                // сообщений своей же отправки не помечаем "открыто", т.к. это
+                                // сделает получатель на своём устройстве.
+                                onViewOnceClick = { msg ->
+                                    if (msg.imageBase64 != null) viewOnceOverlayMessage = msg
+                                },
                                 onReplyQuoteClick = { targetMessageId ->
                                     val targetIndex = displayedMessages.indexOfFirst { it.id == targetMessageId }
                                     if (targetIndex >= 0) {
@@ -1055,6 +1080,66 @@ fun ChatScreen(
                 coroutineScope.launch { snackbarHostState.showSnackbar("Жалоба отправлена") }
             }
         )
+    }
+
+    // НОВОЕ (одноразовые медиа): полноэкранный показ view-once фото поверх чата.
+    // Не переиспользует ImageViewerHolder/ImageViewerScreen намеренно — там доступны
+    // сохранение/шеринг и повторный показ, а у view-once фото не должно быть ни того,
+    // ни другого. Как только пользователь открыл экран, сразу помечаем сообщение как
+    // просмотренное и стираем imageBase64 на сервере — повторно открыть уже нельзя,
+    // в т.ч. если сообщение отправил сам пользователь себе на другое устройство.
+    viewOnceOverlayMessage?.let { msg ->
+        ViewOnceImageOverlay(
+            imageBase64 = msg.imageBase64,
+            onOpened = {
+                if (!msg.viewOnceOpened) viewModel.markViewOnceImageOpened(msg.id)
+            },
+            onDismiss = { viewOnceOverlayMessage = null }
+        )
+    }
+}
+
+@Composable
+private fun ViewOnceImageOverlay(
+    imageBase64: String?,
+    onOpened: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Помечаем как открытое ровно один раз, сразу при показе оверлея (не при закрытии) —
+    // так фото стирается на сервере, даже если пользователь свернёт приложение до того,
+    // как явно закроет полноэкранный просмотр.
+    LaunchedEffect(imageBase64) { onOpened() }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            val bitmap = remember(imageBase64) { imageBase64?.let { ImageUtils.decodeBase64ToBitmap(it) } }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Фото на один просмотр",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Закрыть", tint = Color.White)
+            }
+            Text(
+                "Это фото исчезнет после закрытия",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp)
+            )
+        }
     }
 }
 
@@ -1096,6 +1181,7 @@ private fun SwipeableMessageBubble(
     onVotePoll: (Int) -> Unit,
     onClosePoll: () -> Unit,
     onImageClick: (String) -> Unit,
+    onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit,
     onSwipeBack: () -> Unit
@@ -1118,7 +1204,9 @@ private fun SwipeableMessageBubble(
                         when {
                             offsetX > replyThresholdPx -> onReply()
                             offsetX < -forwardZoneEndPx -> onSwipeBack()
-                            offsetX < 0f -> onForward()
+                            // НОВОЕ (одноразовые медиа): свайп-пересылка недоступна для
+                            // view-once сообщений — см. запрет в DropdownMenuItem выше.
+                            offsetX < 0f && !message.isViewOnce -> onForward()
                         }
                         offsetX = 0f
                     },
@@ -1156,7 +1244,8 @@ private fun SwipeableMessageBubble(
                 onSaveToFavorite = onSaveToFavorite,
                 onVotePoll = onVotePoll,
                 onClosePoll = onClosePoll,
-                onImageClick = onImageClick, onReplyQuoteClick = onReplyQuoteClick,
+                onImageClick = onImageClick, onViewOnceClick = onViewOnceClick,
+                onReplyQuoteClick = onReplyQuoteClick,
                 onForwardedSenderClick = onForwardedSenderClick
             )
         }
@@ -1183,6 +1272,7 @@ private fun MessageBubble(
     onVotePoll: (Int) -> Unit,
     onClosePoll: () -> Unit,
     onImageClick: (String) -> Unit,
+    onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit
 ) {
@@ -1263,23 +1353,23 @@ private fun MessageBubble(
                             Text(replyText.ifBlank { "Картинка" }, style = MaterialTheme.typography.labelMedium, color = textColor.copy(alpha = 0.85f), maxLines = 1)
                         }
                     }
-                    message.imageBase64?.let { base64 ->
-                        if (revealImage) {
-                            val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
-                            bitmap?.let { bmp ->
-                                val aspectRatio = bmp.width.toFloat() / bmp.height.toFloat()
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = "Фото",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .padding(4.dp)
-                                        .widthIn(min = 140.dp, max = 260.dp)
-                                        .heightIn(max = 320.dp)
-                                        .aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 1f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { onImageClick(base64) }
-                                )
+                    if (message.isViewOnce) {
+                        // НОВОЕ (одноразовые медиа): у view-once сообщений своя отрисовка —
+                        // никогда не показываем imageBase64 инлайн в пузыре (только полноэкранно
+                        // через onViewOnceClick), а после открытия показываем серую заглушку.
+                        if (message.viewOnceOpened) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(72.dp)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(textColor.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.RemoveRedEye, contentDescription = null, tint = textColor.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Фото открыто", color = textColor.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         } else {
                             Box(
@@ -1287,9 +1377,45 @@ private fun MessageBubble(
                                     .padding(4.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(textColor.copy(alpha = 0.12f))
-                                    .clickable { revealImage = true },
+                                    .clickable(enabled = message.imageBase64 != null) { onViewOnceClick(message) },
                                 contentAlignment = Alignment.Center
-                            ) { Text("Тап, чтобы загрузить фото", color = textColor) }
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.RemoveRedEye, contentDescription = null, tint = textColor)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Тап, чтобы посмотреть (один раз)", color = textColor)
+                                }
+                            }
+                        }
+                    } else {
+                        message.imageBase64?.let { base64 ->
+                            if (revealImage) {
+                                val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+                                bitmap?.let { bmp ->
+                                    val aspectRatio = bmp.width.toFloat() / bmp.height.toFloat()
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Фото",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .padding(4.dp)
+                                            .widthIn(min = 140.dp, max = 260.dp)
+                                            .heightIn(max = 320.dp)
+                                            .aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 1f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { onImageClick(base64) }
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(120.dp)
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(textColor.copy(alpha = 0.12f))
+                                        .clickable { revealImage = true },
+                                    contentAlignment = Alignment.Center
+                                ) { Text("Тап, чтобы загрузить фото", color = textColor) }
+                            }
                         }
                     }
                     message.voiceBase64?.let { voiceBase64 ->
@@ -1386,11 +1512,17 @@ private fun MessageBubble(
                         )
                     }
                     DropdownMenuItem(text = { Text(if (message.isPinned) "Открепить" else "Закрепить") }, leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) }, onClick = { showMenu = false; onPin() })
-                    DropdownMenuItem(text = { Text("В избранное") }, leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null) }, onClick = { showMenu = false; onSaveToFavorite() })
+                    // НОВОЕ (одноразовые медиа): не даём сохранять view-once фото в избранное.
+                    if (!message.isViewOnce) {
+                        DropdownMenuItem(text = { Text("В избранное") }, leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null) }, onClick = { showMenu = false; onSaveToFavorite() })
+                    }
                     if (message.text.isNotBlank()) {
                         DropdownMenuItem(text = { Text("Копировать") }, leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }, onClick = { showMenu = false; clipboardManager.setText(AnnotatedString(message.text)) })
                     }
-                    DropdownMenuItem(text = { Text("Переслать") }, leadingIcon = { Icon(Icons.Filled.Forward, contentDescription = null) }, onClick = { showMenu = false; onForward() })
+                    // НОВОЕ (одноразовые медиа): фото "на один просмотр" нельзя пересылать.
+                    if (!message.isViewOnce) {
+                        DropdownMenuItem(text = { Text("Переслать") }, leadingIcon = { Icon(Icons.Filled.Forward, contentDescription = null) }, onClick = { showMenu = false; onForward() })
+                    }
                     if (isOwnMessage) {
                         DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
                         DropdownMenuItem(text = { Text("Удалить") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
@@ -2390,6 +2522,7 @@ private fun formatLastSeen(millis: Long): String {
 private fun AttachMenuDialog(
     onDismiss: () -> Unit,
     onPickPhoto: () -> Unit,
+    onPickViewOncePhoto: () -> Unit,
     onPickFile: () -> Unit,
     onPickLocation: () -> Unit,
     onPickPoll: () -> Unit
@@ -2407,6 +2540,9 @@ private fun AttachMenuDialog(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
                 AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото", onClick = onPickPhoto)
+                // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть
+                // полноэкранно только один раз — после этого оно стирается на сервере.
+                AttachMenuRow(icon = Icons.Filled.RemoveRedEye, label = "Фото на один просмотр", onClick = onPickViewOncePhoto)
                 AttachMenuRow(icon = Icons.Filled.InsertDriveFile, label = "Файл", onClick = onPickFile)
                 AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопозиция", onClick = onPickLocation)
                 AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)

@@ -4,6 +4,8 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
+const dns = require("dns").promises;
+const net = require("net");
 
 initializeApp();
 const db = getFirestore();
@@ -114,6 +116,69 @@ const LINK_PREVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 часа
 const LINK_PREVIEW_FETCH_TIMEOUT_MS = 5000;
 const LINK_PREVIEW_MAX_BYTES = 500 * 1024; // не читаем больше 500 КБ HTML
 
+/**
+ * Защита от SSRF: getLinkPreview делает запрос на сервере от имени Cloud
+ * Function, поэтому произвольный URL от клиента не должен иметь возможность
+ * достучаться до внутренней инфраструктуры (loopback, приватные диапазоны
+ * RFC1918, link-local и, в частности, GCP metadata-сервер 169.254.169.254).
+ * Проверяем и исходный хост, и хост(ы), к которым резолвится DNS-имя —
+ * иначе достаточно указать домен, который резолвится в приватный IP.
+ */
+function isForbiddenIp(ip) {
+  const type = net.isIP(ip);
+  if (type === 4) {
+    const parts = ip.split(".").map(Number);
+    const [a, b] = parts;
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 169 && b === 254) return true; // link-local, включая metadata
+    if (a === 0) return true; // 0.0.0.0/8
+    if (a >= 224) return true; // multicast/reserved
+    return false;
+  }
+  if (type === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1") return true; // loopback
+    if (lower.startsWith("fe80:") || lower.startsWith("fe8") || lower.startsWith("fe9") ||
+        lower.startsWith("fea") || lower.startsWith("feb")) return true; // link-local
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local
+    if (lower.startsWith("::ffff:")) {
+      // IPv4-mapped IPv6 — проверяем встроенный IPv4-адрес.
+      return isForbiddenIp(lower.replace("::ffff:", ""));
+    }
+    return false;
+  }
+  return true; // не удалось распознать формат — блокируем на всякий случай
+}
+
+async function assertUrlIsSafeToFetch(parsedUrl) {
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new HttpsError("invalid-argument", "URL с учётными данными не поддерживается");
+  }
+  const hostname = parsedUrl.hostname;
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new HttpsError("invalid-argument", "Недопустимый адрес");
+  }
+  // Если хост уже является голым IP — проверяем его напрямую.
+  if (net.isIP(hostname)) {
+    if (isForbiddenIp(hostname)) {
+      throw new HttpsError("invalid-argument", "Недопустимый адрес");
+    }
+    return;
+  }
+  let addresses;
+  try {
+    addresses = await dns.lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new HttpsError("invalid-argument", "Не удалось разрешить адрес");
+  }
+  if (addresses.length === 0 || addresses.some((a) => isForbiddenIp(a.address))) {
+    throw new HttpsError("invalid-argument", "Недопустимый адрес");
+  }
+}
+
 function extractMetaTag(html, property) {
   // og:title, og:description, og:image и т.п. — атрибуты property/content
   // могут идти в любом порядке, поэтому два варианта регулярки.
@@ -154,6 +219,7 @@ exports.getLinkPreview = onCall(async (request) => {
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
     throw new HttpsError("invalid-argument", "Поддерживаются только http/https ссылки");
   }
+  await assertUrlIsSafeToFetch(parsedUrl);
 
   const cacheId = Buffer.from(url).toString("base64url").slice(0, 200);
   const cacheRef = db.collection("link_previews").doc(cacheId);
@@ -169,14 +235,34 @@ exports.getLinkPreview = onCall(async (request) => {
   let preview = { url, title: null, description: null, imageUrl: null, siteName: null };
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), LINK_PREVIEW_FETCH_TIMEOUT_MS);
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; YodoLinkPreviewBot/1.0)" },
-    });
-    clearTimeout(timeoutId);
+    // Редиректы обрабатываем вручную (redirect: "manual") и заново проверяем
+    // каждый следующий адрес — иначе сервер, отдающий 3xx на приватный IP
+    // или на metadata-сервер, обошёл бы проверку выше (классический SSRF
+    // через редирект).
+    let currentUrl = parsedUrl;
+    let response;
+    const MAX_REDIRECTS = 5;
+    for (let i = 0; i <= MAX_REDIRECTS; i++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), LINK_PREVIEW_FETCH_TIMEOUT_MS);
+      response = await fetch(currentUrl, {
+        signal: controller.signal,
+        redirect: "manual",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; YodoLinkPreviewBot/1.0)" },
+      });
+      clearTimeout(timeoutId);
+
+      if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
+        const nextUrl = new URL(response.headers.get("location"), currentUrl);
+        if (nextUrl.protocol !== "http:" && nextUrl.protocol !== "https:") {
+          throw new Error("Редирект на недопустимую схему");
+        }
+        await assertUrlIsSafeToFetch(nextUrl);
+        currentUrl = nextUrl;
+        continue;
+      }
+      break;
+    }
 
     const contentType = response.headers.get("content-type") || "";
     if (response.ok && contentType.includes("text/html")) {

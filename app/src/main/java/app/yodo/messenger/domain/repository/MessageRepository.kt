@@ -30,7 +30,13 @@ interface MessageRepository {
         chatId: String, text: String, replyTo: ReplyContext? = null,
         hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null
     ): SendMessageResult
-    suspend fun sendImageMessage(chatId: String, imageBase64: String, caption: String = ""): SendMessageResult
+    suspend fun sendImageMessage(
+        chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false
+    ): SendMessageResult
+    // НОВОЕ (одноразовые медиа): вызывается получателем сразу после полноэкранного открытия
+    // view-once фото. Стирает imageBase64 на сервере (в Firestore) и помечает viewOnceOpened,
+    // чтобы фото нельзя было открыть повторно — ни на этом устройстве, ни на других.
+    suspend fun markViewOnceImageOpened(chatId: String, messageId: String)
     suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long): SendMessageResult
     suspend fun sendFileMessage(
         chatId: String, fileBase64: String, fileName: String, mimeType: String, sizeBytes: Long

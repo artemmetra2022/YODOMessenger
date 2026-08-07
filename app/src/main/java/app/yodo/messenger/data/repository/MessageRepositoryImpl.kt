@@ -91,6 +91,7 @@ class MessageRepositoryImpl @Inject constructor(
             val newDocRef = chatRef.collection("messages").add(data).await()
             val previewText = (data["text"] as? String)?.takeIf { it.isNotBlank() }
                 ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
+                else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
                 else if (data.containsKey("imageBase64")) "📷 Фото"
                 else if (data.containsKey("locationLat")) "📍 Геопозиция"
                 else if (data.containsKey("fileBase64")) "📎 ${data["fileName"] as? String ?: "Файл"}"
@@ -122,9 +123,37 @@ class MessageRepositoryImpl @Inject constructor(
         return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds)
     }
 
-    override suspend fun sendImageMessage(chatId: String, imageBase64: String, caption: String): SendMessageResult {
+    override suspend fun sendImageMessage(
+        chatId: String, imageBase64: String, caption: String, isViewOnce: Boolean
+    ): SendMessageResult {
         val data = mutableMapOf<String, Any?>("imageBase64" to imageBase64, "text" to caption.trim())
+        if (isViewOnce) {
+            data["isViewOnce"] = true
+            data["viewOnceOpened"] = false
+        }
         return sendRawMessage(chatId, data)
+    }
+
+    // НОВОЕ (одноразовые медиа): удаляем imageBase64 из документа в Firestore, как только
+    // получатель открыл view-once фото полноэкранно — так фото реально стирается на сервере,
+    // а не просто прячется в UI (иначе оно осталось бы читаемым при повторном открытии чата
+    // или с другого устройства). senderId не трогаем, обновление разрешено правилами и для
+    // получателя (см. firestore.rules — отдельное условие для view-once полей).
+    override suspend fun markViewOnceImageOpened(chatId: String, messageId: String) {
+        try {
+            firestore.collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+                .update(
+                    mapOf(
+                        "imageBase64" to FieldValue.delete(),
+                        "viewOnceOpened" to true
+                    )
+                ).await()
+        } catch (_: Exception) {
+            // Если не получилось стереть на сервере (например, нет сети) — просто не открываем
+            // повторно локально; при следующем успешном подключении получатель может повторить
+            // попытку, открыв фото ещё раз (idempotent: повторный delete/true ничего не ломает).
+        }
     }
 
     override suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long): SendMessageResult {
@@ -368,6 +397,12 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun forwardMessage(targetChatId: String, originalMessage: Message, fromSenderName: String, fromSenderId: String): SendMessageResult {
+        // НОВОЕ (одноразовые медиа): view-once фото пересылать нельзя — иначе пересланная
+        // копия превратилась бы в обычное, сколько угодно раз открываемое изображение,
+        // что противоречит смыслу "один просмотр".
+        if (originalMessage.isViewOnce) {
+            return SendMessageResult.Error("Фото «на один просмотр» нельзя переслать")
+        }
         val data = mutableMapOf<String, Any?>(
             "text" to originalMessage.text,
             "forwardedFromSenderName" to fromSenderName,
@@ -503,12 +538,16 @@ class MessageRepositoryImpl @Inject constructor(
             } else {
                 val msgDoc = firestore.collection("chats").document(chatId)
                     .collection("messages").document(messageId).get().await()
+                // НОВОЕ (одноразовые медиа): не сохраняем imageBase64 view-once сообщения в
+                // избранное — это была бы постоянная копия того, что должно исчезнуть после
+                // одного просмотра.
+                val isViewOnceMsg = msgDoc.getBoolean("isViewOnce") ?: false
                 bookmarkRef.set(mapOf(
                     "messageId" to messageId, "chatId" to chatId,
                     "senderId" to (msgDoc.getString("senderId") ?: ""),
                     "text" to (msgDoc.getString("text") ?: ""),
                     "timestamp" to (msgDoc.getLong("timestamp") ?: 0L),
-                    "imageBase64" to msgDoc.getString("imageBase64"),
+                    "imageBase64" to if (isViewOnceMsg) null else msgDoc.getString("imageBase64"),
                     "savedAt" to System.currentTimeMillis()
                 )).await()
             }
@@ -707,7 +746,9 @@ class MessageRepositoryImpl @Inject constructor(
                 locationLat = doc.getDouble("locationLat"),
                 locationLng = doc.getDouble("locationLng"),
                 commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt(),
-                poll = mapDocToPoll(doc)
+                poll = mapDocToPoll(doc),
+                isViewOnce = doc.getBoolean("isViewOnce") ?: false,
+                viewOnceOpened = doc.getBoolean("viewOnceOpened") ?: false
             )
         } catch (e: Exception) { null }
     }
