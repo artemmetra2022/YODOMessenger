@@ -136,6 +136,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -1088,13 +1089,23 @@ fun ChatScreen(
     // ни другого. Как только пользователь открыл экран, сразу помечаем сообщение как
     // просмотренное и стираем imageBase64 на сервере — повторно открыть уже нельзя,
     // в т.ч. если сообщение отправил сам пользователь себе на другое устройство.
+    // НОВОЕ (детектор скриншотов): защита от повторной отправки уведомления, если
+    // ContentObserver.onChange сработает несколько раз на один и тот же файл скриншота
+    // (типично для MediaStore — сначала PENDING-запись, потом финализация).
+    var screenshotNoticeSent by remember(viewOnceOverlayMessage?.id) { mutableStateOf(false) }
     viewOnceOverlayMessage?.let { msg ->
         ViewOnceImageOverlay(
             imageBase64 = msg.imageBase64,
             onOpened = {
                 if (!msg.viewOnceOpened) viewModel.markViewOnceImageOpened(msg.id)
             },
-            onDismiss = { viewOnceOverlayMessage = null }
+            onDismiss = { viewOnceOverlayMessage = null },
+            onScreenshotDetected = {
+                if (!screenshotNoticeSent) {
+                    screenshotNoticeSent = true
+                    viewModel.notifyScreenshotTaken()
+                }
+            }
         )
     }
 }
@@ -1103,16 +1114,49 @@ fun ChatScreen(
 private fun ViewOnceImageOverlay(
     imageBase64: String?,
     onOpened: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onScreenshotDetected: () -> Unit
 ) {
     // Помечаем как открытое ровно один раз, сразу при показе оверлея (не при закрытии) —
     // так фото стирается на сервере, даже если пользователь свернёт приложение до того,
     // как явно закроет полноэкранный просмотр.
     LaunchedEffect(imageBase64) { onOpened() }
+
+    val context = LocalContext.current
+    // НОВОЕ (защита от скриншотов, слой 1): FLAG_SECURE на окне Activity — стандартный
+    // системный способ заблокировать скриншот/запись экрана для текущего окна (система
+    // просто отдаёт чёрный кадр). Ставим при входе в оверлей и снимаем при выходе, а не
+    // на всё время работы приложения — иначе пользователь не смог бы делать скриншоты
+    // обычных сообщений, что не входит в задачу.
+    DisposableEffect(Unit) {
+        val activity = app.yodo.messenger.util.ChatScreenshotUtils.findActivity(context)
+        activity?.window?.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            android.view.WindowManager.LayoutParams.FLAG_SECURE
+        )
+        onDispose {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+    // НОВОЕ (защита от скриншотов, слой 2): детектор на случай, если FLAG_SECURE всё же
+    // обойдён (см. комментарий в ScreenshotDetector.kt).
+    app.yodo.messenger.util.DetectScreenshots(onScreenshotDetected = onScreenshotDetected)
+
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        // Диалог Compose открывает СВОЁ окно поверх окна Activity — FLAG_SECURE, выставленный
+        // только на activity.window, не наследуется на него автоматически, поэтому дублируем
+        // флаг на окно самого диалога через DialogWindowProvider.
+        val dialogWindowProvider = LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider
+        DisposableEffect(Unit) {
+            dialogWindowProvider?.window?.setFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                android.view.WindowManager.LayoutParams.FLAG_SECURE
+            )
+            onDispose { }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()

@@ -476,6 +476,16 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // НОВОЕ (детектор скриншотов): если во время просмотра view-once фото обнаружен
+    // скриншот (см. ScreenshotDetector — сработает, только если получатель как-то обошёл
+    // FLAG_SECURE), отправляем в чат обычное текстовое сообщение-уведомление от лица
+    // того, кто сделал скриншот — так его увидит автор фото (и остальные участники чата).
+    fun notifyScreenshotTaken() {
+        viewModelScope.launch {
+            messageRepository.sendMessage(chatId, "📸 Сделал(а) скриншот фото «на один просмотр»")
+        }
+    }
+
     // НОВОЕ (п.37): отправка записанного голосового сообщения.
     fun sendVoice(base64: String, durationMs: Long) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
