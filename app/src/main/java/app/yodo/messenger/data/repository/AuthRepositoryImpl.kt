@@ -41,6 +41,7 @@ class AuthRepositoryImpl @Inject constructor(
 
             val result = firebaseAuth.signInWithEmailAndPassword(email, password).await()
             val user = result.user ?: return AuthResult.Error("Не удалось получить данные пользователя")
+            warmUpFirestore(user.uid)
             AuthResult.Success(user.toYodoUser())
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Неизвестная ошибка авторизации"))
@@ -116,6 +117,7 @@ class AuthRepositoryImpl @Inject constructor(
                 )
             }
 
+            warmUpFirestore(firebaseUser.uid)
             AuthResult.Success(
                 firebaseUser.toYodoUser(nameOverride = name.trim(), usernameOverride = normalizedUsername)
             )
@@ -191,10 +193,27 @@ class AuthRepositoryImpl @Inject constructor(
                 "Не удалось синхронизировать профиль Google-входа с Firestore за 8 секунд."
             )
 
+            warmUpFirestore(user.uid)
             AuthResult.Success(user.toYodoUser())
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Не удалось войти через Google"))
         }
+    }
+
+    /**
+     * "Прогревает" grpc-соединение Firestore сразу после успешного входа, ещё до перехода
+     * на экран со списком чатов. Без этого первый запрос к Firestore (уже на новом экране)
+     * сам устанавливает TLS/grpc-канал и проверяет свежий Auth-токен — это добавляет
+     * несколько секунд именно к ПЕРВОЙ загрузке списка чатов после входа. При повторном
+     * заходе в приложение канал уже готов, поэтому там всё быстро.
+     * Не блокирует и не влияет на результат входа — запрос "выстрелил и забыт",
+     * а любая ошибка (например, оффлайн) тихо игнорируется.
+     */
+    private fun warmUpFirestore(uid: String) {
+        firestore.collection("chats")
+            .whereArrayContains("participantIds", uid)
+            .limit(1)
+            .get()
     }
 
     private fun FirebaseUser.toYodoUser(nameOverride: String? = null, usernameOverride: String? = null) = YodoUser(

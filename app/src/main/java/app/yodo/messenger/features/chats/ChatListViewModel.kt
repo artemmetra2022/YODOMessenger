@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -102,11 +103,19 @@ class ChatListViewModel @Inject constructor(
 
     private fun observeChats() {
         viewModelScope.launch {
+            // combine() не эмитит НИЧЕГО, пока каждый источник не выдаст хотя бы одно значение.
+            // draftsPreferences.observeAllDrafts() и chatFolders читаются из DataStore (диск),
+            // и на "холодном" старте сразу после входа могут отвечать не сразу — из-за этого
+            // список чатов висел на Loading, даже когда Firestore уже всё вернул. Особенно
+            // заметно именно на ПЕРВОЙ загрузке после логина — отсюда и жалоба "иногда вообще
+            // не появляется, помогает только перезаход". .onStart{} даёт им значение по
+            // умолчанию сразу же, не дожидаясь диска — черновики/папки просто "доедут"
+            // следующим обновлением, когда будут готовы.
             combine(
                 chatRepository.observeChatList(),
-                draftsPreferences.observeAllDrafts(),
+                draftsPreferences.observeAllDrafts().onStart { emit(emptyMap()) },
                 _activeFilter,
-                chatFolders
+                chatFolders.onStart { emit(emptyList()) }
             ) { result, drafts, filter, folders ->
                 when (result) {
                     is ChatListResult.Success -> {
