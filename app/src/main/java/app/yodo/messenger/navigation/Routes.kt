@@ -89,4 +89,6 @@ sealed class Routes(val route: String) {
         const val ARG_CHAT_ID = "chatId"
         const val ARG_REPORT_ID = "reportId"
     }
+    // НОВОЕ (чат поддержки): экран админ-панели поддержки.
+    data object AdminPanel : Routes("admin_panel")
 }

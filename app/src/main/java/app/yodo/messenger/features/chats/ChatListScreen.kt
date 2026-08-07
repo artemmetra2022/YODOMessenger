@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -108,6 +109,8 @@ fun ChatListScreen(
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
+    // НОВОЕ (чат поддержки): открытие админ-панели поддержки.
+    onOpenAdminPanel: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
