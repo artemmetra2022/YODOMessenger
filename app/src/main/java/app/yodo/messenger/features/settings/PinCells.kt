@@ -2,6 +2,7 @@ package app.yodo.messenger.features.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -90,10 +91,8 @@ fun PinCellsInput(
 
 // Клик без визуального ripple, чтобы фокус переходил на скрытое поле по нажатию на клетку.
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(
-        androidx.compose.foundation.clickable(
-            interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(),
-            indication = null,
-            onClick = onClick
-        )
+    this.clickable(
+        interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(),
+        indication = null,
+        onClick = onClick
     )

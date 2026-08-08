@@ -110,7 +110,6 @@ fun SettingsScreen(
     onProfileClick: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
     onOpenBlockedUsers: () -> Unit = {},
-    onOpenNotes: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currentLanguage by viewModel.currentLanguage.collectAsState()
@@ -888,20 +887,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            item { Spacer(modifier = Modifier.height(8.dp)) }
-            item {
-                SettingsCard {
-                    SettingsNavigateRow(
-                        icon = Icons.Filled.Edit,
-                        title = "Заметки",
-                        subtitle = "Личный блокнот — виден только вам",
-                        colorTheme = colorTheme,
-                        onClick = onOpenNotes
-                    )
-                }
-            }
-
-            // ═════════════════════════════��══════════
+            // ═════════════════════════════���══════════
             // АККАУНТ
             // ════════════════════════════════════════
             item { Spacer(modifier = Modifier.height(8.dp)) }

@@ -28,7 +28,6 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.floorMod
 
 /**
  * Обёртка над Google Nearby Connections API с настоящей MESH-МАРШРУТИЗАЦИЕЙ.
@@ -111,7 +110,7 @@ class NearbyMessagingManager @Inject constructor(
     /** Вычисляем стабильный 6-значный номер из nodeId и соли (100000..999999). */
     private fun deriveShort(salt: Int): String {
         val h = (myNodeId + "#" + salt).hashCode()
-        val v = floorMod(h, 900000) + 100000
+        val v = Math.floorMod(h, 900000) + 100000
         return v.toString()
     }
 

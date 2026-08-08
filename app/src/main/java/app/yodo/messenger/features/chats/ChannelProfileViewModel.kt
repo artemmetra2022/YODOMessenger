@@ -81,10 +81,24 @@ class ChannelProfileViewModel @Inject constructor(
     }
 
     /** Подписка/отписка с мгновенным (оптимистичным) обновлением счётчиков в UI.
-     *  Владелец канала не может отписаться от собственного канала. */
+     *  Владелец канала не может отписаться от собственного канала.
+     *  НОВОЕ (модерируемые каналы): если канал MODERATED и пользователь ещё не
+     *  подписан — вместо подписки отправляем/отменяем заявку на вступление. */
     fun toggleSubscription() {
         if (_uiState.value.isOwner) return
         val profile = _uiState.value.profile ?: return
+
+        // Модерируемый канал: неподписанный пользователь работает с заявкой.
+        if (profile.accessMode == app.yodo.messenger.domain.model.ChannelAccessMode.MODERATED && !profile.isSubscribed) {
+            val wasPending = profile.hasPendingJoinRequest
+            _uiState.value = _uiState.value.copy(profile = profile.copy(hasPendingJoinRequest = !wasPending))
+            viewModelScope.launch {
+                if (wasPending) chatRepository.cancelJoinRequest(chatId)
+                else chatRepository.requestToJoinChannel(chatId)
+            }
+            return
+        }
+
         val wasSubscribed = profile.isSubscribed
         _uiState.value = _uiState.value.copy(
             profile = profile.copy(

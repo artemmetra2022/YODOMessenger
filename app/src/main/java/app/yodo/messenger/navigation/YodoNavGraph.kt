@@ -33,7 +33,6 @@ import app.yodo.messenger.features.chats.ImageViewerScreen
 import app.yodo.messenger.features.contacts.ContactsScreen
 import app.yodo.messenger.features.main.MainScreen
 import app.yodo.messenger.features.nearby.NearbyPeopleScreen
-import app.yodo.messenger.features.notes.NotesScreen
 import app.yodo.messenger.features.profile.ProfileScreen
 import app.yodo.messenger.features.profile.UserProfileScreen
 import app.yodo.messenger.features.search.SearchScreen
@@ -240,10 +239,19 @@ fun YodoNavGraph(
                 onInviteToChannel = { cId ->
                     navController.navigate(Routes.InviteToChannel.createRoute(cId))
                 },
-                // НОВОЕ (QR в личном чате): "Поделиться контактом" → мой QR-код контакта.
-                onShareContactQr = {
-                    navController.navigate(Routes.QrCode.route)
+                // НОВОЕ (поделиться контактом абонента): "Поделиться контактом" → QR-код контакта собеседника.
+                onShareContactQr = { otherUserId ->
+                    navController.navigate(Routes.ContactQr.createRoute(otherUserId))
                 }
+            )
+        }
+        // НОВОЕ (поделиться контактом абонента): QR-карточка контакта собеседника.
+        composable(
+            route = Routes.ContactQr.route,
+            arguments = listOf(navArgument(Routes.ContactQr.ARG_USER_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.contacts.ContactQrScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
         composable(Routes.ImageViewer.route) {
@@ -445,14 +453,7 @@ fun YodoNavGraph(
                     navController.navigate(Routes.Welcome.route) {
                         popUpTo(navController.graph.id) { inclusive = true }
                     }
-                },
-                onOpenNotes = { navController.navigate(Routes.Notes.route) }
-            )
-        }
-        // НОВОЕ: личный блокнот «Заметки».
-        composable(Routes.Notes.route) {
-            NotesScreen(
-                onBackClick = { navController.popBackStack() }
+                }
             )
         }
         composable(Routes.OfflineChat.route) {

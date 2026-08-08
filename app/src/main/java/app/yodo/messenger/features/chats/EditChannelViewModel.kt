@@ -4,7 +4,10 @@ import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.yodo.messenger.domain.model.ChannelAccessMode
 import app.yodo.messenger.domain.model.ChannelProfile
+import app.yodo.messenger.domain.model.ChannelRestrictions
+import app.yodo.messenger.domain.model.JoinRequest
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelUpdateResult
 import app.yodo.messenger.domain.repository.ChatRepository
@@ -29,7 +32,15 @@ data class EditChannelUiState(
     val isSavingMeta: Boolean = false,
     val isSearching: Boolean = false,
     val adminSearchResults: List<YodoUser> = emptyList(),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    // НОВОЕ (режимы доступа и ограничения): текущий режим и набор ограничений.
+    val accessMode: ChannelAccessMode = ChannelAccessMode.OPEN,
+    val restrictions: ChannelRestrictions = ChannelRestrictions.DEFAULT,
+    val isSavingAccess: Boolean = false,
+    val isSavingRestrictions: Boolean = false,
+    // НОВОЕ (модерируемые каналы): ожидающие заявки на вступление (владелец/админ).
+    val joinRequests: List<JoinRequest> = emptyList(),
+    val canManage: Boolean = false
 )
 
 /**
@@ -62,12 +73,58 @@ class EditChannelViewModel @Inject constructor(
             val myUid = firebaseAuth.currentUser?.uid
             val owner = profile.ownerId?.let { userRepository.getUserById(it) }
             val admins = profile.adminIds.mapNotNull { userRepository.getUserById(it) }
+            val canManage = myUid != null && (myUid == profile.ownerId || myUid in profile.adminIds)
+            val requests = if (canManage) chatRepository.getJoinRequests(chatId) else emptyList()
             _uiState.value = _uiState.value.copy(
                 profile = profile,
                 owner = owner,
                 admins = admins,
-                isOwner = myUid != null && myUid == profile.ownerId
+                isOwner = myUid != null && myUid == profile.ownerId,
+                canManage = canManage,
+                accessMode = profile.accessMode,
+                restrictions = profile.restrictions,
+                joinRequests = requests
             )
+        }
+    }
+
+    // НОВОЕ (режимы доступа): смена режима доступа канала.
+    fun setAccessMode(mode: ChannelAccessMode) {
+        if (mode == _uiState.value.accessMode) return
+        _uiState.value = _uiState.value.copy(isSavingAccess = true, accessMode = mode, errorMessage = null)
+        viewModelScope.launch {
+            when (val r = chatRepository.updateChannelAccessMode(chatId, mode)) {
+                is ChannelUpdateResult.Success -> _uiState.value = _uiState.value.copy(isSavingAccess = false)
+                is ChannelUpdateResult.Error ->
+                    _uiState.value = _uiState.value.copy(isSavingAccess = false, errorMessage = r.message)
+            }
+        }
+    }
+
+    // НОВОЕ (ограничения): переключение отдельного ограничения с мгновенным сохранением.
+    fun updateRestrictions(restrictions: ChannelRestrictions) {
+        _uiState.value = _uiState.value.copy(isSavingRestrictions = true, restrictions = restrictions, errorMessage = null)
+        viewModelScope.launch {
+            when (val r = chatRepository.updateChannelRestrictions(chatId, restrictions)) {
+                is ChannelUpdateResult.Success -> _uiState.value = _uiState.value.copy(isSavingRestrictions = false)
+                is ChannelUpdateResult.Error ->
+                    _uiState.value = _uiState.value.copy(isSavingRestrictions = false, errorMessage = r.message)
+            }
+        }
+    }
+
+    // НОВОЕ (модерируемые каналы): одобрение/отклонение заявок.
+    fun approveRequest(userId: String) {
+        viewModelScope.launch {
+            chatRepository.approveJoinRequest(chatId, userId)
+            reload()
+        }
+    }
+
+    fun rejectRequest(userId: String) {
+        viewModelScope.launch {
+            chatRepository.rejectJoinRequest(chatId, userId)
+            reload()
         }
     }
 

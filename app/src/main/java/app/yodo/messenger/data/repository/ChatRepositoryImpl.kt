@@ -470,7 +470,10 @@ class ChatRepositoryImpl @Inject constructor(
                 channelAdminIds = channelAdminIds,
                 subscriberCount = if (type == "CHANNEL") participantIds.size else 0,
                 isSubscribed = type == "CHANNEL" && uid in participantIds,
-                createdAt = doc.getLong("createdAt") ?: 0L
+                createdAt = doc.getLong("createdAt") ?: 0L,
+                // НОВОЕ (режимы доступа/ограничения): нужны в ChatScreen для применения ограничений.
+                accessMode = app.yodo.messenger.domain.model.ChannelAccessMode.fromRaw(doc.getString("accessMode")),
+                restrictions = readRestrictions(doc)
             )
         } catch (e: Exception) { null }
     }
@@ -479,7 +482,12 @@ class ChatRepositoryImpl @Inject constructor(
     // Создатель = владелец (может публиковать посты и назначать/снимать админов).
     // Каждый подписчик добавляется в participantIds, поэтому существующий механизм
     // списка чатов (whereArrayContains) сразу подхватывает канал для всех подписчиков.
-    override suspend fun createChannel(title: String, description: String, avatarBitmap: Bitmap?): CreateChatResult {
+    override suspend fun createChannel(
+        title: String,
+        description: String,
+        avatarBitmap: Bitmap?,
+        accessMode: app.yodo.messenger.domain.model.ChannelAccessMode
+    ): CreateChatResult {
         val uid = firebaseAuth.currentUser?.uid ?: return CreateChatResult.Error("Вы не авторизованы")
         val trimmedTitle = title.trim()
         if (trimmedTitle.isBlank()) return CreateChatResult.Error("Введите название канала")
@@ -504,7 +512,15 @@ class ChatRepositoryImpl @Inject constructor(
                 "isOnline" to false,
                 "createdBy" to uid,
                 "adminIds" to emptyList<String>(),
-                "createdAt" to System.currentTimeMillis()
+                "createdAt" to System.currentTimeMillis(),
+                // НОВОЕ (режимы доступа каналов): режим доступа канала.
+                "accessMode" to accessMode.name,
+                // Ограничения по умолчанию — всё разрешено.
+                "allowForwarding" to true,
+                "allowComments" to true,
+                "allowReactions" to true,
+                "allowSaving" to true,
+                "allowLinkPreviews" to true
             )
             if (avatarBase64 != null) data["avatarBase64"] = avatarBase64
             newChatRef.set(data).await()
@@ -614,6 +630,12 @@ class ChatRepositoryImpl @Inject constructor(
                 .get().await()
             snapshot.documents
                 .filter { doc ->
+                    // НОВОЕ (режимы доступа): скрытые каналы не показываем в поиске,
+                    // кроме случая, когда пользователь уже подписан (чтобы мог найти свой канал).
+                    val accessMode = app.yodo.messenger.domain.model.ChannelAccessMode.fromRaw(doc.getString("accessMode"))
+                    val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    val isSub = uid != null && uid in participantIds
+                    if (accessMode == app.yodo.messenger.domain.model.ChannelAccessMode.HIDDEN && !isSub) return@filter false
                     val title = (doc.getString("title") ?: "").lowercase()
                     val titleLc = doc.getString("titleLowercase") ?: title
                     val desc = (doc.getString("description") ?: "").lowercase()
@@ -633,7 +655,8 @@ class ChatRepositoryImpl @Inject constructor(
                         subscriberCount = participantIds.size,
                         isVerified = doc.getBoolean("isVerified") ?: false,
                         isSubscribed = uid != null && uid in participantIds,
-                        category = doc.getString("category")
+                        category = doc.getString("category"),
+                        accessMode = app.yodo.messenger.domain.model.ChannelAccessMode.fromRaw(doc.getString("accessMode"))
                     )
                 }
                 // Верифицированные каналы (в т.ч. официальный) — выше в выдаче.
@@ -651,7 +674,7 @@ class ChatRepositoryImpl @Inject constructor(
             val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             ChannelProfile(
                 chatId = chatId,
-                title = doc.getString("title") ?: "Без названия",
+                title = doc.getString("title") ?: "Без назван��я",
                 description = doc.getString("description").orEmpty(),
                 avatarBase64 = doc.getString("avatarBase64"),
                 subscriberCount = participantIds.size,
@@ -662,9 +685,38 @@ class ChatRepositoryImpl @Inject constructor(
                 createdAt = doc.getLong("createdAt") ?: 0L,
                 category = doc.getString("category"),
                 tags = (doc.get("tags") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-                coverBase64 = doc.getString("coverBase64")
+                coverBase64 = doc.getString("coverBase64"),
+                // НОВОЕ (режимы доступа): режим и ограничения.
+                accessMode = app.yodo.messenger.domain.model.ChannelAccessMode.fromRaw(doc.getString("accessMode")),
+                restrictions = readRestrictions(doc),
+                // НОВОЕ (модерируемые каналы): статус заявки текущего пользователя и число ожидающих.
+                hasPendingJoinRequest = if (uid != null && uid !in participantIds) {
+                    runCatching {
+                        firestore.collection("chats").document(chatId)
+                            .collection("joinRequests").document(uid).get().await().exists()
+                    }.getOrDefault(false)
+                } else false,
+                pendingRequestsCount = if (uid != null && (uid == doc.getString("createdBy") ||
+                        uid in ((doc.get("adminIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()))) {
+                    runCatching {
+                        firestore.collection("chats").document(chatId)
+                            .collection("joinRequests").get().await().size()
+                    }.getOrDefault(0)
+                } else 0
             )
         } catch (e: Exception) { null }
+    }
+
+    // НОВОЕ (ограничения канала): читаем набор ограничений из документа канала.
+    // Отсутствующее поле = разрешено (так старые каналы работают как раньше).
+    private fun readRestrictions(doc: com.google.firebase.firestore.DocumentSnapshot): app.yodo.messenger.domain.model.ChannelRestrictions {
+        return app.yodo.messenger.domain.model.ChannelRestrictions(
+            allowForwarding = doc.getBoolean("allowForwarding") ?: true,
+            allowComments = doc.getBoolean("allowComments") ?: true,
+            allowReactions = doc.getBoolean("allowReactions") ?: true,
+            allowSaving = doc.getBoolean("allowSaving") ?: true,
+            allowLinkPreviews = doc.getBoolean("allowLinkPreviews") ?: true
+        )
     }
 
     // НОВОЕ (переработка каналов): обновление названия и описания канала (владелец/админ).
@@ -725,6 +777,133 @@ class ChatRepositoryImpl @Inject constructor(
             ChannelUpdateResult.Success
         } catch (e: Exception) {
             ChannelUpdateResult.Error(e.toUserMessage("Не удалось загрузить обложку"))
+        }
+    }
+
+    // === НОВОЕ (режимы доступа и ограничения каналов) ===
+
+    // Проверка: текущий пользователь — владелец или админ канала.
+    private suspend fun isChannelManager(chatId: String, uid: String): Boolean {
+        return try {
+            val doc = firestore.collection("chats").document(chatId).get().await()
+            val admins = (doc.get("adminIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            uid == doc.getString("createdBy") || uid in admins
+        } catch (e: Exception) { false }
+    }
+
+    override suspend fun updateChannelAccessMode(
+        chatId: String, mode: app.yodo.messenger.domain.model.ChannelAccessMode
+    ): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        if (!isChannelManager(chatId, uid)) return ChannelUpdateResult.Error("Недостаточно прав")
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("accessMode", mode.name).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось сменить режим доступа"))
+        }
+    }
+
+    override suspend fun updateChannelRestrictions(
+        chatId: String, restrictions: app.yodo.messenger.domain.model.ChannelRestrictions
+    ): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        if (!isChannelManager(chatId, uid)) return ChannelUpdateResult.Error("Недостаточно прав")
+        return try {
+            firestore.collection("chats").document(chatId).update(
+                mapOf(
+                    "allowForwarding" to restrictions.allowForwarding,
+                    "allowComments" to restrictions.allowComments,
+                    "allowReactions" to restrictions.allowReactions,
+                    "allowSaving" to restrictions.allowSaving,
+                    "allowLinkPreviews" to restrictions.allowLinkPreviews
+                )
+            ).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось сохранить ограничения"))
+        }
+    }
+
+    override suspend fun requestToJoinChannel(chatId: String): ChannelUpdateResult {
+        val user = firebaseAuth.currentUser ?: return ChannelUpdateResult.Error("Не авторизован")
+        val uid = user.uid
+        return try {
+            val userDoc = firestore.collection("users").document(uid).get().await()
+            firestore.collection("chats").document(chatId)
+                .collection("joinRequests").document(uid).set(
+                    mapOf(
+                        "userId" to uid,
+                        "displayName" to (userDoc.getString("displayName") ?: user.displayName ?: "Пользователь"),
+                        "username" to userDoc.getString("username"),
+                        "avatarBase64" to userDoc.getString("avatarBase64"),
+                        "photoUrl" to userDoc.getString("avatarUrl"),
+                        "requestedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось отправить заявку"))
+        }
+    }
+
+    override suspend fun cancelJoinRequest(chatId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        return try {
+            firestore.collection("chats").document(chatId)
+                .collection("joinRequests").document(uid).delete().await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось отменить заявку"))
+        }
+    }
+
+    override suspend fun getJoinRequests(chatId: String): List<app.yodo.messenger.domain.model.JoinRequest> {
+        val uid = firebaseAuth.currentUser?.uid ?: return emptyList()
+        if (!isChannelManager(chatId, uid)) return emptyList()
+        return try {
+            firestore.collection("chats").document(chatId)
+                .collection("joinRequests").get().await().documents.map { d ->
+                    app.yodo.messenger.domain.model.JoinRequest(
+                        userId = d.getString("userId") ?: d.id,
+                        displayName = d.getString("displayName") ?: "Пользователь",
+                        username = d.getString("username"),
+                        avatarBase64 = d.getString("avatarBase64"),
+                        photoUrl = d.getString("photoUrl"),
+                        requestedAt = d.getLong("requestedAt") ?: 0L
+                    )
+                }.sortedByDescending { it.requestedAt }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    override suspend fun approveJoinRequest(chatId: String, userId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        if (!isChannelManager(chatId, uid)) return ChannelUpdateResult.Error("Недостаточно прав")
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            chatRef.update(
+                mapOf(
+                    "participantIds" to FieldValue.arrayUnion(userId),
+                    "unreadCounts.$userId" to 0
+                )
+            ).await()
+            chatRef.collection("joinRequests").document(userId).delete().await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось одобрить заявку"))
+        }
+    }
+
+    override suspend fun rejectJoinRequest(chatId: String, userId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        if (!isChannelManager(chatId, uid)) return ChannelUpdateResult.Error("Недостаточно прав")
+        return try {
+            firestore.collection("chats").document(chatId)
+                .collection("joinRequests").document(userId).delete().await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось отклонить заявку"))
         }
     }
 

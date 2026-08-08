@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -196,7 +197,7 @@ fun ChatScreen(
     onOpenComments: (chatId: String, messageId: String) -> Unit,
     onInviteToChannel: (String) -> Unit = {},
     onOpenChannelStats: (String) -> Unit = {},
-    onShareContactQr: () -> Unit = {},
+    onShareContactQr: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -292,6 +293,28 @@ fun ChatScreen(
     }
 
     var showAttachMenu by remember { mutableStateOf(false) }
+    // НОВОЕ (картинки из буфера + подпись): base64 картинки, ожидающей подписью
+    // и подтверждения отправки (не моментальная отправка).
+    var pendingCaptionImageBase64 by remember { mutableStateOf<String?>(null) }
+
+    // НОВОЕ (картинки из буфера): читаем изображение из системного буфера обмена.
+    fun pasteImageFromClipboard() {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        val clip = cm?.primaryClip
+        val uri: Uri? = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).uri else null
+        if (uri == null) {
+            coroutineScope.launch { snackbarHostState.showSnackbar("В буфере обмена нет изображения") }
+            return
+        }
+        coroutineScope.launch {
+            val base64 = withContext(Dispatchers.Default) {
+                ImageUtils.compressChatImageToBase64(context, uri)
+            }
+            if (base64 != null) pendingCaptionImageBase64 = base64
+            else snackbarHostState.showSnackbar("Не удалось обработать изображение из буфера")
+        }
+    }
+
     var showLocationPicker by remember { mutableStateOf(false) }
     var showPollCreation by remember { mutableStateOf(false) }
 
@@ -524,12 +547,12 @@ fun ChatScreen(
                                             onClick = { showChatMenu = false; showDisappearingDialog = true }
                                         )
                                     }
-                                    // НОВОЕ (QR в личном чате): поделиться своим контактом через QR-код.
-                                    if (uiState.chatType == "PRIVATE") {
+                                    // НОВОЕ (поделиться контактом абонента): делимся QR-кодом контакта собеседника, а не своего.
+                                    if (uiState.chatType == "PRIVATE" && uiState.otherUserId != null) {
                                         DropdownMenuItem(
-                                            text = { Text("Поделиться контактом (QR)") },
+                                            text = { Text("Поделиться контактом абонента (QR)") },
                                             leadingIcon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
-                                            onClick = { showChatMenu = false; onShareContactQr() }
+                                            onClick = { showChatMenu = false; onShareContactQr(uiState.otherUserId!!) }
                                         )
                                     }
                                     DropdownMenuItem(text = { Text("Очистить историю") }, onClick = { showChatMenu = false; viewModel.clearChatHistory() })
@@ -548,7 +571,7 @@ fun ChatScreen(
                                                 coroutineScope.launch {
                                                     val success = ChatScreenshotUtils.captureAndSaveChatScreenshot(context, window, bounds)
                                                     snackbarHostState.showSnackbar(
-                                                        if (success) "Скриншот сохранён в галерею" else "Не удалось сделать скриншот"
+                                                        if (success) "Скриншот сохр��нён в галерею" else "Не удалось сделать скриншот"
                                                     )
                                                 }
                                             }
@@ -972,6 +995,21 @@ fun ChatScreen(
                             onPickPoll = {
                                 showAttachMenu = false
                                 showPollCreation = true
+                            },
+                            onPasteImage = {
+                                showAttachMenu = false
+                                pasteImageFromClipboard()
+                            }
+                        )
+                    }
+                    // НОВОЕ (картинки из буфера + подпись): превью + поле подписи перед отправкой.
+                    pendingCaptionImageBase64?.let { imgBase64 ->
+                        ImageCaptionDialog(
+                            imageBase64 = imgBase64,
+                            onDismiss = { pendingCaptionImageBase64 = null },
+                            onSend = { caption ->
+                                viewModel.sendImage(imgBase64, caption = caption)
+                                pendingCaptionImageBase64 = null
                             }
                         )
                     }
@@ -1060,7 +1098,7 @@ fun ChatScreen(
                             previousDateLabel = dateLabel
                         }
                         item(key = message.id) {
-                            // НОВОЕ (F3): отмечаем просмотр поста канала при появлении на экране.
+                            // НОВОЕ (F3): отмечаем просмотр поста канала при появлени�� на экране.
                             if (isChannel) {
                                 LaunchedEffect(message.id) { viewModel.registerPostView(message.id) }
                             }
@@ -1780,7 +1818,7 @@ private fun ReplyPreviewBar(message: Message, isOwn: Boolean, onCancel: () -> Un
 }
 
 private val COMMON_EMOJIS = listOf(
-    "😀", "😂", "����", "🥰", "😊", "😉", "😎", "🤔",
+    "😀", "😂", "����", "��", "😊", "😉", "😎", "🤔",
     "😢", "😭", "😡", "🥳", "👍", "👎", "❤️", "🔥",
     "🎉", "🙏", "👏", "😴", "🤗", "😅", "😱", "🤷",
     "✅", "❌", "⭐", "💯", "😇", "🤝", "👀", "💔"
@@ -1874,7 +1912,7 @@ private fun MessageInputBar(
                 ) {
                     Icon(
                         Icons.Filled.Timer,
-                        contentDescription = if (isTtlExplicitlySet) "Таймер сообщения: ${disappearingTtlLabel(pendingTtlSeconds)}" else "Таймер исчезновения сообщения",
+                        contentDescription = if (isTtlExplicitlySet) "Таймер сообщения: ${disappearingTtlLabel(pendingTtlSeconds)}" else "Тайм��р исчезновения сообщения",
                         tint = if (isTtlExplicitlySet) colorTheme.primary else Color.Gray,
                         modifier = Modifier.size(20.dp)
                     )
@@ -2642,7 +2680,8 @@ private fun AttachMenuDialog(
     onPickViewOncePhoto: () -> Unit,
     onPickFile: () -> Unit,
     onPickLocation: () -> Unit,
-    onPickPoll: () -> Unit
+    onPickPoll: () -> Unit,
+    onPasteImage: () -> Unit
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -2657,6 +2696,8 @@ private fun AttachMenuDialog(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
                 AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото", onClick = onPickPhoto)
+                // НОВОЕ (картинки из буфера): вставить изображение из буфера обмена (с подписью).
+                AttachMenuRow(icon = Icons.Filled.ContentPaste, label = "Вставить из буфера", onClick = onPasteImage)
                 // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть
                 // полноэкранно только один раз — после этого оно стирается на сервере.
                 AttachMenuRow(icon = Icons.Filled.RemoveRedEye, label = "Фото на один просмотр", onClick = onPickViewOncePhoto)
@@ -2664,6 +2705,64 @@ private fun AttachMenuDialog(
                 AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопозиция", onClick = onPickLocation)
                 AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)
                 Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+/**
+ * НОВОЕ (картинки из буфера + подпись): превью изображения с полем подписи;
+ * отправка происходит только по кнопке «Отправить» (не моментально).
+ */
+@Composable
+private fun ImageCaptionDialog(
+    imageBase64: String,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var caption by remember { mutableStateOf("") }
+    val bitmap = remember(imageBase64) { ImageUtils.decodeBase64ToBitmap(imageBase64) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "Отправить изображение",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                bitmap?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = "Превью",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = caption,
+                    onValueChange = { caption = it },
+                    placeholder = { Text("Подпись (необязательно)…") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 4
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Отмена") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onSend(caption.trim()) }) { Text("Отправить") }
+                }
             }
         }
     }
@@ -2977,7 +3076,7 @@ private fun PollMessageBubble(
                 }
             }
         }
-        // НОВОЕ (викторина): итог для проголосовавшего и пояснение после голосования.
+        // НОВОЕ (викторина): итог для проголосовавшего �� пояснение после голосования.
         if (poll.isQuiz && showResults) {
             Spacer(modifier = Modifier.height(6.dp))
             val answeredRight = currentUserId?.let { poll.answeredCorrectly(it) } ?: false
@@ -3035,7 +3134,7 @@ private fun PollCreationDialog(
     var isAnonymous by remember { mutableStateOf(true) }
     var allowMultiple by remember { mutableStateOf(false) }
     var closesInHours by remember { mutableStateOf<Int?>(null) }
-    // НОВОЕ (викторина): режим викторины с правильным ответом и пояснением.
+    // НОВОЕ (викторина): режим викторины с ����равильным ответом и пояснением.
     var isQuiz by remember { mutableStateOf(false) }
     var correctIndex by remember { mutableStateOf<Int?>(null) }
     var explanation by remember { mutableStateOf("") }

@@ -25,6 +25,11 @@ sealed class Routes(val route: String) {
     data object ProfileHistory : Routes("profile_history")
     data object QrCode : Routes("qr_code")
     data object ScanContact : Routes("scan_contact")
+    // НОВОЕ (поделиться контактом абонента): QR-карточка контакта собеседника.
+    data object ContactQr : Routes("contact_qr/{userId}") {
+        fun createRoute(userId: String) = "contact_qr/$userId"
+        const val ARG_USER_ID = "userId"
+    }
     data object RecentCalls : Routes("recent_calls")
     data object Devices : Routes("devices")
 
@@ -93,5 +98,4 @@ sealed class Routes(val route: String) {
     data object AdminPanel : Routes("admin_panel")
 
     // НОВОЕ: личный блокнот «Заметки».
-    data object Notes : Routes("notes")
 }

@@ -175,7 +175,22 @@ fun ChannelProfileScreen(
                         // ═══ Кнопки подписки ═══
                         // У официального канала подписки нет — он виден всем и закреплён в списке.
                         if (!profile.isVerified) {
-                            if (!profile.isSubscribed) {
+                            if (!profile.isSubscribed &&
+                                profile.accessMode == app.yodo.messenger.domain.model.ChannelAccessMode.MODERATED) {
+                                // НОВОЕ (модерируемый канал): подача/отмена заявки на вступление.
+                                if (profile.hasPendingJoinRequest) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.toggleSubscription() },
+                                        modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp)
+                                    ) { Text("Заявка отправлена · отменить") }
+                                } else {
+                                    Button(
+                                        onClick = { viewModel.toggleSubscription() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
+                                        modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp)
+                                    ) { Text("Подать заявку", color = Color.White, fontWeight = FontWeight.SemiBold) }
+                                }
+                            } else if (!profile.isSubscribed) {
                                 GradientSubscribeButton(
                                     colorTheme = colorTheme,
                                     onClick = { viewModel.toggleSubscription() },

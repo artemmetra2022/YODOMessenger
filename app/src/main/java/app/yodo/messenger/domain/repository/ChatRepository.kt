@@ -5,8 +5,11 @@ import app.yodo.messenger.domain.model.AdminLogEntry
 import app.yodo.messenger.domain.model.AdminLogFilter
 import app.yodo.messenger.domain.model.AssignedRole
 import app.yodo.messenger.domain.model.BuiltInRole
+import app.yodo.messenger.domain.model.ChannelAccessMode
 import app.yodo.messenger.domain.model.ChannelProfile
+import app.yodo.messenger.domain.model.ChannelRestrictions
 import app.yodo.messenger.domain.model.ChatPreview
+import app.yodo.messenger.domain.model.JoinRequest
 import app.yodo.messenger.domain.model.CustomRole
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.YodoUser
@@ -33,7 +36,11 @@ data class ChannelSearchItem(
     val isVerified: Boolean,
     val isSubscribed: Boolean,
     // НОВОЕ (F5): категория канала для выдачи поиска.
-    val category: String? = null
+    val category: String? = null,
+    // НОВОЕ (режимы доступа каналов): режим доступа (для отображения «по заявке» и т.п.).
+    val accessMode: ChannelAccessMode = ChannelAccessMode.OPEN,
+    // НОВОЕ (модерируемые каналы): пользователь уже подал заявку на вступление.
+    val hasPendingJoinRequest: Boolean = false
 )
 
 data class ChatInfo(
@@ -50,7 +57,11 @@ data class ChatInfo(
     val subscriberCount: Int = 0,
     val isSubscribed: Boolean = false,
     // НОВОЕ: дата создания (для профиля канала).
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    // НОВОЕ (режимы доступа каналов): режим доступа и ограничения канала —
+    // используются в ChatScreen для применения ограничений (пересылка, комментарии и т.д.).
+    val accessMode: ChannelAccessMode = ChannelAccessMode.OPEN,
+    val restrictions: ChannelRestrictions = ChannelRestrictions.DEFAULT
 )
 
 sealed class ChatListResult {
@@ -104,7 +115,13 @@ interface ChatRepository {
 ): CreateChatResult
 
     // НОВОЕ: создание канала с необязательной аватаркой (Bitmap после кропа).
-    suspend fun createChannel(title: String, description: String, avatarBitmap: Bitmap? = null): CreateChatResult
+    // НОВОЕ (режимы доступа): при создании можно сразу задать режим доступа канала.
+    suspend fun createChannel(
+        title: String,
+        description: String,
+        avatarBitmap: Bitmap? = null,
+        accessMode: ChannelAccessMode = ChannelAccessMode.OPEN
+    ): CreateChatResult
 
     suspend fun subscribeToChannel(chatId: String)
     suspend fun unsubscribeFromChannel(chatId: String)
@@ -129,6 +146,22 @@ interface ChatRepository {
     suspend fun updateChannelMeta(chatId: String, category: String?, tags: List<String>): ChannelUpdateResult
     // НОВОЕ (F5): обложка (баннер) канала, сжатый Base64.
     suspend fun uploadChannelCover(chatId: String, bitmap: Bitmap): ChannelUpdateResult
+
+    // === НОВОЕ (режимы доступа и ограничения каналов) ===
+    /** Сменить режим доступа канала (владелец/админ). */
+    suspend fun updateChannelAccessMode(chatId: String, mode: ChannelAccessMode): ChannelUpdateResult
+    /** Обновить набор ограничений канала (пересылка, комментарии, реакции и т.д.). */
+    suspend fun updateChannelRestrictions(chatId: String, restrictions: ChannelRestrictions): ChannelUpdateResult
+    /** Подать заявку на вступление в модерируемый канал. */
+    suspend fun requestToJoinChannel(chatId: String): ChannelUpdateResult
+    /** Отменить свою заявку на вступление. */
+    suspend fun cancelJoinRequest(chatId: String): ChannelUpdateResult
+    /** Список ожидающих заявок на вступление (владелец/админ). */
+    suspend fun getJoinRequests(chatId: String): List<JoinRequest>
+    /** Одобрить заявку — подписать пользователя на канал. */
+    suspend fun approveJoinRequest(chatId: String, userId: String): ChannelUpdateResult
+    /** Отклонить заявку. */
+    suspend fun rejectJoinRequest(chatId: String, userId: String): ChannelUpdateResult
 
     // === НОВОЕ (чат поддержки) ===
     /** Является ли текущий пользователь админом поддержки (по email). */

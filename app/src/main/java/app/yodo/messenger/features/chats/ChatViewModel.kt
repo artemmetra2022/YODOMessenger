@@ -467,10 +467,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun sendImage(base64: String, isViewOnce: Boolean = false) {
+    // НОВОЕ (картинки из буфера + подпись): передаём необязательную подпись к фото.
+    fun sendImage(base64: String, caption: String = "", isViewOnce: Boolean = false) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendImageMessage(chatId, base64, isViewOnce = isViewOnce)) {
+            when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }

@@ -139,6 +139,24 @@ service cloud.firestore {
       // roles/customRoles — здесь на уровне правил гарантируем только
       // принадлежность к чату). Писать может только сам участник от своего
       // имени, сразу после выполненного им действия.
+      // НОВОЕ (модерируемые каналы): заявки на вступление хранятся в подколлекции
+      // joinRequests/{userId}. Создать/удалить свою заявку может сам пользователь;
+      // читать список и удалять (одобрять/отклонять) — владелец или админ канала.
+      match /joinRequests/{userId} {
+        allow read: if isSignedIn() &&
+          (request.auth.uid == userId ||
+           request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.createdBy ||
+           request.auth.uid in (get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds is list
+             ? get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds : []));
+        allow create: if isSignedIn() && request.auth.uid == userId;
+        allow delete: if isSignedIn() &&
+          (request.auth.uid == userId ||
+           request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.createdBy ||
+           request.auth.uid in (get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds is list
+             ? get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds : []));
+        allow update: if false;
+      }
+
       match /adminLog/{logId} {
         allow read: if isSignedIn() &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
