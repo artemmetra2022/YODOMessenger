@@ -14,5 +14,9 @@ data class ChannelProfile(
     val ownerId: String?,
     val adminIds: List<String>,
     val isSubscribed: Boolean,
-    val createdAt: Long
+    val createdAt: Long,
+    // НОВОЕ (F5 категории/обложка канала):
+    val category: String? = null,
+    val tags: List<String> = emptyList(),
+    val coverBase64: String? = null
 )

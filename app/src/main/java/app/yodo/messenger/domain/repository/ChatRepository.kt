@@ -31,7 +31,9 @@ data class ChannelSearchItem(
     val avatarBase64: String?,
     val subscriberCount: Int,
     val isVerified: Boolean,
-    val isSubscribed: Boolean
+    val isSubscribed: Boolean,
+    // НОВОЕ (F5): категория канала для выдачи поиска.
+    val category: String? = null
 )
 
 data class ChatInfo(
@@ -123,6 +125,10 @@ interface ChatRepository {
     suspend fun updateChannelInfo(chatId: String, title: String, description: String): ChannelUpdateResult
     /** Загрузка аватарки канала — сжатый Base64 прямо в документ чата. */
     suspend fun uploadChannelAvatar(chatId: String, bitmap: Bitmap): ChannelUpdateResult
+    // НОВОЕ (F5): категория и теги канала (для поиска/навигации).
+    suspend fun updateChannelMeta(chatId: String, category: String?, tags: List<String>): ChannelUpdateResult
+    // НОВОЕ (F5): обложка (баннер) канала, сжатый Base64.
+    suspend fun uploadChannelCover(chatId: String, bitmap: Bitmap): ChannelUpdateResult
 
     // === НОВОЕ (чат поддержки) ===
     /** Является ли текущий пользователь админом поддержки (по email). */

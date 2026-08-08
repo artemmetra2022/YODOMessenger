@@ -186,11 +186,21 @@ service cloud.firestore {
         // Редактировать/удалять сообщение может только его автор
         // (senderId == текущий пользователь), либо один из двух
         // администраторов — если это официальный канал.
-        allow update, delete: if isSignedIn() &&
+        allow update: if isSignedIn() &&
           (
             (chatId == 'yodo_official_channel' && isOfficialChannelAdmin()) ||
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||
-            isViewOnceOpenUpdate()
+            isViewOnceOpenUpdate() ||
+            // НОВОЕ (F1 реакции + F3 просмотры): любой авторизованный пользователь
+            // может ставить реакции и отмечать просмотр поста — обновляя ТОЛЬКО эти поля.
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['reactions', 'viewedBy', 'viewCount'])
+          );
+
+        allow delete: if isSignedIn() &&
+          (
+            (chatId == 'yodo_official_channel' && isOfficialChannelAdmin()) ||
+            (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId)
           );
       }
     }

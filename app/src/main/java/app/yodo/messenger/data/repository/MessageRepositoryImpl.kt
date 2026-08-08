@@ -72,7 +72,8 @@ class MessageRepositoryImpl @Inject constructor(
         chatId: String,
         data: MutableMap<String, Any?>,
         hasTtlOverride: Boolean = false,
-        ttlOverrideSeconds: Long? = null
+        ttlOverrideSeconds: Long? = null,
+        silent: Boolean = false
     ): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
         return try {
@@ -84,6 +85,12 @@ class MessageRepositoryImpl @Inject constructor(
             data["timestamp"] = now
             data["status"] = "SENT"
             data["notified"] = false
+            // НОВОЕ (секретная фича «тихие публикации»): silent-пост не триггерит push
+            // (серверная функция уведомлений пропускает notified=true) и не «пикает».
+            if (silent) {
+                data["silent"] = true
+                data["notified"] = true
+            }
             // п.38 + переработка per-message: если пользователь явно выбрал таймер для этого
             // сообщения — используем его (в т.ч. явное "выключено"); иначе — TTL чата по умолчанию.
             val ttlSeconds = if (hasTtlOverride) ttlOverrideSeconds else chatSnapshot.getLong("disappearingTtlSeconds")
@@ -112,7 +119,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext?,
-        hasTtlOverride: Boolean, ttlOverrideSeconds: Long?
+        hasTtlOverride: Boolean, ttlOverrideSeconds: Long?, silent: Boolean
     ): SendMessageResult {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Сообщение не может быть пустым")
@@ -124,7 +131,7 @@ class MessageRepositoryImpl @Inject constructor(
         }
         // НОВОЕ (сквозное шифрование): для личных чатов шифруем текст под ключи участников.
         tryEncryptTextData(chatId, data)
-        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds)
+        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent)
     }
 
     /**
@@ -520,6 +527,31 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
+    // НОВОЕ (F3 статистика постов канала): регистрируем уникальный просмотр поста.
+    // viewedBy — множество uid просмотревших, viewCount — денормализованный счётчик.
+    // Разрешено любому авторизованному пользователю (правила ограничивают набор полей).
+    override suspend fun registerPostView(chatId: String, messageId: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        val messageRef = firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+        try {
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(messageRef)
+                val viewedBy = (snapshot.get("viewedBy") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                if (uid !in viewedBy) {
+                    transaction.update(
+                        messageRef,
+                        mapOf(
+                            "viewedBy" to FieldValue.arrayUnion(uid),
+                            "viewCount" to FieldValue.increment(1)
+                        )
+                    )
+                }
+                null
+            }.await()
+        } catch (e: Exception) { }
+    }
+
     override suspend fun toggleReaction(chatId: String, messageId: String, emoji: String) {
         val uid = firebaseAuth.currentUser?.uid ?: return
         val messageRef = firestore.collection("chats").document(chatId)
@@ -803,7 +835,8 @@ class MessageRepositoryImpl @Inject constructor(
                 commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt(),
                 poll = mapDocToPoll(doc),
                 isViewOnce = doc.getBoolean("isViewOnce") ?: false,
-                viewOnceOpened = doc.getBoolean("viewOnceOpened") ?: false
+                viewOnceOpened = doc.getBoolean("viewOnceOpened") ?: false,
+                viewCount = (doc.getLong("viewCount") ?: 0L).toInt()
             )
         } catch (e: Exception) { null }
     }

@@ -36,7 +36,9 @@ data class Message(
     // полноэкранно один раз, imageBase64 удаляется на сервере (см. MessageRepositoryImpl.
     // markViewOnceImageOpened) и локально показывается только заглушка "Фото открыто".
     val isViewOnce: Boolean = false,
-    val viewOnceOpened: Boolean = false
+    val viewOnceOpened: Boolean = false,
+    // НОВОЕ (F3 статистика постов канала): число уникальных просмотров поста.
+    val viewCount: Int = 0
 ) {
     fun previewText(): String = when {
         text.isNotBlank() -> text

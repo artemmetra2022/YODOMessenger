@@ -28,7 +28,9 @@ interface MessageRepository {
     // чата (disappearingTtlSeconds из документа chats/{chatId}), как и раньше.
     suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext? = null,
-        hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null
+        hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null,
+        // НОВОЕ (секретная фича «тихие публикации»): не триггерит push-уведомление.
+        silent: Boolean = false
     ): SendMessageResult
     suspend fun sendImageMessage(
         chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false
@@ -75,6 +77,8 @@ interface MessageRepository {
     suspend fun deleteMessage(chatId: String, messageId: String): SendMessageResult
     suspend fun markChatAsRead(chatId: String)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
+    // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).
+    suspend fun registerPostView(chatId: String, messageId: String)
     suspend fun togglePinMessage(chatId: String, messageId: String): SendMessageResult
     fun observePinnedMessages(chatId: String): Flow<List<Message>>
     suspend fun toggleBookmark(messageId: String, chatId: String)

@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -60,6 +62,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import app.yodo.messenger.util.ImageUtils
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -304,6 +309,18 @@ private fun ChannelHero(
     colorTheme: ColorTheme
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+        // НОВОЕ (F5): обложка (баннер) канала над шапкой.
+        profile.coverBase64?.let { cover ->
+            val coverBmp = remember(cover) { ImageUtils.decodeBase64ToBitmap(cover) }
+            if (coverBmp != null) {
+                Image(
+                    bitmap = coverBmp.asImageBitmap(),
+                    contentDescription = "Обложка канала",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxWidth().height(140.dp)
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -348,6 +365,20 @@ private fun ChannelHero(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 6.dp)
                     )
+                }
+                // НОВОЕ (F5): чипы категории и тегов.
+                if (!profile.category.isNullOrBlank() || profile.tags.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        profile.category?.takeIf { it.isNotBlank() }?.let { cat ->
+                            ChannelMetaChip(text = cat, highlighted = true)
+                        }
+                        profile.tags.take(3).forEach { tag ->
+                            ChannelMetaChip(text = "#$tag", highlighted = false)
+                        }
+                    }
                 }
                 Text(
                     buildString {
@@ -402,6 +433,21 @@ private fun ChannelHero(
             }
         }
     }
+}
+
+/** НОВОЕ (F5): чип категории/тега канала на полупрозрачном фоне. */
+@Composable
+private fun ChannelMetaChip(text: String, highlighted: Boolean) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium,
+        color = Color.White,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = if (highlighted) 0.28f else 0.16f))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    )
 }
 
 /** Плоский аватар канала на белой подложке с тонкой обводкой — без вращающегося кольца. */

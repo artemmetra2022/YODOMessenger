@@ -617,7 +617,11 @@ class ChatRepositoryImpl @Inject constructor(
                     val title = (doc.getString("title") ?: "").lowercase()
                     val titleLc = doc.getString("titleLowercase") ?: title
                     val desc = (doc.getString("description") ?: "").lowercase()
-                    titleLc.contains(normalized) || title.contains(normalized) || desc.contains(normalized)
+                    val category = (doc.getString("category") ?: "").lowercase()
+                    val tags = (doc.get("tags") as? List<*>)?.filterIsInstance<String>()
+                        ?.joinToString(" ") { it.lowercase() } ?: ""
+                    titleLc.contains(normalized) || title.contains(normalized) ||
+                        desc.contains(normalized) || category.contains(normalized) || tags.contains(normalized)
                 }
                 .map { doc ->
                     val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
@@ -628,7 +632,8 @@ class ChatRepositoryImpl @Inject constructor(
                         avatarBase64 = doc.getString("avatarBase64"),
                         subscriberCount = participantIds.size,
                         isVerified = doc.getBoolean("isVerified") ?: false,
-                        isSubscribed = uid != null && uid in participantIds
+                        isSubscribed = uid != null && uid in participantIds,
+                        category = doc.getString("category")
                     )
                 }
                 // Верифицированные каналы (в т.ч. официальный) — выше в выдаче.
@@ -654,7 +659,10 @@ class ChatRepositoryImpl @Inject constructor(
                 ownerId = doc.getString("createdBy"),
                 adminIds = (doc.get("adminIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 isSubscribed = uid != null && uid in participantIds,
-                createdAt = doc.getLong("createdAt") ?: 0L
+                createdAt = doc.getLong("createdAt") ?: 0L,
+                category = doc.getString("category"),
+                tags = (doc.get("tags") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                coverBase64 = doc.getString("coverBase64")
             )
         } catch (e: Exception) { null }
     }
@@ -688,6 +696,35 @@ class ChatRepositoryImpl @Inject constructor(
             ChannelUpdateResult.Success
         } catch (e: Exception) {
             ChannelUpdateResult.Error(e.toUserMessage("Не удалось загрузить фото"))
+        }
+    }
+
+    // НОВОЕ (F5): сохранение категории и тегов канала.
+    override suspend fun updateChannelMeta(chatId: String, category: String?, tags: List<String>): ChannelUpdateResult {
+        return try {
+            val cleanTags = tags.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(10)
+            firestore.collection("chats").document(chatId).update(
+                mapOf(
+                    "category" to (category?.trim()?.takeIf { it.isNotBlank() }),
+                    "tags" to cleanTags
+                )
+            ).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось сохранить категорию"))
+        }
+    }
+
+    // НОВОЕ (F5): загрузка обложки (баннера) канала — сжатый Base64 в документ чата.
+    override suspend fun uploadChannelCover(chatId: String, bitmap: Bitmap): ChannelUpdateResult {
+        return try {
+            val base64 = withContext(Dispatchers.Default) {
+                ImageUtils.compressAvatarToBase64(bitmap)
+            } ?: return ChannelUpdateResult.Error("Не удалось обработать изображение")
+            firestore.collection("chats").document(chatId).update("coverBase64", base64).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось загрузить обложку"))
         }
     }
 
@@ -1047,7 +1084,7 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun updateCustomRole(chatId: String, roleId: String, name: String, permissions: Set<Permission>): ChannelUpdateResult {
         val trimmed = name.trim()
-        if (trimmed.isBlank()) return ChannelUpdateResult.Error("Введите название роли")
+        if (trimmed.isBlank()) return ChannelUpdateResult.Error("Введите название рол��")
         return try {
             val data = mapOf(
                 "name" to trimmed,

@@ -251,7 +251,7 @@ class ChatViewModel @Inject constructor(
     }
 
     // НОВОЕ (п.38): периодически (пока открыт чат) чистим уже истёкшие сообщения —
-    // best-effort без Cloud Functions/cron. Достаточно, чтобы в реальном использовании
+    // best-effort ��ез Cloud Functions/cron. Достаточно, чтобы в реальном использовании
     // сообщения пропадали вскоре после истечения таймера у любого из открывших чат.
     // Ранний выход: если в чате не включён TTL — не делаем запрос к Firestore вообще.
     private fun cleanupExpiredMessagesPeriodically() {
@@ -431,7 +431,7 @@ class ChatViewModel @Inject constructor(
     // - hasExplicitTtl = true, explicitTtlSeconds = null -> пользователь явно ВЫКЛЮЧИЛ
     //   исчезание для этого конкретного сообщения (даже если в чате TTL по умолчанию включён).
     // - hasExplicitTtl = true, explicitTtlSeconds = N -> пользователь явно выбрал таймер N сек.
-    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false) {
+    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false, silent: Boolean = false) {
         if (text.isBlank()) return
         clearTypingStatus()
         viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
@@ -458,7 +458,8 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = messageRepository.sendMessage(
                 chatId, text, replyContext,
-                hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds
+                hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds,
+                silent = silent
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -585,6 +586,13 @@ class ChatViewModel @Inject constructor(
 
     fun toggleReaction(messageId: String, emoji: String) {
         viewModelScope.launch { messageRepository.toggleReaction(chatId, messageId, emoji) }
+    }
+
+    // НОВОЕ (F3 статистика постов): отмечаем просмотр поста канала при показе на экране.
+    // Уникальность по uid гарантируется в репозитории (viewedBy).
+    fun registerPostView(messageId: String) {
+        if (_uiState.value.chatType != "CHANNEL") return
+        viewModelScope.launch { messageRepository.registerPostView(chatId, messageId) }
     }
 
     fun togglePinMessage(messageId: String) {

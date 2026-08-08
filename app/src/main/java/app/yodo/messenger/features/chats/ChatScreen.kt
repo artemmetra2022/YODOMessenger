@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Photo
@@ -311,12 +312,16 @@ fun ChatScreen(
     var showPerMessageTtlDialog by remember { mutableStateOf(false) }
     var messagesAreaWindowBounds by remember { mutableStateOf<android.graphics.Rect?>(null) }
 
+    // НОВОЕ (секретная фича «тихие публикации»): режим тихой публикации для каналов.
+    var channelSilentMode by remember { mutableStateOf(false) }
+
     fun trySend() {
         if (inputText.isNotBlank()) {
             viewModel.sendMessage(
                 inputText,
                 explicitTtlSeconds = pendingMessageTtlSeconds,
-                hasExplicitTtl = pendingMessageTtlExplicitlySet
+                hasExplicitTtl = pendingMessageTtlExplicitlySet,
+                silent = (uiState.chatType == "CHANNEL") && channelSilentMode
             )
             inputText = ""
             pendingMessageTtlSeconds = null
@@ -854,6 +859,29 @@ fun ChatScreen(
                             }
                         }
                     }
+                    // НОВОЕ (секретная фича «тихие публикации»): тумблер тихого режима для каналов.
+                    if (isChannel) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { channelSilentMode = !channelSilentMode }
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (channelSilentMode) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
+                                contentDescription = null,
+                                tint = if (channelSilentMode) colorTheme.accent else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                if (channelSilentMode) "Тихая публикация: без уведомления" else "Обычная публикация",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (channelSilentMode) colorTheme.accent else MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
                     when {
                         isRecording -> {
                             VoiceRecordingBar(
@@ -1032,6 +1060,10 @@ fun ChatScreen(
                             previousDateLabel = dateLabel
                         }
                         item(key = message.id) {
+                            // НОВОЕ (F3): отмечаем просмотр поста канала при появлении на экране.
+                            if (isChannel) {
+                                LaunchedEffect(message.id) { viewModel.registerPostView(message.id) }
+                            }
                             SwipeableMessageBubble(
                                 message = message,
                                 isOwnMessage = message.senderId == viewModel.currentUserId,
@@ -1099,7 +1131,7 @@ fun ChatScreen(
     // ни другого. Как только пользователь открыл экран, сразу помечаем сообщение как
     // просмотренное и стираем imageBase64 на сервере — повторно открыть уже нельзя,
     // в т.ч. если сообщение отправил сам пользователь себе на другое устройство.
-    // НОВОЕ (детектор скриншотов): защита от повторной отправки уведомления, если
+    // НОВОЕ (детектор скриншотов): защита от повторной отправки уведомле��ия, если
     // ContentObserver.onChange сработает несколько раз на один и тот же файл скриншота
     // (типично для MediaStore — сначала PENDING-запись, потом финализация).
     var screenshotNoticeSent by remember(viewOnceOverlayMessage?.id) { mutableStateOf(false) }
@@ -1681,6 +1713,37 @@ private fun MessageBubble(
                         color = colorTheme.primary
                     )
                 }
+                // НОВОЕ (F3 + секретная фича «🔥 Популярное»): просмотры и бейдж популярности.
+                val totalReactions = message.reactions.values.sumOf { it.size }
+                val isPopular = message.viewCount >= 100 || totalReactions >= 10
+                Row(
+                    modifier = Modifier.padding(top = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Visibility, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "${message.viewCount}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    if (isPopular) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "🔥 Популярное",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colorTheme.accent,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colorTheme.accent.copy(alpha = 0.15f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1717,7 +1780,7 @@ private fun ReplyPreviewBar(message: Message, isOwn: Boolean, onCancel: () -> Un
 }
 
 private val COMMON_EMOJIS = listOf(
-    "😀", "😂", "😍", "🥰", "😊", "😉", "😎", "🤔",
+    "😀", "😂", "����", "🥰", "😊", "😉", "😎", "🤔",
     "😢", "😭", "😡", "🥳", "👍", "👎", "❤️", "🔥",
     "🎉", "🙏", "👏", "😴", "🤗", "😅", "😱", "🤷",
     "✅", "❌", "⭐", "💯", "😇", "🤝", "👀", "💔"

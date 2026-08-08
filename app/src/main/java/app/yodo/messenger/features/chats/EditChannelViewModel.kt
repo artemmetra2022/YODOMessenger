@@ -25,6 +25,8 @@ data class EditChannelUiState(
     val isOwner: Boolean = false,
     val isSaving: Boolean = false,
     val isUploadingAvatar: Boolean = false,
+    val isUploadingCover: Boolean = false,
+    val isSavingMeta: Boolean = false,
     val isSearching: Boolean = false,
     val adminSearchResults: List<YodoUser> = emptyList(),
     val errorMessage: String? = null
@@ -100,6 +102,37 @@ class EditChannelViewModel @Inject constructor(
                 }
                 is ChannelUpdateResult.Error ->
                     _uiState.value = _uiState.value.copy(isUploadingAvatar = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    // НОВОЕ (F5): сохранение категории и тегов канала.
+    fun saveMeta(category: String, tagsRaw: String) {
+        _uiState.value = _uiState.value.copy(isSavingMeta = true, errorMessage = null)
+        val tags = tagsRaw.split(",", " ", "#").map { it.trim() }.filter { it.isNotBlank() }
+        viewModelScope.launch {
+            when (val result = chatRepository.updateChannelMeta(chatId, category, tags)) {
+                is ChannelUpdateResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isSavingMeta = false)
+                    reload()
+                }
+                is ChannelUpdateResult.Error ->
+                    _uiState.value = _uiState.value.copy(isSavingMeta = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    // НОВОЕ (F5): загрузка обложки (баннера) канала — сразу после кропа.
+    fun uploadCover(bitmap: Bitmap) {
+        _uiState.value = _uiState.value.copy(isUploadingCover = true, errorMessage = null)
+        viewModelScope.launch {
+            when (val result = chatRepository.uploadChannelCover(chatId, bitmap)) {
+                is ChannelUpdateResult.Success -> {
+                    _uiState.value = _uiState.value.copy(isUploadingCover = false)
+                    reload()
+                }
+                is ChannelUpdateResult.Error ->
+                    _uiState.value = _uiState.value.copy(isUploadingCover = false, errorMessage = result.message)
             }
         }
     }
