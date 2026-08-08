@@ -198,7 +198,7 @@
     <string name="chat_clear_history">Очистить историю</string>
     <string name="chat_stats_menu">Статистика чата</string>
     <string name="chat_export">Экспорт чата</string>
-    <string name="chat_screenshot">Сделать скриншот</string>
+    <string name="chat_screenshot">Сделать с��риншот</string>
     <string name="chat_screenshot_saved">Скриншот сохранён в галерею</string>
     <string name="chat_screenshot_error">Не удалось сделать скриншот</string>
     <string name="chat_delete_channel">Удалить канал</string>
@@ -347,6 +347,7 @@
     <string name="forward_section_groups">Группы</string>
     <string name="forward_section_personal">Личные чаты</string>
     <string name="forward_official_channel">Официальный канал · рассылка от админов</string>
+    <string name="forward_channel">Канал</string>
     <string name="forward_saved_messages">Сохранённые сообщения</string>
     <string name="forward_group_chat">Групповой чат</string>
     <string name="forward_chat_default">Чат</string>

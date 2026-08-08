@@ -210,7 +210,7 @@ fun ChatScreen(
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
     var inputText by remember { mutableStateOf("") }
-    // НОВОЕ (система жалоб): сообщение, на которое сейчас ��ткрыт диалог "Пожаловаться".
+    // НОВОЕ (система жалоб): сообщени��, на которое сейчас ��ткрыт диалог "Пожаловаться".
     var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -270,6 +270,24 @@ fun ChatScreen(
         }
     }
 
+    // НОВОЕ (несколько фото): множественный выбор фото. Все выбранные фото
+    // сжимаются и отправляются ОДНИМ сообщением-альбомом (не подряд отдельными).
+    val multiImagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            val encoded = withContext(Dispatchers.Default) {
+                uris.mapNotNull { ImageUtils.compressChatImageToBase64(context, it) }
+            }
+            when {
+                encoded.isEmpty() -> snackbarHostState.showSnackbar("Не удалось обработать фото")
+                encoded.size == 1 -> viewModel.sendImage(encoded.first())
+                else -> viewModel.sendImages(encoded)
+            }
+        }
+    }
+
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -294,7 +312,7 @@ fun ChatScreen(
     }
 
     var showAttachMenu by remember { mutableStateOf(false) }
-    // НОВОЕ (картинки из буфера + подпись): base64 картинки, ожидающей подписью
+    // НОВОЕ (картинки и�� буфера + подпись): base64 картинки, ожидающей подписью
     // и подтверждения отправки (не моментальная отправка).
     var pendingCaptionImageBase64 by remember { mutableStateOf<String?>(null) }
 
@@ -548,7 +566,7 @@ fun ChatScreen(
                                             onClick = { showChatMenu = false; showDisappearingDialog = true }
                                         )
                                     }
-                                    // НОВОЕ (поделиться контактом абонента): делимся QR-кодом контакта собеседника, а не своего.
+                                    // НОВОЕ (поделиться контактом абонента): делимся QR-кодом контакта ��обеседника, а не своего.
                                     if (uiState.chatType == "PRIVATE" && uiState.otherUserId != null) {
                                         DropdownMenuItem(
                                             text = { Text("Поделиться контактом абонента (QR)") },
@@ -648,7 +666,7 @@ fun ChatScreen(
                         Icon(Icons.Filled.PushPin, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(16.dp))
                         Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                             Text("Закреплённое сообщение", style = MaterialTheme.typography.labelSmall, color = colorTheme.primary, fontWeight = FontWeight.Bold)
-                            Text(pinned.text.ifBlank { "📷 Фото" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(pinned.text.ifBlank { "📷 Фо��о" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Icon(
                             Icons.Filled.Close,
@@ -973,7 +991,8 @@ fun ChatScreen(
                             onPickPhoto = {
                                 showAttachMenu = false
                                 pendingImageIsViewOnce = false
-                                imagePicker.launch("image/*")
+                                // Можно выбрать сразу несколько фото — они уйдут одним альбомом.
+                                multiImagePicker.launch("image/*")
                             },
                             onPickViewOncePhoto = {
                                 showAttachMenu = false
@@ -1126,7 +1145,7 @@ fun ChatScreen(
                                     onOpenImageViewer(base64, uiState.chatTitle, message.timestamp)
                                 },
                                 // НОВОЕ (одноразовые медиа): открываем фото в оверлее ПОВЕРХ
-                                // чата (не через onOpenImageViewer/н����вигацию — там есть общий
+                                // чата (не через onOpenImageViewer/н��������вигацию — там есть общий
                                 // держатель картинки и повторные открытия), и только для чужих
                                 // сообщений своей же отправки не помечаем "открыто", т.к. это
                                 // сделает получатель на своём устройстве.
@@ -1228,7 +1247,7 @@ private fun ViewOnceImageOverlay(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        // Диалог Compose открывает СВОЁ окно поверх окна Activity — FLAG_SECURE, выставленный
+        // Диалог Compose открывает СВОЁ окно поверх ок��а Activity — FLAG_SECURE, выставленный
         // только на activity.window, не наследуется на него автоматически, поэтому дублируем
         // флаг на окно самого диалога через DialogWindowProvider.
         val dialogWindowProvider = LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider
@@ -1287,6 +1306,50 @@ private fun DateSeparator(label: String) {
     }
 }
 
+// НОВОЕ (несколько фото): сетка-коллаж для нескольких фото в одном сообщении.
+// Фото показываются по 2 в ряд (при нечётном количестве последнее занимает всю ширину).
+@Composable
+private fun ImageAlbumGrid(
+    images: List<String>,
+    onImageClick: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .padding(4.dp)
+            .widthIn(min = 180.dp, max = 260.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        images.chunked(2).forEach { rowImages ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                rowImages.forEach { base64 ->
+                    val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Фото",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onImageClick(base64) }
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                    }
+                }
+                // Если в ряду одно фото (нечётное общее число) — добавляем пустой вес для выравнивания.
+                if (rowImages.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SwipeableMessageBubble(
     message: Message,
@@ -1329,10 +1392,11 @@ private fun SwipeableMessageBubble(
                     onDragEnd = {
                         when {
                             offsetX > replyThresholdPx -> onReply()
-                            offsetX < -forwardZoneEndPx -> onSwipeBack()
-                            // НОВОЕ (одноразовые медиа): свайп-пересылка недоступна для
-                            // view-once сообщений — см. запрет в DropdownMenuItem выше.
-                            offsetX < 0f && !message.isViewOnce -> onForward()
+                            // Свайп влево — переслать любое сообщение (в т.ч. чужое в личном
+                            // чате). Раньше длинный свайп влево срабатывал как "назад" и мешал
+                            // пересылке; теперь за "назад" отвечает только краевой свайп (swipeToGoBack).
+                            // view-once сообщения пересылать нельзя.
+                            offsetX < -replyThresholdPx && !message.isViewOnce -> onForward()
                         }
                         offsetX = 0f
                     },
@@ -1512,6 +1576,20 @@ private fun MessageBubble(
                                     Text("Тап, чтобы посмотреть (один раз)", color = textColor)
                                 }
                             }
+                        }
+                    } else if (message.imagesBase64.isNotEmpty()) {
+                        // НОВОЕ (несколько фото): альбом — несколько фото сеткой в одном пузыре.
+                        if (revealImage) {
+                            ImageAlbumGrid(images = message.imagesBase64, onImageClick = onImageClick)
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(120.dp)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(textColor.copy(alpha = 0.12f))
+                                    .clickable { revealImage = true },
+                                contentAlignment = Alignment.Center
+                            ) { Text("Тап, чтобы загрузить фото (${message.imagesBase64.size})", color = textColor) }
                         }
                     } else {
                         message.imageBase64?.let { base64 ->
@@ -2383,7 +2461,7 @@ private fun formatCustomTtlLabel(ttlSeconds: Long): String {
         ttlSeconds % (24 * 60 * 60L) == 0L && days > 0 -> pluralizeRu(days, "день", "дня", "дней")
         ttlSeconds % (60 * 60L) == 0L && hours > 0 -> pluralizeRu(hours, "час", "часа", "часов")
         ttlSeconds % 60L == 0L && minutes > 0 -> pluralizeRu(minutes, "минута", "минуты", "минут")
-        else -> pluralizeRu(ttlSeconds, "секунда", "секунды", "секунд")
+        else -> pluralizeRu(ttlSeconds, "��екунда", "секунды", "секунд")
     }
 }
 
@@ -2421,7 +2499,7 @@ private fun DisappearingMessagesDialog(
     val isCustomSelected = currentTtlSeconds != null && DISAPPEARING_TTL_OPTIONS.none { it.second == currentTtlSeconds }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (perMessage) "Таймер для этого сообщения" else "Исчезающие сообщения") },
+        title = { Text(if (perMessage) "Т��ймер для этого сообщения" else "Исчезающие сообщения") },
         text = {
             Column {
                 Text(
@@ -2708,7 +2786,7 @@ private fun AttachMenuDialog(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
-                AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото", onClick = onPickPhoto)
+                AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото (можно несколько)", onClick = onPickPhoto)
                 // НОВОЕ (картинки из буфера): вставить изображение из буфера обмена (с подписью).
                 AttachMenuRow(icon = Icons.Filled.ContentPaste, label = "Вставить из буфера", onClick = onPasteImage)
                 // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть
@@ -3367,7 +3445,7 @@ private fun PollCreationDialog(
                             val closesAtMillis = closesInHours?.let {
                                 System.currentTimeMillis() + it.toLong() * 60 * 60 * 1000
                             }
-                            // Индекс правильного ответа нужно пересчитать относительно
+                            // Индекс правильного ответа нужн�� пересчитать относительно
                             // очищенного списка (без пустых вариантов).
                             val remappedCorrect = if (isQuiz) correctIndex?.let { ci ->
                                 if (options.getOrNull(ci)?.isBlank() != false) null

@@ -101,6 +101,7 @@ class MessageRepositoryImpl @Inject constructor(
             val previewText = if (data["encrypted"] == true) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
                 ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
                 else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
+                else if (data.containsKey("imagesBase64")) "📷 Фото (${(data["imagesBase64"] as? List<*>)?.size ?: 1})"
                 else if (data.containsKey("imageBase64")) "📷 Фото"
                 else if (data.containsKey("locationLat")) "📍 Геопозиция"
                 else if (data.containsKey("fileBase64")) "📎 ${data["fileName"] as? String ?: "Файл"}"
@@ -168,6 +169,27 @@ class MessageRepositoryImpl @Inject constructor(
             data["isViewOnce"] = true
             data["viewOnceOpened"] = false
         }
+        return sendRawMessage(chatId, data)
+    }
+
+    // НОВОЕ (несколько фото): все выбранные фото сохраняются одним массивом
+    // imagesBase64 в одном документе — так они отображаются как единое сообщение-альбом,
+    // а не несколько отдельных сообщений подряд.
+    override suspend fun sendImagesMessage(
+        chatId: String, imagesBase64: List<String>, caption: String
+    ): SendMessageResult {
+        val images = imagesBase64.filter { it.isNotBlank() }
+        if (images.isEmpty()) return SendMessageResult.Error("Нет фото для отправки")
+        // Одно фото — отправляем как обычное imageBase64 (совместимость со старыми клиентами).
+        if (images.size == 1) {
+            return sendRawMessage(chatId, mutableMapOf("imageBase64" to images.first(), "text" to caption.trim()))
+        }
+        val data = mutableMapOf<String, Any?>(
+            "imagesBase64" to images,
+            // Для старых клиентов без поддержки альбомов показываем хотя бы первое фото.
+            "imageBase64" to images.first(),
+            "text" to caption.trim()
+        )
         return sendRawMessage(chatId, data)
     }
 
@@ -456,6 +478,9 @@ class MessageRepositoryImpl @Inject constructor(
             "forwardedFromSenderName" to fromSenderName,
             "forwardedFromSenderId" to fromSenderId
         )
+        if (originalMessage.imagesBase64.isNotEmpty()) {
+            data["imagesBase64"] = originalMessage.imagesBase64
+        }
         originalMessage.imageBase64?.let { data["imageBase64"] = it }
         originalMessage.fileBase64?.let {
             data["fileBase64"] = it
@@ -818,6 +843,7 @@ class MessageRepositoryImpl @Inject constructor(
                 replyToText = doc.getString("replyToText"),
                 reactions = reactions,
                 imageBase64 = doc.getString("imageBase64"),
+                imagesBase64 = (doc.get("imagesBase64") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 isEdited = doc.getBoolean("isEdited") ?: false,
                 isDeleted = doc.getBoolean("isDeleted") ?: false,
                 forwardedFromSenderName = doc.getString("forwardedFromSenderName"),

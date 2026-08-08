@@ -370,7 +370,10 @@ private fun ForwardChatItem(
             }
             // Дополнительная информативная строка
             val subtitle = when {
-                isChannel -> stringResource(R.string.forward_official_channel)
+                // Официальным считается только верифицированный канал (YodoMessenger и
+                // поддержка). Остальные каналы — обычные, поэтому у них нейтральная подпись.
+                isChannel && chat.isVerified -> stringResource(R.string.forward_official_channel)
+                isChannel -> stringResource(R.string.forward_channel)
                 isSavedChat -> stringResource(R.string.forward_saved_messages)
                 isGroup -> stringResource(R.string.forward_group_chat)
                 chat.isOnline -> stringResource(R.string.forward_online)

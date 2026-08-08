@@ -35,6 +35,10 @@ interface MessageRepository {
     suspend fun sendImageMessage(
         chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false
     ): SendMessageResult
+    // НОВОЕ (несколько фото): отправляет несколько фото одним сообщением-альбомом.
+    suspend fun sendImagesMessage(
+        chatId: String, imagesBase64: List<String>, caption: String = ""
+    ): SendMessageResult
     // НОВОЕ (одноразовые медиа): вызывается получателем сразу после полноэкранного открытия
     // view-once фото. Стирает imageBase64 на сервере (в Firestore) и помечает viewOnceOpened,
     // чтобы фото нельзя было открыть повторно — ни на этом устройстве, ни на других.

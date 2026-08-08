@@ -356,6 +356,7 @@ Be the first!</string>
     <string name="forward_section_groups">Groups</string>
     <string name="forward_section_personal">Personal chats</string>
     <string name="forward_official_channel">Official channel · posts by admins</string>
+    <string name="forward_channel">Channel</string>
     <string name="forward_saved_messages">Saved messages</string>
     <string name="forward_group_chat">Group chat</string>
     <string name="forward_chat_default">Chat</string>

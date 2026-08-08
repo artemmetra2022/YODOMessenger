@@ -251,7 +251,7 @@ class ChatViewModel @Inject constructor(
     }
 
     // НОВОЕ (п.38): периодически (пока открыт чат) чистим уже истёкшие сообщения —
-    // best-effort ��ез Cloud Functions/cron. Достаточно, чтобы в реальном использовании
+    // best-effort ����ез Cloud Functions/cron. Достаточно, чтобы в реальном использовании
     // сообщения пропадали вскоре после истечения таймера у любого из открывших чат.
     // Ранний выход: если в чате не включён TTL — не делаем запрос к Firestore вообще.
     private fun cleanupExpiredMessagesPeriodically() {
@@ -472,6 +472,18 @@ class ChatViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce)) {
+                is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    // НОВОЕ (несколько фото): отправляем несколько фото одним сообщением-альбомом.
+    fun sendImages(imagesBase64: List<String>, caption: String = "") {
+        if (imagesBase64.isEmpty()) return
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
+        viewModelScope.launch {
+            when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }

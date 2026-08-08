@@ -62,41 +62,7 @@ jobs:
       # Gradle сам создаёт debug.keystore при первой сборке (стандартные пароли Android).
       # Печатаем SHA-1/SHA-256 прямо в лог — нужны для Google Sign-In и Phone Auth,
       # получить их без компьютера (без `./gradlew signingReport`) больше неоткуда.
-      - name: Print debug keystore SHA-1 / SHA-256 (нужно для Google Sign-In)
-        run: |
-          echo "======================================================"
-          echo "  SHA-1 и SHA-256 debug-ключа — скопируй их в Firebase:"
-          echo "  Project settings → твоё Android-приложение → Add fingerprint"
-          echo "======================================================"
-
-          KEYSTORE_PATH="$HOME/.android/debug.keystore"
-
-          if [ ! -f "$KEYSTORE_PATH" ]; then
-            echo "Файл не найден по стандартному пути ($KEYSTORE_PATH), ищу по всей системе..."
-            FOUND_PATH=$(find / -name "debug.keystore" -type f 2>/dev/null | head -n 1)
-            if [ -n "$FOUND_PATH" ]; then
-              echo "Нашёл: $FOUND_PATH"
-              KEYSTORE_PATH="$FOUND_PATH"
-            else
-              echo "debug.keystore не найден нигде в системе — странно, но сборка APK при этом прошла успешно."
-              echo "Список содержимого \$HOME/.android (если есть):"
-              ls -la "$HOME/.android" 2>/dev/null || echo "(папки не существует)"
-              exit 0
-            fi
-          fi
-
-          keytool -list -v \
-            -keystore "$KEYSTORE_PATH" \
-            -alias androiddebugkey \
-            -storepass android \
-            -keypass android > /tmp/keytool_output.txt 2>&1 || true
-
-          echo "--- Полный вывод keytool ---"
-          cat /tmp/keytool_output.txt
-
-          echo "--- Отфильтрованные строки SHA1/SHA256 ---"
-          grep -E "SHA1:|SHA256:" /tmp/keytool_output.txt || echo "Не нашли строки SHA1/SHA256 — смотри полный вывод выше, формат мог отличаться."
-
+     
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:

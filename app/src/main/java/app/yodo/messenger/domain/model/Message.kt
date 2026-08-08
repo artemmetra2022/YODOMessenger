@@ -14,6 +14,9 @@ data class Message(
     val replyToText: String? = null,
     val reactions: Map<String, List<String>> = emptyMap(),
     val imageBase64: String? = null,
+    // НОВОЕ (несколько фото в одном сообщении): если не пустой — это альбом из
+    // нескольких фото, которые показываются сеткой/коллажем в одном пузыре.
+    val imagesBase64: List<String> = emptyList(),
     val isEdited: Boolean = false,
     val isDeleted: Boolean = false,
     val forwardedFromSenderName: String? = null,
@@ -45,6 +48,7 @@ data class Message(
         poll != null -> "📊 ${poll.question}"
         voiceBase64 != null -> "Голосовое сообщение"
         isViewOnce -> if (viewOnceOpened) "Фото открыто" else "📷 Фото (один просмотр)"
+        imagesBase64.isNotEmpty() -> if (imagesBase64.size > 1) "📷 Фото (${imagesBase64.size})" else "Картинка"
         imageBase64 != null -> "Картинка"
         locationLat != null && locationLng != null -> "Геопозиция"
         fileBase64 != null || fileName != null -> "📎 ${fileName ?: "Файл"}"
