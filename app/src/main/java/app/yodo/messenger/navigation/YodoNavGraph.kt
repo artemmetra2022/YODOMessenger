@@ -33,6 +33,7 @@ import app.yodo.messenger.features.chats.ImageViewerScreen
 import app.yodo.messenger.features.contacts.ContactsScreen
 import app.yodo.messenger.features.main.MainScreen
 import app.yodo.messenger.features.nearby.NearbyPeopleScreen
+import app.yodo.messenger.features.notes.NotesScreen
 import app.yodo.messenger.features.profile.ProfileScreen
 import app.yodo.messenger.features.profile.UserProfileScreen
 import app.yodo.messenger.features.search.SearchScreen
@@ -444,7 +445,14 @@ fun YodoNavGraph(
                     navController.navigate(Routes.Welcome.route) {
                         popUpTo(navController.graph.id) { inclusive = true }
                     }
-                }
+                },
+                onOpenNotes = { navController.navigate(Routes.Notes.route) }
+            )
+        }
+        // НОВОЕ: личный блокнот «Заметки».
+        composable(Routes.Notes.route) {
+            NotesScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
         composable(Routes.OfflineChat.route) {
@@ -478,7 +486,7 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() }
             )
         }
-        // Заглушка: "Избранное" как отдельный экран (альтернатива переходу через chatId).
+        // Заглушка: "Избранное" как от��ельный экран (альтернатива переходу через chatId).
         composable(Routes.SavedMessages.route) {
             app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
                 title = "Избранное",

@@ -110,6 +110,7 @@ fun SettingsScreen(
     onProfileClick: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
     onOpenBlockedUsers: () -> Unit = {},
+    onOpenNotes: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currentLanguage by viewModel.currentLanguage.collectAsState()
@@ -135,6 +136,12 @@ fun SettingsScreen(
     val notificationSound by viewModel.notificationSound.collectAsState()
     val notificationVibration by viewModel.notificationVibration.collectAsState()
     val muteAllNotifications by viewModel.muteAllNotifications.collectAsState()
+    // НОВОЕ: тихие часы, пауза и скрытие превью.
+    val quietHoursEnabled by viewModel.quietHoursEnabled.collectAsState()
+    val quietHoursStart by viewModel.quietHoursStart.collectAsState()
+    val quietHoursEnd by viewModel.quietHoursEnd.collectAsState()
+    val hideNotificationPreview by viewModel.hideNotificationPreview.collectAsState()
+    val notificationsSnoozedUntil by viewModel.notificationsSnoozedUntil.collectAsState()
     val accountDeleted by viewModel.accountDeleted.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val errorMessageResId by viewModel.errorMessageResId.collectAsState()
@@ -803,6 +810,91 @@ fun SettingsScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // ════════════════════════════════════════
+            // НОВОЕ: РАСШИРЕННЫЕ УВЕДОМЛЕНИЯ + БЛОКНОТ
+            // ════════════════════════════════════════
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsToggleRow(
+                        icon = Icons.Filled.NotificationsOff,
+                        title = "Тихие часы",
+                        subtitle = "Не беспокоить в заданный ночной интервал",
+                        checked = quietHoursEnabled,
+                        onCheckedChange = { viewModel.setQuietHoursEnabled(it) },
+                        colorTheme = colorTheme
+                    )
+                    AnimatedVisibility(visible = quietHoursEnabled) {
+                        Column {
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                            SettingsNavigateRow(
+                                icon = Icons.Filled.Timer,
+                                title = "Начало: %02d:00".format(quietHoursStart),
+                                subtitle = "Нажмите, чтобы сдвинуть на +1 час",
+                                colorTheme = colorTheme,
+                                onClick = { viewModel.shiftQuietHoursStart(1) }
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                            SettingsNavigateRow(
+                                icon = Icons.Filled.Timer,
+                                title = "Конец: %02d:00".format(quietHoursEnd),
+                                subtitle = "Нажмите, чтобы сдвинуть на +1 час",
+                                colorTheme = colorTheme,
+                                onClick = { viewModel.shiftQuietHoursEnd(1) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsToggleRow(
+                        icon = Icons.Filled.RemoveRedEye,
+                        title = "Скрывать текст в уведомлениях",
+                        subtitle = "Показывать «Новое сообщение» без имени и текста",
+                        checked = hideNotificationPreview,
+                        onCheckedChange = { viewModel.setHideNotificationPreview(it) },
+                        colorTheme = colorTheme
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Timer,
+                        title = if (notificationsSnoozedUntil > System.currentTimeMillis()) "Пауза активна — выключить" else "Пауза уведомлений на 1 час",
+                        subtitle = if (notificationsSnoozedUntil > System.currentTimeMillis()) "Уведомления временно отключены" else "Тишина на ближайший час",
+                        colorTheme = colorTheme,
+                        onClick = {
+                            if (notificationsSnoozedUntil > System.currentTimeMillis()) viewModel.clearNotificationSnooze()
+                            else viewModel.snoozeNotifications(60L * 60L * 1000L)
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Timer,
+                        title = "Пауза уведомлений на 8 часов",
+                        subtitle = "Удобно на ночь или на встречу",
+                        colorTheme = colorTheme,
+                        onClick = { viewModel.snoozeNotifications(8L * 60L * 60L * 1000L) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.VolumeUp,
+                        title = "Отправить тестовое уведомление",
+                        subtitle = "Проверить, что уведомления работают",
+                        colorTheme = colorTheme,
+                        onClick = { viewModel.sendTestNotification() }
+                    )
+                }
+            }
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Edit,
+                        title = "Заметки",
+                        subtitle = "Личный блокнот — виден только вам",
+                        colorTheme = colorTheme,
+                        onClick = onOpenNotes
+                    )
                 }
             }
 

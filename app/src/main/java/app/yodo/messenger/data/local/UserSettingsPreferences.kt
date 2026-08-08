@@ -78,6 +78,12 @@ class UserSettingsPreferences @Inject constructor(
     private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
     private val hiddenChatIdsKey = stringSetPreferencesKey("hidden_chat_ids")
     private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
+    // НОВОЕ: тихие часы, пауза уведомлений (snooze) и скрытие текста в уведомлениях.
+    private val quietHoursEnabledKey = booleanPreferencesKey("quiet_hours_enabled")
+    private val quietHoursStartKey = intPreferencesKey("quiet_hours_start")
+    private val quietHoursEndKey = intPreferencesKey("quiet_hours_end")
+    private val hideNotificationPreviewKey = booleanPreferencesKey("hide_notification_preview")
+    private val notificationsSnoozedUntilKey = longPreferencesKey("notifications_snoozed_until")
 
     // НОВОЕ (п.18): автоудаление аккаунта
     private val autoDeleteEnabledKey = booleanPreferencesKey("auto_delete_enabled")
@@ -119,6 +125,13 @@ class UserSettingsPreferences @Inject constructor(
     val notificationPermissionAsked: Flow<Boolean> =
         context.settingsDataStore.data.map { it[notificationPermissionAskedKey] ?: false }
 
+    // НОВОЕ: тихие часы (по умолчанию с 22:00 до 07:00), пауза и скрытие превью.
+    val quietHoursEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[quietHoursEnabledKey] ?: false }
+    val quietHoursStart: Flow<Int> = context.settingsDataStore.data.map { it[quietHoursStartKey] ?: 22 }
+    val quietHoursEnd: Flow<Int> = context.settingsDataStore.data.map { it[quietHoursEndKey] ?: 7 }
+    val hideNotificationPreview: Flow<Boolean> = context.settingsDataStore.data.map { it[hideNotificationPreviewKey] ?: false }
+    val notificationsSnoozedUntil: Flow<Long> = context.settingsDataStore.data.map { it[notificationsSnoozedUntilKey] ?: 0L }
+
     // НОВОЕ (п.18): автоудаление аккаунта
     val autoDeleteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[autoDeleteEnabledKey] ?: false }
     val autoDeleteDays: Flow<Int> = context.settingsDataStore.data.map { it[autoDeleteDaysKey] ?: 30 }
@@ -141,6 +154,22 @@ class UserSettingsPreferences @Inject constructor(
 
     suspend fun setNotificationPermissionAsked(asked: Boolean) {
         context.settingsDataStore.edit { it[notificationPermissionAskedKey] = asked }
+    }
+
+    // НОВОЕ: тихие часы / пауза / скрытие превью.
+    suspend fun setQuietHoursEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[quietHoursEnabledKey] = enabled } }
+    suspend fun setQuietHours(startHour: Int, endHour: Int) {
+        context.settingsDataStore.edit {
+            it[quietHoursStartKey] = ((startHour % 24) + 24) % 24
+            it[quietHoursEndKey] = ((endHour % 24) + 24) % 24
+        }
+    }
+    suspend fun setHideNotificationPreview(enabled: Boolean) { context.settingsDataStore.edit { it[hideNotificationPreviewKey] = enabled } }
+    suspend fun snoozeNotificationsFor(durationMillis: Long) {
+        context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = System.currentTimeMillis() + durationMillis }
+    }
+    suspend fun clearNotificationSnooze() {
+        context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = 0L }
     }
     suspend fun setSendOnEnter(enabled: Boolean) { context.settingsDataStore.edit { it[sendOnEnterKey] = enabled } }
     suspend fun setFontSize(size: FontSize) { context.settingsDataStore.edit { it[fontSizeKey] = size.name } }

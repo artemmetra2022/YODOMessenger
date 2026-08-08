@@ -91,4 +91,7 @@ sealed class Routes(val route: String) {
     }
     // НОВОЕ (чат поддержки): экран админ-панели поддержки.
     data object AdminPanel : Routes("admin_panel")
+
+    // НОВОЕ: личный блокнот «Заметки».
+    data object Notes : Routes("notes")
 }

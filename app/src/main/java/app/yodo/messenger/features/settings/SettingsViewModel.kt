@@ -1,8 +1,10 @@
 package app.yodo.messenger.features.settings
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.core.util.toUserMessage
+import app.yodo.messenger.notifications.NotificationHelper
 import app.yodo.messenger.data.local.AppLanguage
 import app.yodo.messenger.data.local.ChatBackgroundType
 import app.yodo.messenger.data.local.DraftsPreferences
@@ -19,6 +21,7 @@ import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.domain.repository.UserRepository
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +33,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val themePreferences: ThemePreferences,
     private val userSettingsPreferences: UserSettingsPreferences,
     private val languagePreferences: LanguagePreferences,
@@ -53,6 +57,12 @@ class SettingsViewModel @Inject constructor(
     val notificationSound: StateFlow<Boolean> = userSettingsPreferences.notificationSound.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val notificationVibration: StateFlow<Boolean> = userSettingsPreferences.notificationVibration.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val muteAllNotifications: StateFlow<Boolean> = userSettingsPreferences.muteAllNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    // НОВОЕ: тихие часы, пауза (snooze) и скрытие текста в уведомлениях.
+    val quietHoursEnabled: StateFlow<Boolean> = userSettingsPreferences.quietHoursEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val quietHoursStart: StateFlow<Int> = userSettingsPreferences.quietHoursStart.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 22)
+    val quietHoursEnd: StateFlow<Int> = userSettingsPreferences.quietHoursEnd.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 7)
+    val hideNotificationPreview: StateFlow<Boolean> = userSettingsPreferences.hideNotificationPreview.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val notificationsSnoozedUntil: StateFlow<Long> = userSettingsPreferences.notificationsSnoozedUntil.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val pinRequirement: StateFlow<PinRequirement> = userSettingsPreferences.pinRequirement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PinRequirement.NEVER)
@@ -106,6 +116,21 @@ class SettingsViewModel @Inject constructor(
     fun setNotificationSound(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationSound(enabled) } }
     fun setNotificationVibration(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationVibration(enabled) } }
     fun setMuteAllNotifications(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setMuteAllNotifications(enabled) } }
+    // НОВОЕ: тихие часы / пауза / скрытие превью / тестовое уведомление.
+    fun setQuietHoursEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setQuietHoursEnabled(enabled) } }
+    fun shiftQuietHoursStart(deltaHours: Int) { viewModelScope.launch { userSettingsPreferences.setQuietHours(quietHoursStart.value + deltaHours, quietHoursEnd.value) } }
+    fun shiftQuietHoursEnd(deltaHours: Int) { viewModelScope.launch { userSettingsPreferences.setQuietHours(quietHoursStart.value, quietHoursEnd.value + deltaHours) } }
+    fun setHideNotificationPreview(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideNotificationPreview(enabled) } }
+    fun snoozeNotifications(durationMillis: Long) { viewModelScope.launch { userSettingsPreferences.snoozeNotificationsFor(durationMillis) } }
+    fun clearNotificationSnooze() { viewModelScope.launch { userSettingsPreferences.clearNotificationSnooze() } }
+    fun sendTestNotification() {
+        NotificationHelper.showMessageNotification(
+            context = appContext,
+            chatId = "test_notification",
+            senderName = "Yodo",
+            messageText = "Это тестовое уведомление ✅ Уведомления работают."
+        )
+    }
     fun setAdvancedPollsEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setAdvancedPollsEnabled(enabled) } }
 
     fun setPin(pin: String, requirement: PinRequirement = PinRequirement.ON_CLOSE) {
