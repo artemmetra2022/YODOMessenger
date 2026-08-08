@@ -124,6 +124,7 @@ fun SettingsScreen(
     val isPinSet by viewModel.isPinSet.collectAsState()
     // НОВОЕ (скрытые чаты): установлен ли ложный PIN.
     val isDecoyPinSet by viewModel.isDecoyPinSet.collectAsState()
+    val pinLockDelaySeconds by viewModel.pinLockDelaySeconds.collectAsState()
     val showBirthDate by viewModel.showBirthDate.collectAsState()
     val showAboutMe by viewModel.showAboutMe.collectAsState()
     val showLocation by viewModel.showLocation.collectAsState()
@@ -620,12 +621,14 @@ fun SettingsScreen(
                     PinSetupDialog(
                         isPinSet = isPinSet,
                         currentRequirement = pinRequirement,
+                        currentLockDelaySeconds = pinLockDelaySeconds,
                         onDismiss = { showPinDialog = false },
                         onSavePin = { pin, requirement ->
                             viewModel.setPin(pin, requirement)
                             showPinDialog = false
                         },
                         onRequirementChanged = { viewModel.setPinRequirement(it) },
+                        onLockDelayChanged = { viewModel.setPinLockDelaySeconds(it) },
                         onDisablePin = { viewModel.clearPin(); showPinDialog = false }
                     )
                 }
@@ -898,7 +901,7 @@ fun SettingsScreen(
                 }
             }
 
-            // ════════════════════════════════════════
+            // ═════════════════════════════��══════════
             // АККАУНТ
             // ════════════════════════════════════════
             item { Spacer(modifier = Modifier.height(8.dp)) }
@@ -1213,7 +1216,9 @@ private fun PinSetupDialog(
     onDismiss: () -> Unit,
     onSavePin: (String, PinRequirement) -> Unit,
     onRequirementChanged: (PinRequirement) -> Unit,
-    onDisablePin: () -> Unit
+    onDisablePin: () -> Unit,
+    currentLockDelaySeconds: Int = 0,
+    onLockDelayChanged: (Int) -> Unit = {}
 ) {
     var pin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
@@ -1226,26 +1231,16 @@ private fun PinSetupDialog(
         title = { Text(if (isPinSet) stringResource(R.string.pin_dialog_change_title) else stringResource(R.string.pin_dialog_set_title)) },
         text = {
             Column {
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it },
-                    label = { Text(stringResource(R.string.pin_dialog_new_pin)) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // НОВОЕ: красивый ввод — каждая цифра в своей клеточке.
+                Text(stringResource(R.string.pin_dialog_new_pin), style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = confirmPin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) confirmPin = it },
-                    label = { Text(stringResource(R.string.pin_dialog_repeat_pin)) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                PinCellsInput(pin = pin, onPinChange = { pin = it; errorMessage = null }, length = 4)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(stringResource(R.string.pin_dialog_repeat_pin), style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                PinCellsInput(pin = confirmPin, onPinChange = { confirmPin = it; errorMessage = null }, length = 4, isError = errorMessage != null)
                 errorMessage?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1273,6 +1268,60 @@ private fun PinSetupDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(requirement.displayName, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+
+                // НОВОЕ: выбор времени, через которое приложение блокируется после сворачивания.
+                if (selectedRequirement == PinRequirement.ON_BACKGROUND) {
+                    val presets = listOf(0 to "Сразу", 30 to "30 сек", 60 to "1 мин", 300 to "5 мин", 900 to "15 мин")
+                    var showCustom by remember { mutableStateOf(presets.none { it.first == currentLockDelaySeconds }) }
+                    var lockDelay by remember { mutableStateOf(currentLockDelaySeconds) }
+                    var customText by remember { mutableStateOf(if (presets.none { it.first == currentLockDelaySeconds }) currentLockDelaySeconds.toString() else "") }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Блокировать через", style = MaterialTheme.typography.labelLarge)
+                    presets.forEach { (seconds, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = !showCustom && lockDelay == seconds,
+                                    onClick = { showCustom = false; lockDelay = seconds; onLockDelayChanged(seconds) }
+                                )
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = !showCustom && lockDelay == seconds,
+                                onClick = { showCustom = false; lockDelay = seconds; onLockDelayChanged(seconds) }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = showCustom, onClick = { showCustom = true })
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = showCustom, onClick = { showCustom = true })
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Своё время (сек)", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (showCustom) {
+                        OutlinedTextField(
+                            value = customText,
+                            onValueChange = { new ->
+                                val digits = new.filter(Char::isDigit).take(5)
+                                customText = digits
+                                digits.toIntOrNull()?.let { onLockDelayChanged(it) }
+                            },
+                            label = { Text("Секунд") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        )
                     }
                 }
             }
@@ -1325,26 +1374,15 @@ private fun DecoyPinDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it },
-                    label = { Text("Ложный PIN") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Text("Ложный PIN", style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = confirmPin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) confirmPin = it },
-                    label = { Text("Повторите ложный PIN") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                PinCellsInput(pin = pin, onPinChange = { pin = it; errorMessage = null }, length = 4)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Повторите ложный PIN", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                PinCellsInput(pin = confirmPin, onPinChange = { confirmPin = it; errorMessage = null }, length = 4, isError = errorMessage != null)
                 errorMessage?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
             }

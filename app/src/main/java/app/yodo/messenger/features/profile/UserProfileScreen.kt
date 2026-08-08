@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
@@ -73,6 +74,7 @@ fun UserProfileScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val openChatId by viewModel.openChatId.collectAsState()
+    val isBlocked by viewModel.isBlocked.collectAsState()
     val colorTheme = LocalColorTheme.current
 
     LaunchedEffect(openChatId) {
@@ -230,6 +232,34 @@ fun UserProfileScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
+                    }
+
+                    // НОВОЕ (блокировка): кнопка заблокировать / разблокировать.
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val blockColor = if (isBlocked) colorTheme.primary else Color(0xFFE53935)
+                    Button(
+                        onClick = { viewModel.toggleBlock() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = blockColor.copy(alpha = 0.12f),
+                            contentColor = blockColor
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .padding(horizontal = 20.dp),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Block,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            if (isBlocked) "Разблокировать" else "Заблокировать",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
 
                     // ════════════════════════════════════════

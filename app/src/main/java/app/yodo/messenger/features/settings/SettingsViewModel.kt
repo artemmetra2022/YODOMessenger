@@ -69,6 +69,8 @@ class SettingsViewModel @Inject constructor(
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     // НОВОЕ (скрытые чаты): установлен ли ложный (decoy) PIN.
     val isDecoyPinSet: StateFlow<Boolean> = userSettingsPreferences.isDecoyPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    // НОВОЕ: задержка блокировки при сворачивании (в секундах, 0 = сразу).
+    val pinLockDelaySeconds: StateFlow<Int> = userSettingsPreferences.pinLockDelaySeconds.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     // НОВОЕ (п.18): автоудаление аккаунта
     val autoDeleteEnabled: StateFlow<Boolean> = userSettingsPreferences.autoDeleteEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -140,6 +142,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
     fun setPinRequirement(requirement: PinRequirement) { viewModelScope.launch { userSettingsPreferences.setPinRequirement(requirement) } }
+    // НОВОЕ: задать задержку блокировки при сворачивании (в секундах, 0 = сразу).
+    fun setPinLockDelaySeconds(seconds: Int) { viewModelScope.launch { userSettingsPreferences.setPinLockDelaySeconds(seconds) } }
     fun clearPin() { viewModelScope.launch { userSettingsPreferences.clearPin() } }
     // НОВОЕ (скрытые чаты): управление ложным (decoy) PIN.
     fun setDecoyPin(pin: String) { viewModelScope.launch { userSettingsPreferences.setDecoyPin(pin) } }

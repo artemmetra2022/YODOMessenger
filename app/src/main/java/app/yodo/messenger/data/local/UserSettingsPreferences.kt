@@ -40,6 +40,9 @@ sealed class PinCheckResult {
     data class LockedOut(val unlockAtMillis: Long) : PinCheckResult()
 }
 
+// НОВОЕ (скрытые чаты): результат проверки PIN для «шторки скрытых чатов».
+enum class HiddenPinResult { MAIN, DECOY, NONE }
+
 // НОВОЕ (п.13): типы фона чата
 enum class ChatBackgroundType(val displayName: String) {
     DEFAULT("Стандартный"),
@@ -73,6 +76,8 @@ class UserSettingsPreferences @Inject constructor(
     private val pinRequirementKey = stringPreferencesKey("pin_requirement")
     private val pinFailedAttemptsKey = intPreferencesKey("pin_failed_attempts")
     private val pinLockedUntilKey = longPreferencesKey("pin_locked_until")
+    // НОВОЕ: задержка (в секундах) перед блокировкой при сворачивании (0 = сразу).
+    private val pinLockDelaySecondsKey = intPreferencesKey("pin_lock_delay_seconds")
     // НОВОЕ (скрытые чаты): ложный (decoy) PIN-код и набор ID скрытых чатов.
     private val decoyPinHashKey = stringPreferencesKey("decoy_pin_hash")
     private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
@@ -116,6 +121,8 @@ class UserSettingsPreferences @Inject constructor(
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
     }
     val isPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[pinHashKey].isNullOrBlank() }
+    // НОВОЕ: через сколько секунд после сворачивания блокировать приложение (0 = сразу).
+    val pinLockDelaySeconds: Flow<Int> = context.settingsDataStore.data.map { it[pinLockDelaySecondsKey] ?: 0 }
     // НОВОЕ (скрытые чаты): установлен ли ложный PIN и множество скрытых чатов.
     val isDecoyPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[decoyPinHashKey].isNullOrBlank() }
     val hiddenChatIds: Flow<Set<String>> = context.settingsDataStore.data.map { it[hiddenChatIdsKey] ?: emptySet() }
@@ -230,6 +237,29 @@ class UserSettingsPreferences @Inject constructor(
 
     suspend fun setPinRequirement(requirement: PinRequirement) {
         context.settingsDataStore.edit { it[pinRequirementKey] = requirement.name }
+    }
+
+    // НОВОЕ: задать задержку блокировки при сворачивании (в секундах, 0 = сразу).
+    suspend fun setPinLockDelaySeconds(seconds: Int) {
+        context.settingsDataStore.edit { it[pinLockDelaySecondsKey] = seconds.coerceAtLeast(0) }
+    }
+
+    // НОВОЕ (скрытые чаты): без побочных эффектов определить, какой PIN введён —
+    // основной (MAIN), ложный (DECOY) или ни один (NONE). Используется для
+    // «шторки скрытых чатов»: основной → показать скрытые, ложный → пусто.
+    suspend fun checkHiddenPin(pin: String): HiddenPinResult {
+        val prefs = context.settingsDataStore.data.first()
+        val salt = prefs[pinSaltKey]
+        val storedHash = prefs[pinHashKey]
+        if (salt != null && storedHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, salt) == storedHash
+        ) return HiddenPinResult.MAIN
+        val decoySalt = prefs[decoyPinSaltKey]
+        val decoyHash = prefs[decoyPinHashKey]
+        if (decoySalt != null && decoyHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, decoySalt) == decoyHash
+        ) return HiddenPinResult.DECOY
+        return HiddenPinResult.NONE
     }
 
     suspend fun verifyPin(pin: String): PinCheckResult {

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.data.local.DraftsPreferences
+import app.yodo.messenger.data.local.HiddenPinResult
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.domain.model.ChatPreview
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -69,6 +71,24 @@ class ChatListViewModel @Inject constructor(
     // НОВОЕ (скрытые чаты): множество ID скрытых чатов (для пунктов меню).
     val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    // НОВОЕ (скрытые чаты): задан ли основной PIN (нужно для шторки со скрытыми чатами).
+    val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // НОВОЕ (скрытые чаты): полный список скрытых чатов (для отдельного окна).
+    val hiddenChats: StateFlow<List<ChatPreview>> = combine(
+        chatRepository.observeChatList(),
+        userSettingsPreferences.hiddenChatIds.onStart { emit(emptySet()) }
+    ) { result, hiddenIds ->
+        when (result) {
+            is ChatListResult.Success -> result.chats.filter { it.chatId in hiddenIds }
+            is ChatListResult.Error -> emptyList()
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // НОВОЕ (скрытые чаты): проверка пин-кода для шторки (без побочных эффектов).
+    suspend fun checkHiddenPin(pin: String): HiddenPinResult = userSettingsPreferences.checkHiddenPin(pin)
 
     // НОВОЕ (чат поддержки): является ли текущий пользователь админом поддержки —
     // тогда в меню показывается пункт "Админ-панель поддержки".

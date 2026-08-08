@@ -477,13 +477,13 @@ fun YodoNavGraph(
                 }
             )
         }
-        // Заглушка: экран "Заблокированные пользователи" (упоминается в Settings).
+        // НОВОЕ (блокировка): реальный экран со списком заблокированных и разблокировкой.
         composable(Routes.BlockedUsers.route) {
-            app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
-                title = "Заблокированные",
-                icon = androidx.compose.material.icons.Icons.Filled.Block,
-                description = "Список заблокированных пользователей появится здесь.",
-                onBackClick = { navController.popBackStack() }
+            app.yodo.messenger.features.profile.BlockedUsersScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenProfile = { userId ->
+                    navController.navigate(Routes.UserProfile.createRoute(userId))
+                }
             )
         }
         // Заглушка: "Избранное" как от��ельный экран (альтернатива переходу через chatId).

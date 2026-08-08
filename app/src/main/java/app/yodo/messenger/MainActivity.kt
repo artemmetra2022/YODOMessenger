@@ -66,8 +66,12 @@ class MainActivity : ComponentActivity() {
             // PIN-блокировка
             val pinRequirement by userSettingsPreferences.pinRequirement.collectAsState(initial = PinRequirement.NEVER)
             val isPinSet by userSettingsPreferences.isPinSet.collectAsState(initial = false)
+            // НОВОЕ: задержка (в секундах) перед блокировкой при сворачивании (0 = сразу).
+            val pinLockDelaySeconds by userSettingsPreferences.pinLockDelaySeconds.collectAsState(initial = 0)
             var isLocked by remember { mutableStateOf(false) }
             var didInitialLockCheck by remember { mutableStateOf(false) }
+            // НОВОЕ: момент сворачивания приложения для расчёта задержки.
+            var backgroundedAt by remember { mutableStateOf(0L) }
 
             // SplashScreen: пока настройки не загружены — крутим прогресс.
             if (languageCode == null || isDarkTheme == null || colorThemeName == null || fontSize == null) {
@@ -96,10 +100,31 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            DisposableEffect(pinRequirement, isPinSet) {
+            DisposableEffect(pinRequirement, isPinSet, pinLockDelaySeconds) {
                 val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_STOP && isPinSet && pinRequirement == PinRequirement.ON_BACKGROUND) {
-                        isLocked = true
+                    if (isPinSet && pinRequirement == PinRequirement.ON_BACKGROUND) {
+                        when (event) {
+                            Lifecycle.Event.ON_STOP -> {
+                                // При сворачивании: если задержка 0 — блокируем сразу,
+                                // иначе запоминаем время и блокируем при возврате.
+                                if (pinLockDelaySeconds <= 0) {
+                                    isLocked = true
+                                    backgroundedAt = 0L
+                                } else {
+                                    backgroundedAt = System.currentTimeMillis()
+                                }
+                            }
+                            Lifecycle.Event.ON_START -> {
+                                // При возврате: если прошло не меньше выбранной задержки — блокируем.
+                                if (backgroundedAt > 0L &&
+                                    System.currentTimeMillis() - backgroundedAt >= pinLockDelaySeconds * 1000L
+                                ) {
+                                    isLocked = true
+                                }
+                                backgroundedAt = 0L
+                            }
+                            else -> {}
+                        }
                     }
                 }
                 ProcessLifecycleOwner.get().lifecycle.addObserver(observer)

@@ -8,6 +8,7 @@ import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.CreateChatResult
 import app.yodo.messenger.domain.repository.PresenceRepository
+import app.yodo.messenger.domain.repository.ProfileUpdateResult
 import app.yodo.messenger.domain.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,14 +38,30 @@ class UserProfileViewModel @Inject constructor(
     private val _openChatId = MutableStateFlow<String?>(null)
     val openChatId: StateFlow<String?> = _openChatId
 
+    // НОВОЕ (блокировка): заблокирован ли этот пользователь.
+    private val _isBlocked = MutableStateFlow(false)
+    val isBlocked: StateFlow<Boolean> = _isBlocked
+
     init {
         viewModelScope.launch {
             val user = userRepository.getUserById(userId)
             if (user != null) {
                 _uiState.value = UserProfileUiState.Content(user, presence = null)
+                _isBlocked.value = userRepository.isUserBlocked(userId)
                 observePresence()
             } else {
                 _uiState.value = UserProfileUiState.NotFound
+            }
+        }
+    }
+
+    // НОВОЕ (блокировка): заблокировать / разблокировать пользователя.
+    fun toggleBlock() {
+        viewModelScope.launch {
+            val result = if (_isBlocked.value) userRepository.unblockUser(userId)
+            else userRepository.blockUser(userId)
+            if (result is ProfileUpdateResult.Success) {
+                _isBlocked.value = !_isBlocked.value
             }
         }
     }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
@@ -57,12 +60,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.window.Dialog
+import app.yodo.messenger.data.local.HiddenPinResult
+import app.yodo.messenger.features.settings.PinCellsInput
+import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -118,9 +130,41 @@ fun ChatListScreen(
     val chatFolders by viewModel.chatFolders.collectAsState()
     // НОВОЕ (скрытые чаты): множество ID скрытых чатов для подписей меню.
     val hiddenChatIds by viewModel.hiddenChatIds.collectAsState()
+    // НОВОЕ (скрытые чаты): список скрытых чатов и признак PIN для шторки "потянуть вниз".
+    val hiddenChats by viewModel.hiddenChats.collectAsState()
+    val isPinSet by viewModel.isPinSet.collectAsState()
     val colorTheme = LocalColorTheme.current
     var showFabMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
+
+    // НОВОЕ (скрытые чаты): состояние шторки со скрытыми чатами.
+    val chatListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var showHiddenPinDialog by remember { mutableStateOf(false) }
+    var showHiddenWindow by remember { mutableStateOf(false) }
+    var showEmptyWindow by remember { mutableStateOf(false) }
+    var pullAccum by remember { mutableFloatStateOf(0f) }
+    val pullThreshold = 240f
+    // Жест "потянуть сверху вниз" на самом верху списка → открыть ввод PIN.
+    val hiddenPullConnection = remember(isPinSet) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val anyWindowOpen = showHiddenPinDialog || showHiddenWindow || showEmptyWindow
+                val atTop = chatListState.firstVisibleItemIndex == 0 &&
+                    chatListState.firstVisibleItemScrollOffset == 0
+                if (!anyWindowOpen && atTop && available.y > 0f) {
+                    pullAccum += available.y
+                    if (pullAccum > pullThreshold) {
+                        pullAccum = 0f
+                        if (isPinSet) showHiddenPinDialog = true else showHiddenWindow = true
+                    }
+                } else if (available.y < 0f) {
+                    pullAccum = 0f
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -245,7 +289,10 @@ fun ChatListScreen(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                     } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = chatListState,
+                            modifier = Modifier.fillMaxSize().nestedScroll(hiddenPullConnection)
+                        ) {
                             // Строка архива
                             if (state.archivedChats.isNotEmpty()) {
                                 item(key = "archive_row") {
@@ -315,6 +362,157 @@ fun ChatListScreen(
                 showFolderDialog = false
             }
         )
+    }
+
+    // НОВОЕ (скрытые чаты): ввод PIN после жеста "потянуть вниз".
+    if (showHiddenPinDialog) {
+        HiddenChatsPinDialog(
+            onDismiss = { showHiddenPinDialog = false },
+            onSubmit = { pin ->
+                scope.launch {
+                    val result = viewModel.checkHiddenPin(pin)
+                    showHiddenPinDialog = false
+                    when (result) {
+                        HiddenPinResult.MAIN -> showHiddenWindow = true
+                        HiddenPinResult.DECOY, HiddenPinResult.NONE -> showEmptyWindow = true
+                    }
+                }
+            }
+        )
+    }
+
+    // НОВОЕ (скрытые чаты): окно со скрытыми чатами (верный PIN).
+    if (showHiddenWindow) {
+        HiddenChatsWindow(
+            chats = hiddenChats,
+            colorTheme = colorTheme,
+            onDismiss = { showHiddenWindow = false },
+            onChatClick = { chatId -> showHiddenWindow = false; onChatClick(chatId) },
+            onUnhide = { chatId -> viewModel.toggleChatHidden(chatId) }
+        )
+    }
+
+    // НОВОЕ (скрытые чаты): пустое окно для ложного/неверного PIN.
+    if (showEmptyWindow) {
+        HiddenChatsEmptyWindow(onDismiss = { showEmptyWindow = false })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// НОВОЕ (скрытые чаты): диалог ввода PIN для шторки
+// ---------------------------------------------------------------------------
+@Composable
+private fun HiddenChatsPinDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit
+) {
+    var pin by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Введите PIN-код") },
+        text = {
+            Column {
+                Text(
+                    "Введите код, чтобы открыть скрытые чаты.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                PinCellsInput(pin = pin, onPinChange = { pin = it }, length = 4)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(pin) }, enabled = pin.length >= 4) {
+                Text("Открыть")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+// ---------------------------------------------------------------------------
+// НОВОЕ (скрытые чаты): окно со скрытыми чатами
+// ---------------------------------------------------------------------------
+@Composable
+private fun HiddenChatsWindow(
+    chats: List<ChatPreview>,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onDismiss: () -> Unit,
+    onChatClick: (String) -> Unit,
+    onUnhide: (String) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Скрытые чаты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Закрыть") }
+                }
+                if (chats.isEmpty()) {
+                    Text(
+                        "Нет скрытых чатов",
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                        items(chats, key = { it.chatId }) { chat ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { onChatClick(chat.chatId) }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                UserAvatar(
+                                    displayName = chat.title,
+                                    photoUrl = chat.avatarUrl,
+                                    avatarBase64 = chat.avatarBase64,
+                                    size = 44.dp,
+                                    userId = chat.otherUserId ?: chat.chatId
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(chat.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(chat.lastMessage, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                TextButton(onClick = { onUnhide(chat.chatId) }) { Text("Вытащить") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// НОВОЕ (скрытые чаты): пустое окно (ложный/неверный PIN)
+// ---------------------------------------------------------------------------
+@Composable
+private fun HiddenChatsEmptyWindow(onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Чатов не найдено", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(onClick = onDismiss) { Text("Закрыть") }
+            }
+        }
     }
 }
 
@@ -508,7 +706,8 @@ internal fun SwipeableChatListItem(
         Box(modifier = Modifier.offset { IntOffset(offsetX.roundToInt(), 0) }) {
             ChatListItem(
                 chat = chat, colorTheme = colorTheme,
-                onClick = onClick, onLongClick = { showMenu = true }
+                onClick = onClick, onLongClick = { showMenu = true },
+                isHidden = isHidden
             )
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -545,7 +744,8 @@ private fun ChatListItem(
     chat: ChatPreview,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    isHidden: Boolean = false
 ) {
     val isSavedChat = chat.type == ChatType.PRIVATE && chat.otherUserId == null
     val isChannel = chat.type == ChatType.CHANNEL
@@ -612,6 +812,11 @@ private fun ChatListItem(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // НОВОЕ (скрытые чаты): маркер-замок у скрытого чата (виден только под основным PIN).
+                    if (isHidden) {
+                        Icon(Icons.Filled.Lock, contentDescription = "Скрытый чат",
+                            modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = colorTheme.primary)
+                    }
                     if (chat.isMuted) {
                         Icon(Icons.Filled.NotificationsOff, contentDescription = null,
                             modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = Color.Gray)
