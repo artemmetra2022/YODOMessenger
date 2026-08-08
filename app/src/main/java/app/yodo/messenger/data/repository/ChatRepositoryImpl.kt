@@ -336,15 +336,23 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun getOrCreateSavedChat(): String {
         val uid = firebaseAuth.currentUser?.uid
             ?: throw IllegalStateException("Пользователь не авторизован")
+        // ИСПРАВЛЕНИЕ (баг «может появиться несколько избранных»): раньше чат
+        // «Избранное» создавался со случайным id, поэтому при быстрых/параллельных
+        // вызовах (гонка) могло создаться сразу несколько чатов. Теперь id
+        // детерминирован: saved_<uid> — повторный set просто перезапишет тот же документ.
+        val savedChatId = "saved_" + uid
+        val savedRef = firestore.collection("chats").document(savedChatId)
+        // Миграция: если ранее уже были созданы SAVED-чаты со случайным id —
+        // используем самый старый из них, чтобы не потерять уже сохранённые сообщения.
         val existing = firestore.collection("chats")
             .whereArrayContains("participantIds", uid)
             .whereEqualTo("type", "SAVED")
-            .limit(1)
             .get().await()
-        val existingDoc = existing.documents.firstOrNull()
-        if (existingDoc != null) return existingDoc.id
-        val newChatRef = firestore.collection("chats").document()
-        newChatRef.set(
+        val legacyDoc = existing.documents.firstOrNull { it.id != savedChatId }
+        if (legacyDoc != null && !savedRef.get().await().exists()) return legacyDoc.id
+        val doc = savedRef.get().await()
+        if (doc.exists()) return savedChatId
+        savedRef.set(
             mapOf(
                 "participantIds" to listOf(uid),
                 "type" to "SAVED",
@@ -355,7 +363,7 @@ class ChatRepositoryImpl @Inject constructor(
                 "isOnline" to false
             )
         ).await()
-        return newChatRef.id
+        return savedChatId
     }
 
     override suspend fun createOrGetPrivateChat(otherUserId: String): CreateChatResult {

@@ -98,7 +98,13 @@ service cloud.firestore {
       allow read: if isSignedIn() &&
         (chatId == 'yodo_official_channel'
           || request.auth.uid in resource.data.participantIds
-          || (isSupportChat(chatId) && canAccessSupportChat(chatId)));
+          || (isSupportChat(chatId) && canAccessSupportChat(chatId))
+          // ИСПРАВЛЕНИЕ (админ-панель: не отображались вопросы): админу нужно
+          // выполнять коллекционный запрос whereEqualTo("type","SUPPORT"). Ветка выше
+          // завязана на regex по id документа (support_*), что Firestore не может
+          // доказать для list-запроса (он фильтрует по полю type), и отклоняет его.
+          // Эта ветка завязана на resource.data.type, который запрос и ограничивает.
+          || (isOfficialChannelAdmin() && resource.data.type == 'SUPPORT'));
 
       allow create: if isSignedIn();
 
@@ -210,7 +216,7 @@ service cloud.firestore {
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||
             isViewOnceOpenUpdate() ||
             // НОВОЕ (F1 реакции + F3 просмотры): любой авторизованный пользователь
-            // может ставить реакции и отмечать просмотр поста — обновляя ТОЛЬКО эти поля.
+            // может ставить реакции и отмечать просмотр поста — обновля�� ТОЛЬКО эти поля.
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['reactions', 'viewedBy', 'viewCount'])
           );

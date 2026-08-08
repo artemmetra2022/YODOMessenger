@@ -4,6 +4,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Campaign
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -666,7 +667,7 @@ fun ChatScreen(
                     if (showUnpinConfirm) {
                         AlertDialog(
                             onDismissRequest = { showUnpinConfirm = false },
-                            title = { Text("Открепить сообщение?") },
+                            title = { Text("От��репить сообщение?") },
                             text = { Text("Сообщение будет откреплено из этого чата.") },
                             confirmButton = {
                                 TextButton(onClick = {
@@ -939,7 +940,8 @@ fun ChatScreen(
                                 placeholder = if (isChannel && uiState.isAdmin) "Вы админ, вам можно писать" else "Сообщение...",
                                 pendingTtlSeconds = pendingMessageTtlSeconds,
                                 isTtlExplicitlySet = pendingMessageTtlExplicitlySet,
-                                onTtlIconClick = { showPerMessageTtlDialog = true }
+                                onTtlIconClick = { showPerMessageTtlDialog = true },
+                                onScheduleClick = { if (inputText.isNotBlank()) showScheduleDialog = true }
                             )
                         }
                     }
@@ -1124,7 +1126,7 @@ fun ChatScreen(
                                     onOpenImageViewer(base64, uiState.chatTitle, message.timestamp)
                                 },
                                 // НОВОЕ (одноразовые медиа): открываем фото в оверлее ПОВЕРХ
-                                // чата (не через onOpenImageViewer/навигацию — там есть общий
+                                // чата (не через onOpenImageViewer/н����вигацию — там есть общий
                                 // держатель картинки и повторные открытия), и только для чужих
                                 // сообщений своей же отправки не помечаем "открыто", т.к. это
                                 // сделает получатель на своём устройстве.
@@ -1608,6 +1610,16 @@ private fun MessageBubble(
                             )
                         }
                         Text(formatMessageTime(message.timestamp), color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                        // НОВОЕ: число просмотров канала теперь рядом со временем.
+                        if (isChannel) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Filled.Visibility, contentDescription = "Просмотры",
+                                tint = textColor.copy(alpha = 0.7f),
+                                modifier = Modifier.size(13.dp).padding(end = 3.dp)
+                            )
+                            Text("${message.viewCount}", color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                        }
                         if (isOwnMessage) {
                             val statusIcon = if (message.status == MessageStatus.READ) Icons.Filled.DoneAll else Icons.Filled.Done
                             Icon(
@@ -1741,35 +1753,25 @@ private fun MessageBubble(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Comment, contentDescription = null,
-                        tint = colorTheme.primary, modifier = Modifier.size(14.dp)
+                        tint = colorTheme.primary, modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
+                    // НОВОЕ: текст кнопки «Комментарии» теперь такого же размера, что и текст сообщения.
                     Text(
                         if (message.commentsCount > 0) "Комментарии · ${message.commentsCount}" else "Комментировать",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
                         color = colorTheme.primary
                     )
                 }
-                // НОВОЕ (F3 + секретная фича «🔥 Популярное»): просмотры и бейдж популярности.
+                // НОВОЕ (бейдж «🔥 Популярное»): сами просмотры теперь показываются рядом со временем.
                 val totalReactions = message.reactions.values.sumOf { it.size }
                 val isPopular = message.viewCount >= 100 || totalReactions >= 10
-                Row(
-                    modifier = Modifier.padding(top = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.Visibility, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        "${message.viewCount}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                    if (isPopular) {
-                        Spacer(modifier = Modifier.width(8.dp))
+                if (isPopular) {
+                    Row(
+                        modifier = Modifier.padding(top = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             "🔥 Популярное",
                             style = MaterialTheme.typography.labelSmall,
@@ -1861,7 +1863,8 @@ private fun MessageInputBar(
     placeholder: String = "Сообщение...",
     pendingTtlSeconds: Long? = null,
     isTtlExplicitlySet: Boolean = false,
-    onTtlIconClick: () -> Unit = {}
+    onTtlIconClick: () -> Unit = {},
+    onScheduleClick: () -> Unit = {}
 ) {
     val canSend = !isSending && text.isNotBlank()
     var showEmojiPicker by remember { mutableStateOf(false) }
@@ -1902,22 +1905,6 @@ private fun MessageInputBar(
                 ) {
                     Icon(Icons.Filled.AttachFile, contentDescription = "Прикрепить фото", tint = colorTheme.primary, modifier = Modifier.size(24.dp))
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = onTtlIconClick),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.Timer,
-                        contentDescription = if (isTtlExplicitlySet) "Таймер сообщения: ${disappearingTtlLabel(pendingTtlSeconds)}" else "Тайм��р исчезновения сообщения",
-                        tint = if (isTtlExplicitlySet) colorTheme.primary else Color.Gray,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(2.dp))
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(22.dp),
@@ -1960,17 +1947,43 @@ private fun MessageInputBar(
                         Icon(Icons.Filled.Mic, contentDescription = "Удерживайте для записи голосового сообщения", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 } else {
+                    // НОВОЕ: рядом с кнопкой отправки — две кнопки: таймер (настройка исчезания)
+                    // и запланированная отправка.
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onTtlIconClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Timer,
+                            contentDescription = if (isTtlExplicitlySet) "Таймер сообщения: ${disappearingTtlLabel(pendingTtlSeconds)}" else "Таймер исчезновения сообщения",
+                            tint = if (isTtlExplicitlySet) colorTheme.primary else Color.Gray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .clickable(enabled = canSend, onClick = onScheduleClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Schedule,
+                            contentDescription = "Запланировать отправку",
+                            tint = if (canSend) colorTheme.primary else Color.Gray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(2.dp))
                     Box(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
                             .background(if (canSend) colorTheme.primary else colorTheme.primary.copy(alpha = 0.3f))
-                            .pointerInput(canSend) {
-                                detectTapGestures(
-                                    onTap = { if (canSend) onSendClick() },
-                                    onLongPress = { if (canSend) onSendLongPress() }
-                                )
-                            },
+                            .clickable(enabled = canSend, onClick = onSendClick),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isSending) {
@@ -1978,7 +1991,7 @@ private fun MessageInputBar(
                                 modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp
                             )
                         } else {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить (удержите — запланировать)", tint = Color.White, modifier = Modifier.size(18.dp))
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -2047,7 +2060,7 @@ private fun ChannelBottomBar(
     }
 }
 
-// ══════════════════════════════════════════════════════════════════
+// ���═════════════════════════════════════════════════════════════════
 // VoiceRecordingBar (находится внутри этого файла, не является отдельным файлом)
 // ИСПРАВЛЕНО: используем Animatable вместо infiniteTransition.animateFloat 
 // для обхода бага компилятора Compose с выводом типов.
@@ -2390,7 +2403,7 @@ private fun subscriberCountLabel(count: Int): String {
     val mod100 = count % 100
     val mod10 = count % 10
     return when {
-        mod100 in 11..14 -> "подписчиков"
+        mod100 in 11..14 -> "подписчик��в"
         mod10 == 1 -> "подписчик"
         mod10 in 2..4 -> "подписчика"
         else -> "подписчиков"
@@ -2415,7 +2428,7 @@ private fun DisappearingMessagesDialog(
                     if (perMessage)
                         "Сообщение будет автоматически удалено у всех участников чата через выбранное время после отправки."
                     else
-                        "Новые сообщения в этом чате будут по умолчанию автоматически удаляться через выбранное время после отправки. Таймер для отдельного сообщения можно изменить перед его отправкой (иконка часов рядом с полем ввода).",
+                        "Новые сообщения в этом чате будут по умолчанию автоматически удаляться через вы��ранное время после отправки. Таймер для ��тдельного сообщения можно изменить перед его отправкой (иконка часов рядом с полем ввода).",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
@@ -2702,7 +2715,7 @@ private fun AttachMenuDialog(
                 // полноэкранно только один раз — после этого оно стирается на сервере.
                 AttachMenuRow(icon = Icons.Filled.RemoveRedEye, label = "Фото на один просмотр", onClick = onPickViewOncePhoto)
                 AttachMenuRow(icon = Icons.Filled.InsertDriveFile, label = "Файл", onClick = onPickFile)
-                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопозиция", onClick = onPickLocation)
+                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопо��иция", onClick = onPickLocation)
                 AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)
                 Spacer(modifier = Modifier.height(4.dp))
             }
@@ -3134,7 +3147,7 @@ private fun PollCreationDialog(
     var isAnonymous by remember { mutableStateOf(true) }
     var allowMultiple by remember { mutableStateOf(false) }
     var closesInHours by remember { mutableStateOf<Int?>(null) }
-    // НОВОЕ (викторина): режим викторины с ����равильным ответом и пояснением.
+    // НОВОЕ (викторина): режим викт��рины с ����равильным ответом и пояснением.
     var isQuiz by remember { mutableStateOf(false) }
     var correctIndex by remember { mutableStateOf<Int?>(null) }
     var explanation by remember { mutableStateOf("") }
