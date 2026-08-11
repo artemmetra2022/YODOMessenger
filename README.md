@@ -1,0 +1,285 @@
+# YODO Messenger
+
+**YODO** — современный мессенджер для Android с акцентом на приватность, офлайн-режим и удобный интерфейс. Написан на Kotlin с использованием Jetpack Compose и архитектурой MVVM.
+
+[![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-purple.svg)](https://kotlinlang.org/)
+[![Compose](https://img.shields.io/badge/Compose-1.6+-blue.svg)](https://developer.android.com/jetpack/compose)
+[![Firebase](https://img.shields.io/badge/Firebase-Enabled-orange.svg)](https://firebase.google.com/)
+
+---
+
+## 📱 Возможности
+
+### Основные функции
+- ✅ **Обмен сообщениями** — текст, фото, голосовые сообщения
+- ✅ **Групповые чаты** — создание групп, управление участниками
+- ✅ **Реакции на сообщения** — эмодзи-реакции на любое сообщение
+- ✅ **Ответы на сообщения** — свайп вправо для цитирования
+- ✅ **Пересылка сообщений** — одиночная и массовая пересылка
+- ✅ **Поиск** — поиск контактов, чатов и сообщений
+- ✅ **Профиль пользователя** — аватар, ник, username, био, локация, сайт
+- ✅ **Настройки приватности** — контроль видимости данных профиля
+- ✅ **Исчезающие сообщения** — автоудаление через заданное время
+- ✅ **Черновики** — автосохранение черновиков сообщений
+- ✅ **Запланированные сообщения** — отложенная отправка
+
+### Уникальные особенности
+- 🌐 **Офлайн-режим** — обмен сообщениями через Bluetooth/Wi-Fi Direct без интернета
+- 📍 **Чат с людьми рядом** — обнаружение пользователей поблизости
+- 🎨 **8 цветовых тем** — синяя, зелёная, красная, фиолетовая, оранжевая, розовая, бирюзовая, бежевая
+- 🔙 **Swipe-back жест** — свайп от левого края для навигации назад
+- 🖼️ **Просмотр фото как в Telegram** — pinch-to-zoom, double-tap, swipe-to-dismiss
+- ⌨️ **Автозакрытие клавиатуры** — опциональное скрытие после отправки сообщения
+
+### Технические возможности
+- 🔔 **Push-уведомления** — через Firebase Cloud Messaging
+- 🔐 **Авторизация** — телефон, Google Sign-In
+- 📸 **Оптимизированная загрузка фото** — адаптивное сжатие с сохранением качества
+- 👤 **Аватарки** — кэширование и догрузка аватарок собеседников
+- 📊 **Статусы прочтения** — для личных и групповых чатов
+- 🌙 **Тёмная/светлая тема** — системная или ручная настройка
+
+---
+
+## 🏗 Архитектура
+
+Проект следует архитектуре **MVVM** с использованием следующих компонентов:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    UI Layer                         │
+│  (Jetpack Compose Screens & ViewModels)             │
+├─────────────────────────────────────────────────────┤
+│                 Domain Layer                        │
+│  (Models, Interfaces, Business Logic)               │
+├─────────────────────────────────────────────────────┤
+│                  Data Layer                         │
+│  (Repositories, Firebase, Local Storage)            │
+└─────────────────────────────────────────────────────┘
+```
+
+### Технологический стек
+
+| Категория | Технологии |
+|-----------|------------|
+| **Язык** | Kotlin 2.0+ |
+| **UI** | Jetpack Compose, Material 3 |
+| **Архитектура** | MVVM, Clean Architecture |
+| **DI** | Hilt |
+| **Async** | Coroutines, Flow |
+| **Backend** | Firebase (Firestore, Auth, Storage, FCM) |
+| **Local DB** | Room, DataStore Preferences |
+| **Navigation** | Navigation Compose |
+| **Network** | Retrofit (для Link Preview) |
+| **Serialization** | kotlinx.serialization |
+| **Image Loading** | Coil |
+| **Build** | Gradle Kotlin DSL, KSP |
+
+---
+
+## 📂 Структура проекта
+
+```
+app/src/main/java/app/yodo/messenger/
+├── data/
+│   ├── local/          # Room DAOs, DataStore
+│   ├── remote/         # Firebase services, API
+│   └── repository/     # Реализации репозиториев
+├── domain/
+│   ├── model/          # Data classes
+│   └── repository/     # Интерфейсы репозиториев
+├── ui/
+│   ├── components/     # Переиспользуемые UI компоненты
+│   ├── theme/          # Темы, цвета, типографика
+│   └── screens/        # Экраны приложения
+├── features/
+│   ├── auth/           # Авторизация и регистрация
+│   ├── chats/          # Чаты и сообщения
+│   ├── contacts/       # Контакты
+│   ├── profile/        # Профиль пользователя
+│   ├── settings/       # Настройки
+│   ├── nearby/         # Люди рядом
+│   └── offline/        # Офлайн-чат
+├── di/                 # Dependency Injection модули
+├── navigation/         # Навигационный граф
+└── notifications/      # Уведомления
+```
+
+---
+
+## 🚀 Быстрый старт
+
+### Требования
+- Android Studio Hedgehog (2023.1.1) или новее
+- JDK 17+
+- Android SDK 34 (API level 34)
+- Минимальная версия Android: 8.0 (API level 26)
+- Аккаунт Firebase с включёнными сервисами
+
+### Настройка Firebase
+
+1. Создайте проект в [Firebase Console](https://console.firebase.google.com/)
+2. Добавьте Android-приложение с package name: `app.yodo.messenger`
+3. Скачайте `google-services.json` и поместите в `app/`
+4. Включите следующие сервисы:
+   - **Authentication** (Phone, Google)
+   - **Cloud Firestore**
+   - **Cloud Messaging**
+   - **Storage** (опционально для фото)
+
+5. Настройте **Firestore Rules** (см. `firestore.rules`)
+6. Создайте индексы (см. `firestore.indexes.json`)
+
+### Сборка проекта
+
+```bash
+# Клонирование репозитория
+git clone <repository-url>
+cd yodo-messenger
+
+# Сборка debug-версии
+./gradlew assembleDebug
+
+# Сборка release-версии
+./gradlew assembleRelease
+
+# Запуск тестов
+./gradlew test
+```
+
+APK будет создан в:
+- Debug: `app/build/outputs/apk/debug/app-debug.apk`
+- Release: `app/build/outputs/apk/release/app-release.apk`
+
+---
+
+## ⚙️ Конфигурация
+
+### Версии
+- **Compile SDK**: 34
+- **Target SDK**: 34
+- **Min SDK**: 26
+- **Version Code**: 1
+- **Version Name**: 0.1.0-mvp
+
+### Основные зависимости
+
+```kotlin
+// Core
+implementation("androidx.core:core-ktx:1.13.1")
+implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+
+// Compose
+implementation(platform("androidx.compose:compose-bom:2024.08.00"))
+implementation("androidx.compose.ui:ui")
+implementation("androidx.compose.material3:material3")
+implementation("androidx.navigation:navigation-compose:2.7.7")
+
+// Hilt
+implementation("com.google.dagger:hilt-android:2.51.1")
+ksp("com.google.dagger:hilt-compiler:2.51.1")
+
+// Firebase
+implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
+implementation("com.google.firebase:firebase-firestore-ktx")
+implementation("com.google.firebase:firebase-auth-ktx")
+implementation("com.google.firebase:firebase-messaging-ktx")
+
+// Room
+implementation("androidx.room:room-runtime:2.6.1")
+implementation("androidx.room:room-ktx:2.6.1")
+ksp("androidx.room:room-compiler:2.6.1")
+
+// Coil (изображения)
+implementation("io.coil-kt:coil-compose:2.6.0")
+
+// Serialization
+implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
+```
+
+---
+
+## 🔧 Исправленные проблемы
+
+### 1. Качество фотографий
+**Проблема**: Лимит Base64 превышал ограничение Firestore (1 МБ), фото не отправлялись.
+
+**Решение**: Адаптивное сжатие в `ImageUtils.kt`:
+- Постепенное снижение качества (шаг 8) до попадания в лимит
+- Дополнительное уменьшение разрешения при необходимости
+- Максимальное сохранение качества в рамках ограничений
+
+### 2. Аватарки пользователей
+**Проблема**: Аватарки не отображались в списке чатов.
+
+**Решение**:
+- Добавлено поле `avatarBase64` в модель `ChatPreview`
+- Реализована догрузка аватарок из `users/{uid}` в `ChatRepositoryImpl`
+- Кэширование аватарок для производительности
+- Обновление `ChatListScreen` для отображения аватарок
+
+### 3. Swipe-back навигация
+**Проблема**: Отсутствовал жест свайпа от левого края для возврата назад.
+
+**Решение**: Компонент `SwipeBackHandler.kt`:
+- Срабатывает только при начале жеста у левого края (32dp)
+- Не конфликтует с другими свайпами (ответы, удаление)
+- Подключается одной строкой к модификаторам экранов
+
+---
+
+## 📱 Скриншоты
+
+| Чат列表 | Сообщения | Профиль | Настройки |
+|---------|-----------|---------|-----------|
+| Список чатов с аватарками | Обмен сообщениями, реакции | Редактирование профиля | Темы, приватность, уведомления |
+
+---
+
+## 🔒 Безопасность
+
+- **Firestore Rules**: Ограничивают доступ к данным только авторизованным пользователям
+- **Валидация данных**: Проверка входящих данных на уровне репозиториев
+- **Шифрование**: Использование Firebase Authentication для безопасной авторизации
+- **Приватность**: Настройки видимости профиля для каждого пользователя
+
+---
+
+## 🤝 Вклад в проект
+
+1. Fork репозиторий
+2. Создайте ветку (`git checkout -b feature/AmazingFeature`)
+3. Закоммитьте изменения (`git commit -m 'Add some AmazingFeature'`)
+4. Push в ветку (`git push origin feature/AmazingFeature`)
+5. Откройте Pull Request
+
+---
+
+## 📄 Лицензия
+
+Этот проект распространяется под лицензией MIT. Подробнее см. в файле [LICENSE](LICENSE).
+
+---
+
+## 📞 Контакты
+
+- **Email**: support@yodo.app
+- **Telegram**: @yodo_support
+- **Website**: https://yodo.app
+
+---
+
+## 🗺 Roadmap
+
+- [ ] Видеозвонки (WebRTC)
+- [ ] Стикерпаки
+- [ ] Боты API
+- [ ] Двухфакторная аутентификация
+- [ ] Синхронизация между устройствами
+- [ ] Web-версия
+- [ ] Desktop-приложения (Windows, macOS, Linux)
+
+---
+
+**YODO Messenger** © 2024. Сделано с ❤️ для безопасного общения.

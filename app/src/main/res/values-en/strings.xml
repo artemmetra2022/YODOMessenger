@@ -1,0 +1,538 @@
+<resources>
+    <string name="app_name">Yodo Messenger</string>
+
+    <!-- Common -->
+    <string name="app_tagline">Fast. Secure. Yours.</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_back">Back</string>
+
+    <!-- Welcome -->
+    <string name="welcome_start">Get Started</string>
+    <string name="welcome_no_account">Don\'t have an account? Sign up</string>
+    <string name="welcome_or">— or —</string>
+    <string name="welcome_offline_mode">Offline mode</string>
+    <string name="welcome_offline_description">Chat with people nearby over Bluetooth — no sign-up and no internet needed</string>
+
+    <!-- Common Auth (Login/Register) -->
+    <string name="auth_tab_login">Log in</string>
+    <string name="auth_tab_register">Sign up</string>
+    <string name="auth_or_divider">or</string>
+    <string name="auth_login_with_phone">Log in with phone number</string>
+    <string name="auth_login_with_google">Continue with Google</string>
+    <string name="auth_google_error">Google sign-in error: %1$s</string>
+    <string name="auth_show_password">Show password</string>
+    <string name="auth_hide_password">Hide password</string>
+
+    <!-- Login -->
+    <string name="login_email_or_username">Email or username</string>
+    <string name="login_password">Password</string>
+    <string name="login_submit">Log in</string>
+    <string name="login_no_account">Don\'t have an account? Sign up</string>
+
+    <!-- Register -->
+    <string name="register_name">Name</string>
+    <string name="register_username">Username</string>
+    <string name="register_username_hint">3-20 characters: Latin letters, digits, \"_\"</string>
+    <string name="register_email">Email</string>
+    <string name="register_password">Password (minimum 6 characters)</string>
+    <string name="register_advanced_polls_title">Advanced polls</string>
+    <string name="register_advanced_polls_subtitle">Multiple choice and auto-close voting</string>
+    <string name="register_submit">Sign up</string>
+    <string name="register_have_account">Already have an account? Log in</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_profile">Profile</string>
+
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_dark_theme">Dark theme</string>
+    <string name="settings_dark_theme_subtitle">Dark interface appearance</string>
+
+    <string name="settings_section_customization">Customization</string>
+    <string name="settings_color_theme">Color theme</string>
+    <string name="settings_font_size">Font size</string>
+
+    <string name="settings_section_language">Language</string>
+    <string name="settings_language_title">App language</string>
+    <string name="settings_language_system">System</string>
+    <string name="settings_language_ru">Русский</string>
+    <string name="settings_language_en">English</string>
+
+    <string name="settings_section_chats">Chats</string>
+    <string name="settings_send_on_enter">Send with Enter</string>
+    <string name="settings_send_on_enter_subtitle">Enter sends the message</string>
+    <string name="settings_hide_keyboard">Hide keyboard</string>
+    <string name="settings_hide_keyboard_subtitle">Closes after sending</string>
+    <string name="settings_auto_download">Auto-download photos</string>
+    <string name="settings_auto_download_subtitle">Show images immediately</string>
+
+    <string name="settings_section_privacy">Privacy</string>
+    <string name="settings_online_status">Online status</string>
+    <string name="settings_online_status_subtitle">Others can see when you\'re online</string>
+    <string name="settings_read_receipts">Read receipts</string>
+    <string name="settings_read_receipts_subtitle">The other person sees a double checkmark</string>
+
+    <string name="settings_pin_set">PIN code is set</string>
+    <string name="settings_pin_set_up">Set a PIN code</string>
+    <string name="settings_pin_never">Protection is inactive</string>
+    <string name="settings_pin_on_close">Requested when closing the app</string>
+    <string name="settings_pin_on_background">Requested when the app is backgrounded</string>
+
+    <string name="settings_blocked_users">Blocked users</string>
+    <string name="settings_blocked_users_subtitle">Manage blocked users</string>
+
+    <string name="settings_extended_profile">Extended profile</string>
+    <string name="settings_extended_profile_subtitle">What other users can see</string>
+    <string name="settings_about_me">\"About me\" notes</string>
+    <string name="settings_about_me_subtitle">Show text in the extended profile</string>
+    <string name="settings_birth_date">Date of birth</string>
+    <string name="settings_show_to_others">Show to other users</string>
+    <string name="settings_location">Location</string>
+    <string name="settings_website">Website / link</string>
+    <string name="settings_phone_number">Phone number</string>
+    <string name="settings_show_in_profile">Show to others in profile</string>
+    <string name="settings_email">Email</string>
+
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_mute_all">Mute all notifications</string>
+    <string name="settings_mute_all_subtitle">Turn off push notifications completely</string>
+    <string name="settings_sound">Sound</string>
+    <string name="settings_sound_subtitle">Sound alert for new messages</string>
+    <string name="settings_vibration">Vibration</string>
+    <string name="settings_vibration_subtitle">Vibrate on new messages</string>
+
+    <string name="settings_section_account">Account</string>
+    <string name="settings_logout">Log out</string>
+    <string name="settings_logout_subtitle">End the current session</string>
+    <string name="settings_delete_account">Delete account</string>
+    <string name="settings_delete_account_subtitle">This action is irreversible</string>
+    <string name="settings_delete_account_confirm_title">Delete account?</string>
+    <string name="settings_delete_account_confirm_text">This action cannot be undone. All data will be lost.</string>
+    <string name="settings_not_authorized">You are not signed in</string>
+    <string name="settings_delete_account_failed">Failed to delete account</string>
+
+    <!-- PIN dialog -->
+    <string name="pin_dialog_change_title">Change PIN code</string>
+    <string name="pin_dialog_set_title">Set a PIN code</string>
+    <string name="pin_dialog_new_pin">New PIN code</string>
+    <string name="pin_dialog_repeat_pin">Repeat PIN code</string>
+    <string name="pin_dialog_when_ask">When to ask for PIN</string>
+    <string name="pin_dialog_min_digits">PIN must contain at least 4 digits</string>
+    <string name="pin_dialog_mismatch">PIN codes don\'t match</string>
+    <string name="pin_dialog_disable">Disable</string>
+
+    <!-- TwoFactorGate -->
+    <string name="two_factor_title">Enter password</string>
+    <string name="two_factor_subtitle">Two-step verification is enabled for this account</string>
+    <string name="two_factor_password_label">Password</string>
+    <string name="two_factor_hint_prefix">Hint: %1$s</string>
+    <string name="two_factor_continue">Continue</string>
+    <string name="two_factor_logout">Log out</string>
+    <string name="two_factor_wrong_password">Incorrect password</string>
+
+    <!-- PhoneLogin -->
+    <string name="phone_login_title">Log in with phone</string>
+    <string name="phone_login_label">Phone, e.g. +79001234567</string>
+    <string name="phone_login_get_code">Get code</string>
+    <string name="phone_login_code_sent">Code sent to %1$s</string>
+    <string name="phone_login_sms_label">SMS code</string>
+    <string name="phone_login_confirm">Confirm</string>
+    <string name="phone_login_resend">Resend code</string>
+    <string name="phone_login_use_email">Log in with email instead</string>
+    <string name="phone_login_format_error">Enter number in format +7XXXXXXXXXX</string>
+    <string name="phone_login_request_code_first">Request the code first</string>
+    <string name="phone_login_code_length_error">Code must be 6 digits</string>
+
+    <!-- AuthViewModel validation -->
+    <string name="auth_error_enter_email">Enter email or username</string>
+    <string name="auth_error_enter_password">Enter password</string>
+    <string name="auth_error_enter_name">Enter name</string>
+    <string name="auth_error_enter_username">Enter username</string>
+    <string name="auth_error_invalid_email">Enter a valid email</string>
+    <string name="auth_error_password_length">Password must be at least 6 characters</string>
+
+    <!-- GroupInfo -->
+    <string name="group_info_title">Group info</string>
+    <string name="group_info_not_found">Group not found</string>
+    <string name="group_info_members">Members (%1$d)</string>
+    <string name="group_info_creator">Group creator</string>
+    <string name="group_info_leave">Leave group</string>
+
+    <!-- InviteToChannel -->
+    <string name="invite_channel_title">Invite to channel</string>
+    <string name="invite_channel_subtitle">Choose who to subscribe</string>
+    <string name="invite_channel_hint">Invited users will see channel posts immediately</string>
+    <string name="invite_channel_selected">Selected: %1$d</string>
+    <string name="invite_channel_remove_cd">Remove</string>
+    <string name="invite_channel_search_placeholder">Search by name or @username</string>
+    <string name="invite_channel_clear_cd">Clear</string>
+    <string name="invite_channel_start_typing">Start typing a name or @username to find people</string>
+    <string name="invite_channel_no_results">Nobody found</string>
+    <string name="invite_channel_btn">Invite</string>
+    <string name="invite_channel_btn_count">Invite (%1$d)</string>
+    <string name="invite_channel_tap_hint">Tap to invite</string>
+    <string name="invite_channel_add_cd">Add</string>
+
+    <!-- ChatStats -->
+    <string name="chat_stats_title">Chat statistics</string>
+    <string name="chat_stats_empty">No messages in this chat yet</string>
+    <string name="chat_stats_total">Total messages: %1$d</string>
+    <string name="chat_stats_first_message">First message: %1$s</string>
+    <string name="chat_stats_top_senders">Top senders</string>
+    <string name="chat_stats_content_types">Message types</string>
+    <string name="chat_stats_hourly">Hourly activity</string>
+    <string name="chat_stats_daily">Daily activity</string>
+    <string name="chat_stats_type_text">Text</string>
+    <string name="chat_stats_type_photo">Photo</string>
+    <string name="chat_stats_type_voice">Voice</string>
+    <string name="chat_stats_type_files">Files</string>
+    <string name="chat_stats_type_location">Location</string>
+    <string name="chat_stats_type_polls">Polls</string>
+
+    <!-- ChatScreen -->
+    <string name="chat_search_placeholder">Search messages</string>
+    <string name="chat_verified_cd">Verified</string>
+    <string name="chat_official_tooltip">This is an official account you can trust.</string>
+    <string name="chat_typing">typing...</string>
+    <string name="chat_online">online</string>
+    <string name="chat_was_online">last seen %1$s</string>
+    <string name="chat_back_cd">Back</string>
+    <string name="chat_search_cd">Search</string>
+    <string name="chat_menu_cd">Menu</string>
+    <string name="chat_invite_to_channel">Invite to channel</string>
+    <string name="chat_unsubscribe">Unsubscribe</string>
+    <string name="chat_subscribe">Subscribe</string>
+    <string name="chat_disappearing">Disappearing messages</string>
+    <string name="chat_clear_history">Clear history</string>
+    <string name="chat_stats_menu">Chat statistics</string>
+    <string name="chat_export">Export chat</string>
+    <string name="chat_screenshot">Take screenshot</string>
+    <string name="chat_screenshot_saved">Screenshot saved to gallery</string>
+    <string name="chat_screenshot_error">Failed to take screenshot</string>
+    <string name="chat_delete_channel">Delete channel</string>
+    <string name="chat_delete_chat">Delete chat</string>
+    <string name="chat_delete_channel_title">Delete channel?</string>
+    <string name="chat_delete_channel_text">The channel will be permanently deleted for all subscribers. This cannot be undone.</string>
+    <string name="chat_delete_btn">Delete</string>
+    <string name="chat_pinned_label">Pinned message</string>
+    <string name="chat_pinned_photo">📷 Photo</string>
+    <string name="chat_unpin_title">Unpin message?</string>
+    <string name="chat_unpin_text">The message will be unpinned from this chat.</string>
+    <string name="chat_unpin_btn">Unpin</string>
+    <string name="chat_msg_deleted">Message deleted</string>
+    <string name="chat_msg_pinned_label">Pinned</string>
+    <string name="chat_msg_edited">edited </string>
+    <string name="chat_reply_default">Message</string>
+    <string name="chat_reply_image">Image</string>
+    <string name="chat_tap_to_load">Tap to load photo</string>
+    <string name="chat_msg_reply">Reply</string>
+    <string name="chat_msg_comments">Comments</string>
+    <string name="chat_msg_pin">Pin</string>
+    <string name="chat_msg_unpin">Unpin</string>
+    <string name="chat_msg_favorite">Save to favorites</string>
+    <string name="chat_msg_copy">Copy</string>
+    <string name="chat_msg_forward">Forward</string>
+    <string name="chat_photo_error">Failed to process photo</string>
+    <string name="chat_file_read_error">Failed to read file</string>
+    <string name="chat_location_permission">Location access is needed to send your position</string>
+    <string name="chat_cancel_btn">Cancel</string>
+
+    <!-- ChatList -->
+    <string name="chat_filter_all">All</string>
+    <string name="chat_filter_private">Personal</string>
+    <string name="chat_filter_groups">Groups</string>
+    <string name="chat_filter_unread">Unread</string>
+    <string name="chat_list_new_chat">New chat</string>
+    <string name="chat_list_new_group">New group</string>
+    <string name="chat_list_new_channel">New channel</string>
+    <string name="chat_list_contacts">Contacts</string>
+    <string name="chat_list_empty_all">You have no chats yet.
+Start a new conversation!</string>
+    <string name="chat_list_empty_private">No personal chats</string>
+    <string name="chat_list_empty_groups">No groups or channels</string>
+    <string name="chat_list_empty_unread">No unread messages</string>
+    <string name="chat_list_load_error">Failed to load chats</string>
+    <string name="chat_list_archive">Archive</string>
+    <string name="chat_list_delete_cd">Delete</string>
+    <string name="chat_list_favorite_cd">Favorites</string>
+    <string name="chat_list_verified_cd">Verified</string>
+    <string name="chat_list_read_cd">Read</string>
+    <string name="chat_list_delivered_cd">Delivered</string>
+    <string name="chat_list_draft_prefix">Draft: </string>
+    <string name="chat_list_channel_label">Channel</string>
+    <string name="chat_list_online">online</string>
+    <string name="chat_list_was_online">last seen %1$s</string>
+    <string name="chat_list_pin">Pin</string>
+    <string name="chat_list_unpin">Unpin</string>
+    <string name="chat_list_mute">Mute</string>
+    <string name="chat_list_unmute">Unmute</string>
+    <string name="chat_list_archive_action">Archive</string>
+    <string name="chat_list_unarchive">Unarchive</string>
+    <string name="chat_list_clear">Clear history</string>
+    <string name="chat_list_delete">Delete chat</string>
+    <string name="chat_list_just_now">just now</string>
+    <string name="chat_list_yesterday">Yesterday</string>
+    <string name="chat_search_icon_cd">Search</string>
+    <string name="chat_profile_cd">Profile</string>
+    <string name="chat_create_cd">Create</string>
+
+    <!-- CreateGroup -->
+    <string name="create_group_title">New group</string>
+    <string name="create_group_subtitle">Choose at least 2 members</string>
+    <string name="create_group_avatar_cd">Group avatar</string>
+    <string name="create_group_remove_photo_cd">Remove photo</string>
+    <string name="create_group_pick_photo_cd">Pick photo</string>
+    <string name="create_group_add_photo">Add a group photo (optional)</string>
+    <string name="create_group_photo_chosen">Photo selected</string>
+    <string name="create_group_name_label">Group name</string>
+    <string name="create_group_desc_label">Description (optional)</string>
+    <string name="create_group_selected">Selected: %1$d</string>
+    <string name="create_group_chip_remove_cd">Remove</string>
+    <string name="create_group_search_placeholder">Search by name or @username</string>
+    <string name="create_group_clear_cd">Clear</string>
+    <string name="create_group_start_typing">Start typing a name or @username to find people</string>
+    <string name="create_group_no_results">Nobody found</string>
+    <string name="create_group_btn">Create group</string>
+    <string name="create_group_tap_hint">Tap to add to group</string>
+    <string name="create_group_add_cd">Add</string>
+
+    <!-- EditChannel -->
+    <string name="edit_channel_title">Edit channel</string>
+    <string name="edit_channel_change_photo_hint">Tap the photo to change the avatar</string>
+    <string name="edit_channel_name_label">Channel name</string>
+    <string name="edit_channel_desc_label">Description</string>
+    <string name="edit_channel_save_btn">Save changes</string>
+    <string name="edit_channel_admins_title">Channel administrators</string>
+    <string name="edit_channel_admins_hint">Admins can post on behalf of the channel.</string>
+    <string name="edit_channel_owner_role">Owner</string>
+    <string name="edit_channel_admin_role">Administrator</string>
+    <string name="edit_channel_admin_search">Find user by name or @username</string>
+    <string name="edit_channel_add_admin_cd">Make admin</string>
+    <string name="edit_channel_remove_admin_cd">Remove admin</string>
+    <string name="edit_channel_change_photo_cd">Change photo</string>
+
+    <!-- ChannelProfile -->
+    <string name="channel_profile_title">About channel</string>
+    <string name="channel_profile_not_found">Channel not found</string>
+    <string name="channel_profile_official">Official channel</string>
+    <string name="channel_profile_created">created %1$s</string>
+    <string name="channel_profile_open_posts">Open posts</string>
+    <string name="channel_profile_unsubscribe">Unsubscribe</string>
+    <string name="channel_profile_subscribe">Subscribe</string>
+    <string name="channel_profile_latest_posts">Latest posts</string>
+    <string name="channel_profile_administration">Administration</string>
+    <string name="channel_profile_edit">Edit channel</string>
+    <string name="channel_profile_delete">Delete channel</string>
+    <string name="channel_profile_delete_title">Delete channel?</string>
+    <string name="channel_profile_delete_text">The channel will be permanently deleted for all subscribers. This cannot be undone.</string>
+    <string name="channel_profile_verified_cd">Verified</string>
+
+    <!-- Comments -->
+    <string name="comments_title">Comments</string>
+    <string name="comments_delete_title">Delete comment?</string>
+    <string name="comments_placeholder">Write a comment...</string>
+    <string name="comments_send_cd">Send</string>
+    <string name="comments_empty">No comments yet.
+Be the first!</string>
+    <string name="comments_you">You</string>
+    <string name="comments_channel_post_prefix">Channel post · %1$s</string>
+
+    <!-- ArchivedChats -->
+    <string name="archived_chats_title">Archive</string>
+    <string name="archived_chats_empty">Archive is empty</string>
+    <string name="archived_chats_load_error">Failed to load archive</string>
+
+    <!-- ForwardMessage -->
+    <string name="forward_title">Forward message</string>
+    <string name="forward_subtitle">Choose a chat to forward to</string>
+    <string name="forward_search_placeholder">Search chats</string>
+    <string name="forward_clear_cd">Clear</string>
+    <string name="forward_no_chats">No chats available</string>
+    <string name="forward_no_results">Nothing found</string>
+    <string name="forward_forwarded_msg">Forwarded message</string>
+    <string name="forward_section_pinned">Pinned</string>
+    <string name="forward_section_channels">Channel</string>
+    <string name="forward_section_groups">Groups</string>
+    <string name="forward_section_personal">Personal chats</string>
+    <string name="forward_official_channel">Official channel · posts by admins</string>
+    <string name="forward_saved_messages">Saved messages</string>
+    <string name="forward_group_chat">Group chat</string>
+    <string name="forward_chat_default">Chat</string>
+    <string name="forward_yesterday">Yesterday</string>
+    <string name="forward_just_now">just now</string>
+    <string name="forward_online">online</string>
+    <string name="forward_was_online">last seen %1$s</string>
+
+    <!-- Profile -->
+    <string name="profile_title">Profile</string>
+    <string name="profile_no_name">No name</string>
+    <string name="profile_online">Online</string>
+    <string name="profile_edit_cd">Edit</string>
+    <string name="profile_history_cd">History</string>
+    <string name="profile_more_cd">More</string>
+    <string name="profile_about_label">About</string>
+    <string name="profile_about_placeholder">Tell about yourself</string>
+    <string name="profile_name_field">Name</string>
+    <string name="profile_username_field">Username</string>
+    <string name="profile_phone_label">Phone number</string>
+    <string name="profile_favorites">Favorites</string>
+    <string name="profile_recent_calls">Recent calls</string>
+    <string name="profile_devices">Devices</string>
+    <string name="profile_logout">Log out</string>
+    <string name="profile_more_section">More</string>
+    <string name="profile_birth_date_label">Date of birth</string>
+    <string name="profile_birth_date_placeholder">dd.mm.yyyy</string>
+    <string name="profile_change_photo_cd">Change photo</string>
+
+    <!-- UserProfile -->
+    <string name="user_profile_not_found">User not found</string>
+    <string name="user_profile_online">online</string>
+    <string name="user_profile_last_seen">last seen recently</string>
+    <string name="user_profile_send_message">Send message</string>
+    <string name="user_profile_about">About</string>
+    <string name="user_profile_birth_date">Date of birth</string>
+    <string name="user_profile_location">Location</string>
+    <string name="user_profile_website">Website</string>
+    <string name="user_profile_phone">Phone</string>
+    <string name="user_profile_more">More</string>
+
+    <!-- QrCode -->
+    <string name="qr_hint">Show this code to a friend — it will open your profile in YODO</string>
+    <string name="qr_saved">Saved to gallery 📷</string>
+    <string name="qr_save_error">Failed to save</string>
+    <string name="qr_save_btn">Save</string>
+    <string name="qr_saved_btn">Saved</string>
+    <string name="qr_share_btn">Share</string>
+    <string name="qr_share_text">My profile in YODO Messenger</string>
+    <string name="qr_share_chooser">Share QR code</string>
+    <string name="qr_back_cd">Back</string>
+
+    <!-- Devices -->
+    <string name="devices_title">Devices</string>
+    <string name="devices_hint">All devices where you are signed into your YODO account are listed below.</string>
+    <string name="devices_this_device">This device</string>
+    <string name="devices_other">Other devices (%1$d)</string>
+    <string name="devices_terminate_all">Terminate all other sessions</string>
+    <string name="devices_only_one">You are signed in from this device only. No other active sessions found.</string>
+    <string name="devices_terminate_title">Terminate all other sessions?</string>
+    <string name="devices_terminate_text">All devices except the current one will be disconnected from your account.</string>
+    <string name="devices_terminate_btn">Terminate</string>
+    <string name="devices_current_badge">Current</string>
+    <string name="devices_terminate_cd">End session</string>
+    <string name="devices_never">never</string>
+    <string name="devices_just_now">just now</string>
+    <string name="devices_yesterday">yesterday</string>
+
+    <!-- AvatarCrop -->
+    <string name="avatar_crop_title">New profile photo</string>
+    <string name="avatar_crop_cancel_cd">Cancel</string>
+    <string name="avatar_crop_save_cd">Save</string>
+    <string name="avatar_crop_preview_cd">Avatar preview</string>
+    <string name="avatar_crop_load_error">Failed to load image</string>
+    <string name="avatar_crop_hint">Move and scale the photo with your fingers</string>
+
+    <!-- Search -->
+    <string name="search_hint">Find people by name or @username —
+or channels by title</string>
+    <string name="search_no_results">Nobody and nothing found</string>
+    <string name="search_channels_header">Channels</string>
+    <string name="search_people_header">People</string>
+    <string name="search_placeholder">Name, @username or channel</string>
+    <string name="search_clear_cd">Clear</string>
+    <string name="search_verified_cd">Verified</string>
+    <string name="search_subscribed">Subscribed</string>
+    <string name="search_back_cd">Back</string>
+
+    <!-- Contacts -->
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_permission_hint">Allow access to contacts to see who from your phone book is already on Yodo</string>
+    <string name="contacts_permission_btn">Allow access</string>
+    <string name="contacts_no_phone">No contacts with phone numbers found in your phone book</string>
+    <string name="contacts_already_in_yodo">Already on Yodo</string>
+    <string name="contacts_invite">Invite to Yodo</string>
+    <string name="contacts_not_found">No contacts found</string>
+    <string name="contacts_not_registered">Not registered on Yodo</string>
+
+    <!-- PinLock -->
+    <string name="pin_lock_enter">Enter PIN code</string>
+    <string name="pin_lock_wrong">Wrong PIN. Attempts remaining: %1$d</string>
+    <string name="pin_lock_too_many">Too many attempts. Please try later.</string>
+    <string name="pin_lock_retry_seconds">Try again in %1$d sec.</string>
+    <string name="pin_lock_backspace_cd">Backspace</string>
+
+    <!-- TwoFactor settings -->
+    <string name="two_factor_settings_title">Two-step verification</string>
+    <string name="two_factor_settings_enabled">An additional password is set. It will be required every time you sign in to your account on a new device.</string>
+    <string name="two_factor_settings_disabled">Set an additional password. It will be asked when signing in — just like in Telegram — and protects access even if someone gets your email password.</string>
+    <string name="two_factor_settings_new_password">New password</string>
+    <string name="two_factor_settings_repeat_password">Repeat password</string>
+    <string name="two_factor_settings_hint_label">Hint (optional)</string>
+    <string name="two_factor_settings_enable_btn">Enable password</string>
+    <string name="two_factor_settings_hint_prefix">Hint: %1$s</string>
+    <string name="two_factor_settings_change_btn">Change password</string>
+    <string name="two_factor_settings_disable_btn">Disable</string>
+    <string name="two_factor_settings_current_password">Current password</string>
+    <string name="two_factor_settings_new_password2">New password</string>
+    <string name="two_factor_settings_repeat_new">Repeat new password</string>
+    <string name="two_factor_settings_save_btn">Save</string>
+    <string name="two_factor_settings_disable_password_btn">Disable password</string>
+    <string name="two_factor_settings_cancel">Cancel</string>
+
+    <!-- Nearby -->
+    <string name="nearby_title">People nearby</string>
+    <string name="nearby_list_tab">List</string>
+    <string name="nearby_map_tab">Map</string>
+    <string name="nearby_permission_hint">Location access is needed to find people nearby.</string>
+    <string name="nearby_location_error">Could not determine location. Check if location is enabled on your phone.</string>
+    <string name="nearby_empty">Nobody nearby yet.
+Try later — people appear when they open this screen.</string>
+    <string name="nearby_you_here">You are here</string>
+
+    <!-- Offline chat -->
+    <string name="offline_chat_title">Offline chat (Bluetooth)</string>
+    <string name="offline_chat_permissions">Bluetooth and location permissions are required (location is mandatory for nearby device discovery on Android — no data is sent anywhere).</string>
+    <string name="offline_name_question">What should we call you?</string>
+    <string name="offline_name_hint">You are not signed into Yodo. Enter a name that others will see in the offline chat. It will be saved for next time.</string>
+    <string name="offline_name_label">Your name</string>
+    <string name="offline_name_placeholder">E.g. Alex</string>
+    <string name="offline_start_search">Start searching</string>
+    <string name="offline_searching">Searching for nearby devices...</string>
+    <string name="offline_radar_tab">Radar</string>
+    <string name="offline_list_tab">List</string>
+    <string name="offline_range_hint">Works without internet — only with devices within Bluetooth/Wi-Fi range (usually 10-100 m) that also have this screen open.</string>
+    <string name="offline_connecting">Connecting...</string>
+    <string name="offline_nobody_nearby">Nobody found nearby yet.</string>
+    <string name="offline_connected">Connected: %1$s</string>
+    <string name="offline_message_placeholder">Message...</string>
+    <string name="offline_send_cd">Send</string>
+    <string name="offline_disconnect">Disconnect</string>
+    <string name="offline_scanning">Scanning...</string>
+    <string name="offline_guest_default">Guest</string>
+    <string name="offline_interlocutor">Interlocutor</string>
+    <string name="offline_yodo_user">Yodo User</string>
+
+    <!-- Main nav -->
+    <string name="nav_chats">Chats</string>
+    <string name="nav_nearby">Nearby</string>
+    <string name="nav_offline">Offline</string>
+    <string name="nav_chats_cd">Chats</string>
+    <string name="nav_nearby_cd">Nearby</string>
+    <string name="nav_offline_cd">Offline</string>
+
+    <!-- Onboarding after registration -->
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_start">Get started</string>
+    <string name="onboarding_welcome_title">Welcome to Yodo!</string>
+    <string name="onboarding_welcome_desc">A quick tour of what the app can do. It takes less than a minute — or skip it anytime.</string>
+    <string name="onboarding_chats_title">Chats</string>
+    <string name="onboarding_chats_desc">Direct messages, groups and channels in one place. Send messages, photos, voice notes and files.</string>
+    <string name="onboarding_nearby_title">Nearby</string>
+    <string name="onboarding_nearby_desc">Discover people around you and connect without exchanging contacts.</string>
+    <string name="onboarding_offline_title">Offline mode</string>
+    <string name="onboarding_offline_desc">Chat with people nearby even without the internet — via a direct device-to-device connection.</string>
+    <string name="onboarding_settings_title">Profile &amp; settings</string>
+    <string name="onboarding_settings_desc">Customize the theme, privacy and PIN, and manage your profile and devices.</string>
+
+</resources>
