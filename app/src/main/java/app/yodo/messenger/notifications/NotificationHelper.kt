@@ -16,36 +16,79 @@ import app.yodo.messenger.data.local.StoredNotificationMessage
 object NotificationHelper {
 
     // На Android 8+ звук/вибрация закреплены за каналом на момент его создания и не меняются
-    // через билдер уведомления — поэтому под настройку "звук вкл/выкл" заведены два канала.
-    const val CHANNEL_ID_MESSAGES_SOUND = "yodo_messages_sound"
-    const val CHANNEL_ID_MESSAGES_SILENT = "yodo_messages_silent"
+    // через билдер уведомления. Раньше было всего два канала (со звуком/без), и вибрация
+    // не могла управляться отдельно от звука — из-за этого тумблеры "звук" и "вибрация" в
+    // настройках фактически не работали независимо. Теперь заводим все 4 комбинации
+    // (звук × вибрация) и выбираем канал по ОБОИМ флагам.
+    const val CHANNEL_ID_MESSAGES_SOUND_VIBRO = "yodo_messages_sound_vibro"
+    const val CHANNEL_ID_MESSAGES_SOUND_ONLY = "yodo_messages_sound_only"
+    const val CHANNEL_ID_MESSAGES_VIBRO_ONLY = "yodo_messages_vibro_only"
+    const val CHANNEL_ID_MESSAGES_MUTED = "yodo_messages_muted"
+
+    // Старые каналы (для миграции — удаляем, чтобы не засорять настройки приложения).
+    private const val LEGACY_CHANNEL_ID_MESSAGES_SOUND = "yodo_messages_sound"
+    private const val LEGACY_CHANNEL_ID_MESSAGES_SILENT = "yodo_messages_silent"
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        val soundChannel = NotificationChannel(
-            CHANNEL_ID_MESSAGES_SOUND,
-            "Сообщения (со звуком)",
+        // Удаляем устаревшие каналы, чтобы пользователь не видел дубли в системных настройках.
+        runCatching { manager.deleteNotificationChannel(LEGACY_CHANNEL_ID_MESSAGES_SOUND) }
+        runCatching { manager.deleteNotificationChannel(LEGACY_CHANNEL_ID_MESSAGES_SILENT) }
+
+        val soundVibro = NotificationChannel(
+            CHANNEL_ID_MESSAGES_SOUND_VIBRO,
+            "Сообщения (звук + вибрация)",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Уведомления о новых сообщениях в чатах"
+            description = "Уведомления о новых сообщениях: со звуком и вибрацией"
             enableVibration(true)
         }
 
-        val silentChannel = NotificationChannel(
-            CHANNEL_ID_MESSAGES_SILENT,
-            "Сообщения (без звука)",
+        val soundOnly = NotificationChannel(
+            CHANNEL_ID_MESSAGES_SOUND_ONLY,
+            "Сообщения (только звук)",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Уведомления о новых сообщениях в чатах, без звука/вибрации"
+            description = "Уведомления о новых сообщениях: со звуком, без вибрации"
+            enableVibration(false)
+        }
+
+        val vibroOnly = NotificationChannel(
+            CHANNEL_ID_MESSAGES_VIBRO_ONLY,
+            "Сообщения (только вибрация)",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Уведомления о новых сообщениях: без звука, с вибрацией"
+            enableVibration(true)
+            setSound(null, null)
+        }
+
+        val muted = NotificationChannel(
+            CHANNEL_ID_MESSAGES_MUTED,
+            "Сообщения (без звука и вибрации)",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Уведомления о новых сообщениях: без звука и вибрации"
             enableVibration(false)
             setSound(null, null)
         }
 
-        manager.createNotificationChannel(soundChannel)
-        manager.createNotificationChannel(silentChannel)
+        manager.createNotificationChannel(soundVibro)
+        manager.createNotificationChannel(soundOnly)
+        manager.createNotificationChannel(vibroOnly)
+        manager.createNotificationChannel(muted)
+    }
+
+    // Канал выбирается по обоим флагам сразу — так тумблеры "звук" и "вибрация" работают
+    // независимо друг от друга.
+    private fun channelIdFor(soundEnabled: Boolean, vibrationEnabled: Boolean): String = when {
+        soundEnabled && vibrationEnabled -> CHANNEL_ID_MESSAGES_SOUND_VIBRO
+        soundEnabled && !vibrationEnabled -> CHANNEL_ID_MESSAGES_SOUND_ONLY
+        !soundEnabled && vibrationEnabled -> CHANNEL_ID_MESSAGES_VIBRO_ONLY
+        else -> CHANNEL_ID_MESSAGES_MUTED
     }
 
     /**
@@ -76,7 +119,7 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val channelId = if (soundEnabled) CHANNEL_ID_MESSAGES_SOUND else CHANNEL_ID_MESSAGES_SILENT
+        val channelId = channelIdFor(soundEnabled, vibrationEnabled)
 
         // Собеседник/автор текущего сообщения — от его лица уведомление и "приходит".
         val me = Person.Builder().setName("Вы").build()

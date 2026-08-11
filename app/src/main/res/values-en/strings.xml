@@ -29,6 +29,13 @@
     <string name="login_password">Password</string>
     <string name="login_submit">Log in</string>
     <string name="login_no_account">Don\'t have an account? Sign up</string>
+    <string name="login_forgot_password">Forgot password?</string>
+    <string name="reset_password_title">Reset password</string>
+    <string name="reset_password_description">Enter your email or username — we\'ll send a password reset link to the linked email address.</string>
+    <string name="reset_password_input_label">Email or username</string>
+    <string name="reset_password_submit">Send email</string>
+    <string name="reset_password_success">Password reset email sent. Check your inbox (and spam folder).</string>
+    <string name="reset_password_back_to_login">Back to login</string>
 
     <!-- Register -->
     <string name="register_name">Name</string>
@@ -356,6 +363,7 @@ Be the first!</string>
     <string name="forward_section_groups">Groups</string>
     <string name="forward_section_personal">Personal chats</string>
     <string name="forward_official_channel">Official channel · posts by admins</string>
+    <string name="forward_channel">Channel</string>
     <string name="forward_saved_messages">Saved messages</string>
     <string name="forward_group_chat">Group chat</string>
     <string name="forward_chat_default">Chat</string>
@@ -519,20 +527,5 @@ Try later — people appear when they open this screen.</string>
     <string name="nav_chats_cd">Chats</string>
     <string name="nav_nearby_cd">Nearby</string>
     <string name="nav_offline_cd">Offline</string>
-
-    <!-- Onboarding after registration -->
-    <string name="onboarding_skip">Skip</string>
-    <string name="onboarding_next">Next</string>
-    <string name="onboarding_start">Get started</string>
-    <string name="onboarding_welcome_title">Welcome to Yodo!</string>
-    <string name="onboarding_welcome_desc">A quick tour of what the app can do. It takes less than a minute — or skip it anytime.</string>
-    <string name="onboarding_chats_title">Chats</string>
-    <string name="onboarding_chats_desc">Direct messages, groups and channels in one place. Send messages, photos, voice notes and files.</string>
-    <string name="onboarding_nearby_title">Nearby</string>
-    <string name="onboarding_nearby_desc">Discover people around you and connect without exchanging contacts.</string>
-    <string name="onboarding_offline_title">Offline mode</string>
-    <string name="onboarding_offline_desc">Chat with people nearby even without the internet — via a direct device-to-device connection.</string>
-    <string name="onboarding_settings_title">Profile &amp; settings</string>
-    <string name="onboarding_settings_desc">Customize the theme, privacy and PIN, and manage your profile and devices.</string>
 
 </resources>

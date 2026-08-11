@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -67,8 +69,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.util.Base64
+import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.util.QrCardGenerator
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,6 +84,7 @@ import java.io.FileOutputStream
 @Composable
 fun QrCodeScreen(
     onBackClick: () -> Unit,
+    onScanClick: () -> Unit = {},
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -97,8 +103,10 @@ fun QrCodeScreen(
         val user = uiState.user ?: return@LaunchedEffect
         isGenerating = true
         val bitmap = withContext(Dispatchers.IO) {
+            // НОВОЕ (офлайн обмен контактами по QR): вшиваем карточку контакта + публичный ключ.
+            val publicKey = viewModel.getMyPublicKey()
             QrCardGenerator.generate(
-                content = "yodo://user/${user.uid}",
+                content = buildContactQrContent(user, publicKey),
                 displayName = user.displayName.ifBlank { "YODO User" },
                 username = user.username,
                 primaryArgb = android.graphics.Color.rgb(
@@ -257,6 +265,17 @@ fun QrCodeScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── Сканировать чужой QR (офлайн обмен контактами) ─────────
+            OutlinedButton(
+                onClick = onScanClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("Сканировать код друга", modifier = Modifier.padding(start = 6.dp))
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
@@ -265,6 +284,24 @@ fun QrCodeScreen(
 // ────────────────────────────────────────────────────────────────────────────
 // Утилиты сохранения / шаринга
 // ────────────────────────────────────────────────────────────────────────────
+
+// НОВОЕ (офлайн обмен контактами по QR): формируем содержимое QR как карточку контакта
+// (yodo://c/<base64url(json)>). JSON: v=версия, uid, n=имя, u=username, pk=публичный ключ.
+// Такой QR можно распознать полностью офлайн — включая ключ для сквозного шифрования.
+private fun buildContactQrContent(user: YodoUser, publicKey: String?): String {
+    val json = JSONObject().apply {
+        put("v", 1)
+        put("uid", user.uid)
+        put("n", user.displayName)
+        user.username?.takeIf { it.isNotBlank() }?.let { put("u", it) }
+        publicKey?.takeIf { it.isNotBlank() }?.let { put("pk", it) }
+    }
+    val encoded = Base64.encodeToString(
+        json.toString().toByteArray(Charsets.UTF_8),
+        Base64.NO_WRAP or Base64.URL_SAFE
+    )
+    return "yodo://c/$encoded"
+}
 
 private fun saveBitmapToGallery(context: Context, bitmap: Bitmap): Boolean {
     return try {

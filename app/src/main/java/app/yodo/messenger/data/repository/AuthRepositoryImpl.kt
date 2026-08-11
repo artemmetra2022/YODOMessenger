@@ -1,9 +1,11 @@
 package app.yodo.messenger.data.repository
 
 import app.yodo.messenger.core.util.toUserMessage
+import app.yodo.messenger.data.local.AccountStore
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.AuthResult
+import app.yodo.messenger.domain.repository.ResetPasswordResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -17,7 +19,9 @@ import javax.inject.Singleton
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    // НОВОЕ (Y): сохраняем аккаунты для быстрой смены аккаунта.
+    private val accountStore: AccountStore
 ) : AuthRepository {
 
     override val currentUser: YodoUser?
@@ -41,6 +45,11 @@ class AuthRepositoryImpl @Inject constructor(
 
             val result = firebaseAuth.signInWithEmailAndPassword(email, password).await()
             val user = result.user ?: return AuthResult.Error("Не удалось получить данные пользователя")
+            warmUpFirestore(user.uid)
+            // НОВОЕ (Y): запоминаем аккаунт для быстрой смены.
+            accountStore.saveAccount(
+                AccountStore.SavedAccount(user.uid, email, password, user.displayName.orEmpty())
+            )
             AuthResult.Success(user.toYodoUser())
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Неизвестная ошибка авторизации"))
@@ -76,6 +85,9 @@ class AuthRepositoryImpl @Inject constructor(
                 UserProfileChangeRequest.Builder().setDisplayName(name.trim()).build()
             ).await()
 
+            // НОВОЕ (AE): генерируем случайный публичный ID пользователя (виден в профиле, для админ-банов).
+            val publicId = generatePublicId()
+
             // Создаём документ пользователя и резервируем username атомарно в одной транзакции.
             // Оборачиваем в таймаут: если Firestore Database ещё не создана в консоли или недоступна,
             // не блокируем экран навсегда — пользователь Auth уже создан, это главное.
@@ -95,6 +107,7 @@ class AuthRepositoryImpl @Inject constructor(
                             "username" to normalizedUsername,
                             "usernameLowercase" to normalizedUsername,
                             "email" to email.trim(),
+                            "publicId" to publicId,
                             "createdAt" to System.currentTimeMillis()
                         )
                     )
@@ -116,8 +129,13 @@ class AuthRepositoryImpl @Inject constructor(
                 )
             }
 
+            warmUpFirestore(firebaseUser.uid)
+            // НОВОЕ (Y): запоминаем аккаунт для быстрой смены.
+            accountStore.saveAccount(
+                AccountStore.SavedAccount(firebaseUser.uid, email.trim(), password, name.trim())
+            )
             AuthResult.Success(
-                firebaseUser.toYodoUser(nameOverride = name.trim(), usernameOverride = normalizedUsername)
+                firebaseUser.toYodoUser(nameOverride = name.trim(), usernameOverride = normalizedUsername, publicIdOverride = publicId)
             )
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Не удалось зарегистрироваться"))
@@ -144,6 +162,27 @@ class AuthRepositoryImpl @Inject constructor(
             val uid = usernameDoc.getString("uid") ?: return@withTimeoutOrNull null
             val userDoc = firestore.collection("users").document(uid).get().await()
             userDoc.getString("email")
+        }
+    }
+
+    override suspend fun resetPassword(emailOrUsername: String): ResetPasswordResult {
+        val input = emailOrUsername.trim()
+        if (input.isBlank()) return ResetPasswordResult.Error("Введите email или username")
+
+        return try {
+            // Та же логика определения email, что и при входе: если строка похожа
+            // на email — используем её напрямую, иначе резолвим username → email через Firestore.
+            val email = if (isEmailLike(input)) {
+                input
+            } else {
+                resolveEmailByUsername(input)
+                    ?: return ResetPasswordResult.Error("Пользователь с таким username не найден")
+            }
+
+            firebaseAuth.sendPasswordResetEmail(email).await()
+            ResetPasswordResult.Success
+        } catch (e: Exception) {
+            ResetPasswordResult.Error(e.toUserMessage("Не удалось отправить письмо для сброса пароля"))
         }
     }
 
@@ -191,18 +230,52 @@ class AuthRepositoryImpl @Inject constructor(
                 "Не удалось синхронизировать профиль Google-входа с Firestore за 8 секунд."
             )
 
+            warmUpFirestore(user.uid)
             AuthResult.Success(user.toYodoUser())
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Не удалось войти через Google"))
         }
     }
 
-    private fun FirebaseUser.toYodoUser(nameOverride: String? = null, usernameOverride: String? = null) = YodoUser(
+    /**
+     * "Прогревает" grpc-соединение Firestore сразу после успешного входа, ещё до перехода
+     * на экран со списком чатов. Без этого первый запрос к Firestore (уже на новом экране)
+     * сам устанавливает TLS/grpc-канал и проверяет свежий Auth-токен — это добавляет
+     * несколько секунд именно к ПЕРВОЙ загрузке списка чатов после входа. При повторном
+     * заходе в приложение канал уже готов, поэтому там всё быстро.
+     * Не блокирует и не влияет на результат входа — запрос "выстрелил и забыт",
+     * а любая ошибка (например, оффлайн) тихо игнорируется.
+     */
+    private fun warmUpFirestore(uid: String) {
+        firestore.collection("chats")
+            .whereArrayContains("participantIds", uid)
+            .limit(1)
+            .get()
+    }
+
+    private fun FirebaseUser.toYodoUser(nameOverride: String? = null, usernameOverride: String? = null, publicIdOverride: String? = null) = YodoUser(
         uid = uid,
         displayName = nameOverride ?: displayName.orEmpty(),
         username = usernameOverride,
         email = email,
         phoneNumber = phoneNumber,
-        photoUrl = photoUrl?.toString()
+        photoUrl = photoUrl?.toString(),
+        publicId = publicIdOverride
     )
+
+    companion object {
+        // НОВОЕ (AE): алфавит без похожих символов (0/O, 1/I) для читаемого ID.
+        private const val ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+        /** Генерирует случайный публичный ID вида YODO-XXXX-XXXX. */
+        fun generatePublicId(): String {
+            val rnd = java.security.SecureRandom()
+            val sb = StringBuilder("YODO-")
+            for (i in 0 until 8) {
+                if (i == 4) sb.append('-')
+                sb.append(ID_ALPHABET[rnd.nextInt(ID_ALPHABET.length)])
+            }
+            return sb.toString()
+        }
+    }
 }

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.GroupInfo
+import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,10 +21,12 @@ sealed class GroupInfoUiState {
 @HiltViewModel
 class GroupInfoViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
+    private val firebaseAuth: FirebaseAuth,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val chatId: String = checkNotNull(savedStateHandle["chatId"])
+    val chatId: String = checkNotNull(savedStateHandle["chatId"])
+    val myUid: String? get() = firebaseAuth.currentUser?.uid
 
     private val _uiState = MutableStateFlow<GroupInfoUiState>(GroupInfoUiState.Loading)
     val uiState: StateFlow<GroupInfoUiState> = _uiState

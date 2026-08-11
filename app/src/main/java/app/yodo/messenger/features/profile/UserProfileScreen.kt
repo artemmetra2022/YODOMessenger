@@ -25,14 +25,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,6 +50,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -73,6 +80,14 @@ fun UserProfileScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val openChatId by viewModel.openChatId.collectAsState()
+    val isBlocked by viewModel.isBlocked.collectAsState()
+    // НОВОЕ (AD): глобальная блокировка аккаунта админом (2 почты).
+    val isGloballyBlocked by viewModel.isGloballyBlocked.collectAsState()
+    // ИСПРАВЛЕНО (AT): результат блокировки теперь виден админу.
+    val globalBlockError by viewModel.globalBlockError.collectAsState()
+    val globalBlockInfo by viewModel.globalBlockInfo.collectAsState()
+    var showGlobalBlockDialog by remember { mutableStateOf(false) }
+    var globalBlockReason by remember { mutableStateOf("") }
     val colorTheme = LocalColorTheme.current
 
     LaunchedEffect(openChatId) {
@@ -165,6 +180,30 @@ fun UserProfileScreen(
                             )
                         }
 
+                        // НОВОЕ (батч 7): эмодзи-статус и текстовый статус пользователя.
+                        val statusLine = listOf(user.emojiStatus, user.customStatus)
+                            .mapNotNull { it?.takeIf { s -> s.isNotBlank() } }
+                            .joinToString(" ")
+                        if (statusLine.isNotBlank()) {
+                            Text(
+                                text = statusLine,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colorTheme.primary,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+
+                        // НОВОЕ (AE): публичный ID пользователя (для админов — чтобы забанить именно этого человека).
+                        user.publicId?.takeIf { it.isNotBlank() }?.let { pid ->
+                            Text(
+                                text = "ID: $pid",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+
                         // Статус онлайн
                         state.presence?.let { presence ->
                             val statusText = if (presence.isOnline) stringResource(R.string.user_profile_online)
@@ -226,6 +265,62 @@ fun UserProfileScreen(
                             Text(
                                 stringResource(R.string.user_profile_send_message),
                                 color = Color.White,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // НОВОЕ (блокировка): кнопка заблокировать / разблокировать.
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val blockColor = if (isBlocked) colorTheme.primary else Color(0xFFE53935)
+                    Button(
+                        onClick = { viewModel.toggleBlock() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = blockColor.copy(alpha = 0.12f),
+                            contentColor = blockColor
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .padding(horizontal = 20.dp),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Block,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            if (isBlocked) "Разблокировать" else "Заблокировать",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    // НОВОЕ (AD): админская глобальная блокировка аккаунта во всём приложении (только 2 почты).
+                    if (viewModel.isAppAdmin) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                if (isGloballyBlocked) viewModel.removeGlobalBlock()
+                                else showGlobalBlockDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF8E24AA).copy(alpha = 0.12f),
+                                contentColor = Color(0xFF8E24AA)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .padding(horizontal = 20.dp),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Icon(Icons.Filled.Block, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                if (isGloballyBlocked) "Снять блокировку приложения" else "Заблокировать в приложении (админ)",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -307,6 +402,51 @@ fun UserProfileScreen(
                 }
             }
         }
+    }
+
+    // НОВОЕ (AD): диалог с причиной глобальной блокировки аккаунта.
+    if (showGlobalBlockDialog) {
+        AlertDialog(
+            onDismissRequest = { showGlobalBlockDialog = false },
+            title = { Text("Блокировка аккаунта") },
+            text = {
+                Column {
+                    Text("Причина бу��ет показана пользователю. Он сможет только подать обжалование.")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = globalBlockReason,
+                        onValueChange = { globalBlockReason = it },
+                        label = { Text("Причина") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setGlobalBlock(globalBlockReason.trim())
+                        showGlobalBlockDialog = false
+                        globalBlockReason = ""
+                    },
+                    enabled = globalBlockReason.isNotBlank()
+                ) { Text("Заблокировать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGlobalBlockDialog = false }) { Text("Отмена") }
+            }
+        )
+    }
+
+    // ИСПРАВЛЕНО (AT): сообщение об успехе или ошибке блокировки аккаунта.
+    if (globalBlockError != null || globalBlockInfo != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearGlobalBlockMessages() },
+            title = { Text(if (globalBlockError != null) "Не получилось" else "Готово") },
+            text = { Text(globalBlockError ?: globalBlockInfo ?: "") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearGlobalBlockMessages() }) { Text("ОК") }
+            }
+        )
     }
 }
 

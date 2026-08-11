@@ -12,9 +12,16 @@ import javax.inject.Singleton
 @Singleton
 class PendingForwardHolder @Inject constructor() {
     private var message: Message? = null
+    // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
+    // раньше при пересылке всегда подставлялось имя ТЕКУЩЕГО пользователя
+    // (того, кто нажал «Переслать»), а не автора исходного сообщения. Теперь
+    // вместе с сообщением сохраняем и настоящее имя источника — например,
+    // название канала, если сообщение было постом канала.
+    private var originSenderName: String? = null
 
-    fun set(message: Message) {
+    fun set(message: Message, originSenderName: String) {
         this.message = message
+        this.originSenderName = originSenderName
     }
 
     /**
@@ -24,9 +31,12 @@ class PendingForwardHolder @Inject constructor() {
      */
     fun peek(): Message? = message
 
+    fun peekOriginSenderName(): String? = originSenderName
+
     fun takeAndClear(): Message? {
         val result = message
         message = null
+        originSenderName = null
         return result
     }
 }

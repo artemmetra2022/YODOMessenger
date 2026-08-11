@@ -14,6 +14,9 @@ data class Message(
     val replyToText: String? = null,
     val reactions: Map<String, List<String>> = emptyMap(),
     val imageBase64: String? = null,
+    // НОВОЕ (несколько фото в одном сообщении): если не пустой — это альбом из
+    // нескольких фото, которые показываются сеткой/коллажем в одном пузыре.
+    val imagesBase64: List<String> = emptyList(),
     val isEdited: Boolean = false,
     val isDeleted: Boolean = false,
     val forwardedFromSenderName: String? = null,
@@ -31,12 +34,21 @@ data class Message(
     // НОВОЕ (переработка каналов): число комментариев под постом канала.
     val commentsCount: Int = 0,
     // НОВОЕ (опросы): если не null — это сообщение-опрос.
-    val poll: Poll? = null
+    val poll: Poll? = null,
+    // НОВОЕ (одноразовые медиа): фото "на один просмотр" — как только получатель открыл его
+    // полноэкранно один раз, imageBase64 удаляется на сервере (см. MessageRepositoryImpl.
+    // markViewOnceImageOpened) и локально показывается только заглушка "Фото открыто".
+    val isViewOnce: Boolean = false,
+    val viewOnceOpened: Boolean = false,
+    // НОВОЕ (F3 статистика постов канала): число уникальных просмотров поста.
+    val viewCount: Int = 0
 ) {
     fun previewText(): String = when {
         text.isNotBlank() -> text
         poll != null -> "📊 ${poll.question}"
         voiceBase64 != null -> "Голосовое сообщение"
+        isViewOnce -> if (viewOnceOpened) "Фото открыто" else "📷 Фото (один просмотр)"
+        imagesBase64.isNotEmpty() -> if (imagesBase64.size > 1) "📷 Фото (${imagesBase64.size})" else "Картинка"
         imageBase64 != null -> "Картинка"
         locationLat != null && locationLng != null -> "Геопозиция"
         fileBase64 != null || fileName != null -> "📎 ${fileName ?: "Файл"}"
@@ -56,9 +68,20 @@ data class Poll(
     val isClosed: Boolean = false,
     // НОВОЕ (расширенные опросы): если задано — опрос автоматически считается закрытым
     // после этого момента времени (мс), независимо от isClosed.
-    val closesAt: Long? = null
+    val closesAt: Long? = null,
+    // НОВОЕ (викторина): режим викторины. isQuiz=true — у опроса есть один правильный
+    // ответ (correctOptionIndex) и необязательное пояснение (explanation), которое
+    // показывается участнику после голосования.
+    val isQuiz: Boolean = false,
+    val correctOptionIndex: Int? = null,
+    val explanation: String? = null
 ) {
     fun totalVotes(): Int = votesByOption.values.sumOf { it.size }
+    /** Викторина: является ли вариант правильным ответом. */
+    fun isCorrectOption(optionIndex: Int): Boolean = isQuiz && correctOptionIndex == optionIndex
+    /** Викторина: ответил ли пользователь правильно (проголосовал за верный вариант). */
+    fun answeredCorrectly(uid: String): Boolean =
+        isQuiz && correctOptionIndex != null && correctOptionIndex in votedOptions(uid)
     fun votesFor(optionIndex: Int): Int = votesByOption[optionIndex]?.size ?: 0
     fun hasVoted(uid: String): Boolean = votesByOption.values.any { uid in it }
     fun votedOptions(uid: String): Set<Int> =

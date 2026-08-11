@@ -28,9 +28,21 @@ interface MessageRepository {
     // чата (disappearingTtlSeconds из документа chats/{chatId}), как и раньше.
     suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext? = null,
-        hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null
+        hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null,
+        // НОВОЕ (секретная фича «тихие публикации»): не триггерит push-уведомление.
+        silent: Boolean = false
     ): SendMessageResult
-    suspend fun sendImageMessage(chatId: String, imageBase64: String, caption: String = ""): SendMessageResult
+    suspend fun sendImageMessage(
+        chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false
+    ): SendMessageResult
+    // НОВОЕ (несколько фото): отправляет несколько фото одним сообщением-альбомом.
+    suspend fun sendImagesMessage(
+        chatId: String, imagesBase64: List<String>, caption: String = ""
+    ): SendMessageResult
+    // НОВОЕ (одноразовые медиа): вызывается получателем сразу после полноэкранного открытия
+    // view-once фото. Стирает imageBase64 на сервере (в Firestore) и помечает viewOnceOpened,
+    // чтобы фото нельзя было открыть повторно — ни на этом устройстве, ни на других.
+    suspend fun markViewOnceImageOpened(chatId: String, messageId: String)
     suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long): SendMessageResult
     suspend fun sendFileMessage(
         chatId: String, fileBase64: String, fileName: String, mimeType: String, sizeBytes: Long
@@ -44,7 +56,10 @@ interface MessageRepository {
         options: List<String>,
         isAnonymous: Boolean,
         allowMultipleAnswers: Boolean,
-        closesAtMillis: Long? = null
+        closesAtMillis: Long? = null,
+        isQuiz: Boolean = false,
+        correctOptionIndex: Int? = null,
+        explanation: String? = null
     ): SendMessageResult
     // НОВОЕ (расширенные опросы): голосование/переголосование по варианту опроса.
     // Повторный вызов по тому же варианту снимает голос (переключатель), как toggleReaction.
@@ -66,6 +81,8 @@ interface MessageRepository {
     suspend fun deleteMessage(chatId: String, messageId: String): SendMessageResult
     suspend fun markChatAsRead(chatId: String)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
+    // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).
+    suspend fun registerPostView(chatId: String, messageId: String)
     suspend fun togglePinMessage(chatId: String, messageId: String): SendMessageResult
     fun observePinnedMessages(chatId: String): Flow<List<Message>>
     suspend fun toggleBookmark(messageId: String, chatId: String)

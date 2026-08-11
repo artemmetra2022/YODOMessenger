@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.AuthResult
+import app.yodo.messenger.domain.repository.ResetPasswordResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +21,14 @@ sealed class AuthUiState {
     data class Error(val message: String) : AuthUiState()
 }
 
+/** Отдельное состояние для экрана сброса пароля — не смешивается с [AuthUiState] экрана входа. */
+sealed class ResetPasswordUiState {
+    data object Idle : ResetPasswordUiState()
+    data object Loading : ResetPasswordUiState()
+    data object Success : ResetPasswordUiState()
+    data class Error(val message: String) : ResetPasswordUiState()
+}
+
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
@@ -28,6 +37,9 @@ class AuthViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val uiState: StateFlow<AuthUiState> = _uiState
+
+    private val _resetPasswordState = MutableStateFlow<ResetPasswordUiState>(ResetPasswordUiState.Idle)
+    val resetPasswordState: StateFlow<ResetPasswordUiState> = _resetPasswordState
 
     // НОВОЕ (расширенные опросы): читается на RegisterScreen для отображения переключателя
     // с уже актуальным (общим для приложения) значением флага.
@@ -99,6 +111,26 @@ class AuthViewModel @Inject constructor(
 
     fun resetState() {
         _uiState.value = AuthUiState.Idle
+    }
+
+    /** [emailOrUsername] — как и при входе, можно ввести и email, и username. */
+    fun resetPassword(emailOrUsername: String) {
+        if (emailOrUsername.isBlank()) {
+            _resetPasswordState.value = ResetPasswordUiState.Error("Введите email или username")
+            return
+        }
+
+        _resetPasswordState.value = ResetPasswordUiState.Loading
+        viewModelScope.launch {
+            when (val result = authRepository.resetPassword(emailOrUsername)) {
+                is ResetPasswordResult.Success -> _resetPasswordState.value = ResetPasswordUiState.Success
+                is ResetPasswordResult.Error -> _resetPasswordState.value = ResetPasswordUiState.Error(result.message)
+            }
+        }
+    }
+
+    fun resetPasswordState() {
+        _resetPasswordState.value = ResetPasswordUiState.Idle
     }
 
     fun loginWithGoogle(idToken: String) {

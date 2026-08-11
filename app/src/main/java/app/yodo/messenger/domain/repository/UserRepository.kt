@@ -2,6 +2,8 @@ package app.yodo.messenger.domain.repository
 
 import android.graphics.Bitmap
 import android.net.Uri
+import app.yodo.messenger.domain.model.GlobalBlock
+import app.yodo.messenger.domain.model.ProfileHistoryEntry
 import app.yodo.messenger.domain.model.YodoUser
 import kotlinx.coroutines.flow.Flow
 
@@ -14,6 +16,8 @@ interface UserRepository {
     fun observeCurrentUser(): Flow<YodoUser?>
     suspend fun updateDisplayName(name: String): ProfileUpdateResult
     suspend fun updateBio(bio: String): ProfileUpdateResult
+    suspend fun updateEmojiStatus(emoji: String): ProfileUpdateResult
+    suspend fun updateCustomStatus(status: String): ProfileUpdateResult
     suspend fun updateUsername(username: String): ProfileUpdateResult
     suspend fun uploadAvatar(imageUri: Uri): ProfileUpdateResult
     // Загрузка аватара из уже скадрированного/смещённого пользователем битмапа
@@ -37,4 +41,18 @@ interface UserRepository {
     suspend fun unblockUser(uid: String): ProfileUpdateResult
     suspend fun getBlockedUsers(): List<YodoUser>
     suspend fun isUserBlocked(uid: String): Boolean
+    // НОВОЕ (реальная блокировка): заблокировал ли данный пользователь меня.
+    suspend fun isBlockedBy(uid: String): Boolean
+    // НОВОЕ (История изменений профиля): журнал изменений (от новых к старым).
+    suspend fun getProfileHistory(): List<ProfileHistoryEntry>
+
+    // НОВОЕ (AD): глобальная блокировка аккаунта администратором приложения.
+    /** Наблюдаем глобальную блокировку текущего пользователя (null — не заблокирован). */
+    fun observeMyGlobalBlock(): Flow<GlobalBlock?>
+    /** Заблокировать аккаунт в приложении (только 2 почты-админа). */
+    suspend fun setGlobalBlock(uid: String, reason: String): ProfileUpdateResult
+    /** Снять глобальную блокировку. */
+    suspend fun removeGlobalBlock(uid: String): ProfileUpdateResult
+    /** Глобальная блокировка конкретного пользователя (для админ-UI). */
+    suspend fun getGlobalBlock(uid: String): GlobalBlock?
 }

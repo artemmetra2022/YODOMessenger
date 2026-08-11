@@ -14,6 +14,7 @@ import app.yodo.messenger.domain.model.UserPresence
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.MessageRepository
 import app.yodo.messenger.domain.repository.PresenceRepository
+import app.yodo.messenger.domain.repository.UserRepository
 import app.yodo.messenger.domain.repository.ReplyContext
 import app.yodo.messenger.domain.repository.SendMessageResult
 import app.yodo.messenger.notifications.NotificationHelper
@@ -45,6 +46,12 @@ data class ChatUiState(
     val typingUserNames: List<String> = emptyList(),
     val replyingTo: Message? = null,
     val editingMessage: Message? = null,
+    // НОВОЕ (лента новостей): это официальный канал YodoMessenger (режим новостной ленты).
+    val isOfficialChannel: Boolean = false,
+    // НОВОЕ (реальная блокировка): я заблокировал собеседника.
+    val iBlockedOther: Boolean = false,
+    // НОВОЕ (реальная блокировка): собеседник заблокировал меня.
+    val otherBlockedMe: Boolean = false,
     val initialDraft: String? = null,
     val searchQuery: String = "",
     val isSearchActive: Boolean = false,
@@ -79,6 +86,7 @@ class ChatViewModel @Inject constructor(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val presenceRepository: PresenceRepository,
+    private val userRepository: UserRepository,
     private val userSettingsPreferences: UserSettingsPreferences,
     private val draftsPreferences: DraftsPreferences,
     private val pendingForwardHolder: PendingForwardHolder,
@@ -89,7 +97,23 @@ class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    fun prepareForward(message: Message) { pendingForwardHolder.set(message) }
+    fun prepareForward(message: Message) {
+        // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
+        // источник для подписи "Переслано от.." определяем в таком порядке:
+        // 1) если сообщение уже было переслано ранее — сохраняем исходный источник
+        //    (например, название канала), а не имя того, кто пересылает сейчас;
+        // 2) если это пост в канале — берём название канала, а не имя автора поста;
+        // 3) иначе — имя автора сообщения в этом чате.
+        val originSenderName = message.forwardedFromSenderName
+            ?: if (_uiState.value.chatType == "CHANNEL") {
+                _uiState.value.chatTitle
+            } else if (message.senderId == currentUserId) {
+                "Вы"
+            } else {
+                _uiState.value.chatTitle
+            }
+        pendingForwardHolder.set(message, originSenderName)
+    }
 
     private var forwardUndoTimerJob: Job? = null
 
@@ -111,7 +135,7 @@ class ChatViewModel @Inject constructor(
     // НОВОЕ (расширенные опросы): управляет тем, показывать ли в диалоге создания опроса
     // доп. параметры (множественный выбор, дата авто-закрытия).
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(
-        scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = false
+        scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = true
     )
     // Фон чата, выбранный в настройках
     val chatBackgroundType: StateFlow<app.yodo.messenger.data.local.ChatBackgroundType> =
@@ -251,7 +275,7 @@ class ChatViewModel @Inject constructor(
     }
 
     // НОВОЕ (п.38): периодически (пока открыт чат) чистим уже истёкшие сообщения —
-    // best-effort без Cloud Functions/cron. Достаточно, чтобы в реальном использовании
+    // best-effort ����ез Cloud Functions/cron. Достаточно, чтобы в реальном использовании
     // сообщения пропадали вскоре после истечения таймера у любого из открывших чат.
     // Ранний выход: если в чате не включён TTL — не делаем запрос к Firestore вообще.
     private fun cleanupExpiredMessagesPeriodically() {
@@ -300,10 +324,33 @@ class ChatViewModel @Inject constructor(
                     isAdmin = isAdmin,
                     subscriberCount = info.subscriberCount,
                     isSubscribed = info.isSubscribed,
-                    isChannelOwner = myUid != null && myUid == info.channelOwnerId
+                    isChannelOwner = myUid != null && myUid == info.channelOwnerId,
+                    // НОВОЕ (лента новостей): официальный канал показываем как ленту новостей.
+                    isOfficialChannel = chatId == ChatRepository.OFFICIAL_CHANNEL_ID
                 )
                 info.otherUserId?.let { observePresence(it) }
+                // НОВОЕ (реальная блокировка): в приватном чате узнаём, кто кого заблокировал.
+                info.otherUserId?.let { other -> refreshBlockState(other) }
             }
+        }
+    }
+
+    // НОВОЕ (реальная блокировка): подгружает, заблокировал ли я собеседника
+    // и заблокировал ли собеседник меня, и кладёт это в состояние экрана.
+    fun refreshBlockState(otherUserId: String) {
+        viewModelScope.launch {
+            val iBlocked = userRepository.isUserBlocked(otherUserId)
+            val blockedMe = userRepository.isBlockedBy(otherUserId)
+            _uiState.value = _uiState.value.copy(iBlockedOther = iBlocked, otherBlockedMe = blockedMe)
+        }
+    }
+
+    // НОВОЕ (реальная блокировка): (раз)блокировка прямо из чата.
+    fun setBlocked(blocked: Boolean) {
+        val other = _uiState.value.otherUserId ?: return
+        viewModelScope.launch {
+            if (blocked) userRepository.blockUser(other) else userRepository.unblockUser(other)
+            refreshBlockState(other)
         }
     }
 
@@ -363,6 +410,14 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             messageRepository.observeMessages(chatId).collect { messages ->
                 _uiState.value = _uiState.value.copy(messages = messages)
+                // ФИКС (бейдж непрочитанных): markAsRead() раньше вызывался только при
+                // открытии чата. Если сообщение (например одноразовое фото) приходило, пока
+                // чат уже открыт, счётчик непрочитанных на сервере рос, а в главном меню бейдж
+                // оставался. Теперь помечаем как прочитанное при каждом входящем сообщении,
+                // пока экран чата открыт.
+                val myUid = firebaseAuth.currentUser?.uid
+                val lastFromOther = messages.lastOrNull()?.senderId?.let { it != myUid } ?: false
+                if (lastFromOther) markAsRead()
             }
         }
     }
@@ -423,8 +478,10 @@ class ChatViewModel @Inject constructor(
     // - hasExplicitTtl = true, explicitTtlSeconds = null -> пользователь явно ВЫКЛЮЧИЛ
     //   исчезание для этого конкретного сообщения (даже если в чате TTL по умолчанию включён).
     // - hasExplicitTtl = true, explicitTtlSeconds = N -> пользователь явно выбрал таймер N сек.
-    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false) {
+    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false, silent: Boolean = false) {
         if (text.isBlank()) return
+        // НОВОЕ (реальная блокировка): нельзя писать, если кто-то кого-то заблокировал.
+        if (blockGuard()) return
         clearTypingStatus()
         viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
         val editing = _uiState.value.editingMessage
@@ -450,7 +507,8 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = messageRepository.sendMessage(
                 chatId, text, replyContext,
-                hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds
+                hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds,
+                silent = silent
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -458,13 +516,61 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun sendImage(base64: String) {
+    // НОВОЕ (реальная блокировка): единая проверка перед отправкой. Возвращает true,
+    // если отправка запрещена (и выставляет понятное сообщение об ошибке).
+    private fun blockGuard(): Boolean {
+        val s = _uiState.value
+        if (s.otherBlockedMe) {
+            _uiState.value = s.copy(errorMessage = "Пользователь заблокировал вас. Вы не можете отправлять сообщения")
+            return true
+        }
+        if (s.iBlockedOther) {
+            _uiState.value = s.copy(errorMessage = "Вы заблокировали этого пользователя. Разблокируйте, чтобы написать")
+            return true
+        }
+        return false
+    }
+
+    // НОВОЕ (картинки из буфера + подпись): передаём необязательную подпись к фото.
+    fun sendImage(base64: String, caption: String = "", isViewOnce: Boolean = false) {
+        if (blockGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendImageMessage(chatId, base64)) {
+            when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
+        }
+    }
+
+    // НОВОЕ (несколько фото): отправляем несколько фото одним сообщением-альбомом.
+    fun sendImages(imagesBase64: List<String>, caption: String = "") {
+        if (imagesBase64.isEmpty()) return
+        if (blockGuard()) return
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
+        viewModelScope.launch {
+            when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption)) {
+                is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+            }
+        }
+    }
+
+    // НОВОЕ (одноразовые ��едиа): вызывается экраном сразу после полноэкранного показа
+    // view-once фото — стирает imageBase64 на сервере, чтобы повторно открыть было нельзя.
+    fun markViewOnceImageOpened(messageId: String) {
+        viewModelScope.launch {
+            messageRepository.markViewOnceImageOpened(chatId, messageId)
+        }
+    }
+
+    // НОВОЕ (детектор скриншотов): если во время просмотра view-once фото обнаружен
+    // скриншот (см. ScreenshotDetector — сработает, только если получатель как-то обошёл
+    // FLAG_SECURE), отправляем в чат обычное текстовое сообщение-уведомление от лица
+    // того, кто сделал скриншот — так его увидит автор фото (и остальные участники чата).
+    fun notifyScreenshotTaken() {
+        viewModelScope.launch {
+            messageRepository.sendMessage(chatId, "📸 Сделал(а) скриншот фото «на один просмотр»")
         }
     }
 
@@ -511,12 +617,16 @@ class ChatViewModel @Inject constructor(
         options: List<String>,
         isAnonymous: Boolean,
         allowMultipleAnswers: Boolean,
-        closesAtMillis: Long? = null
+        closesAtMillis: Long? = null,
+        isQuiz: Boolean = false,
+        correctOptionIndex: Int? = null,
+        explanation: String? = null
     ) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendPollMessage(
-                chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis
+                chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis,
+                isQuiz, correctOptionIndex, explanation
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -557,6 +667,13 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { messageRepository.toggleReaction(chatId, messageId, emoji) }
     }
 
+    // НОВОЕ (F3 статистика постов): отмечаем просмотр поста канала при показе на экране.
+    // Уникальность по uid гарантируется в репозитории (viewedBy).
+    fun registerPostView(messageId: String) {
+        if (_uiState.value.chatType != "CHANNEL") return
+        viewModelScope.launch { messageRepository.registerPostView(chatId, messageId) }
+    }
+
     fun togglePinMessage(messageId: String) {
         viewModelScope.launch { messageRepository.togglePinMessage(chatId, messageId) }
     }
@@ -565,10 +682,18 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val savedChatId = chatRepository.getOrCreateSavedChat()
-                val myName = firebaseAuth.currentUser?.displayName
-                    ?.takeIf { it.isNotBlank() } ?: "Вы"
+                // ИСПРАВЛЕНИЕ: как и при обычной пересылке, подпись должна указывать
+                // на настоящий источник (канал), а не на того, кто сохраняет в Избранное.
+                val originSenderName = message.forwardedFromSenderName
+                    ?: if (_uiState.value.chatType == "CHANNEL") {
+                        _uiState.value.chatTitle
+                    } else if (message.senderId == currentUserId) {
+                        "Вы"
+                    } else {
+                        _uiState.value.chatTitle
+                    }
                 val myUid = currentUserId ?: return@launch
-                messageRepository.forwardMessage(savedChatId, message, myName, myUid)
+                messageRepository.forwardMessage(savedChatId, message, originSenderName, myUid)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(errorMessage = "Не удалось сохранить в Избранное")
             }

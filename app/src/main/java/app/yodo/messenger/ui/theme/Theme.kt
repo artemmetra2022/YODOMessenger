@@ -3,7 +3,9 @@ package app.yodo.messenger.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -17,7 +19,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+
+/**
+ * НОВОЕ (AM): единые скругления для всего приложения.
+ *
+ * Material3 берёт форму выпадающих меню (DropdownMenu — меню «3 точки»),
+ * диалогов (AlertDialog — окна создания чата/группы/канала) и карточек именно
+ * отсюда. Раньше использовались значения по умолчанию (у меню — всего 4.dp), из-за
+ * чего меню и окна выглядели угловатыми. Одно изменение здесь скругляет все подобные
+ * поверхности сразу, без правки каждого экрана.
+ */
+private val YodoShapes = Shapes(
+    extraSmall = RoundedCornerShape(14.dp),
+    small = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp)
+)
 
 val LocalColorTheme = compositionLocalOf { BlueTheme }
 
@@ -71,6 +91,8 @@ fun YodoMessengerTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = typography,
+            // НОВОЕ (AM): единые скруглённые углы у меню и диалогов.
+            shapes = YodoShapes,
             content = content
         )
     }

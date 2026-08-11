@@ -11,6 +11,16 @@ sealed class AuthResult {
     data class Error(val message: String) : AuthResult()
 }
 
+/**
+ * Результат отправки письма для сброса пароля. Отдельный от [AuthResult],
+ * т.к. после отправки письма пользователь ещё не аутентифицирован и
+ * объекта [YodoUser] попросту нет.
+ */
+sealed class ResetPasswordResult {
+    data object Success : ResetPasswordResult()
+    data class Error(val message: String) : ResetPasswordResult()
+}
+
 interface AuthRepository {
 
     val currentUser: YodoUser?
@@ -27,6 +37,12 @@ interface AuthRepository {
 
     /** Вход/регистрация через Google — idToken получен из Credential Manager (GoogleSignInHelper). */
     suspend fun loginWithGoogle(idToken: String): AuthResult
+
+    /**
+     * Отправляет письмо для сброса пароля. [emailOrUsername] определяется автоматически
+     * так же, как в [login]: email — напрямую, username — через поиск email в Firestore.
+     */
+    suspend fun resetPassword(emailOrUsername: String): ResetPasswordResult
 
     fun logout()
 

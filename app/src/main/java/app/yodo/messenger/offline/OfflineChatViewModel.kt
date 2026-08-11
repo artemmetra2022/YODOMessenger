@@ -41,6 +41,17 @@ class OfflineChatViewModel @Inject constructor(
     val connectedDeviceName: StateFlow<String?> = nearbyManager.connectedDeviceName
     val messages: StateFlow<List<OfflineMessage>> = nearbyManager.messages
 
+    // НОВОЕ (mesh): узлы ячеистой сети и число прямых соседей.
+    val meshNodes: StateFlow<List<MeshNode>> = nearbyManager.meshNodes
+    val neighborCount: StateFlow<Int> = nearbyManager.neighborCount
+
+    /** Мой шестизначный номер — его можно сообщить другу. */
+    val myShortId: StateFlow<String> = nearbyManager.myShortId
+
+    /** Выбранный адресат личных сообщений (null → пишем всей сети). */
+    private val _selectedTargetNodeId = MutableStateFlow<String?>(null)
+    val selectedTargetNodeId: StateFlow<String?> = _selectedTargetNodeId.asStateFlow()
+
     /** Состояние идентификации — определяет, показывать ли поле ввода имени. */
     private val _identityState = MutableStateFlow<OfflineIdentityState>(resolveIdentity())
     val identityState: StateFlow<OfflineIdentityState> = _identityState.asStateFlow()
@@ -116,7 +127,54 @@ class OfflineChatViewModel @Inject constructor(
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
-        nearbyManager.sendMessage(text)
+        val target = _selectedTargetNodeId.value
+        if (target == null) {
+            nearbyManager.sendMessage(text)
+        } else {
+            nearbyManager.sendMessageTo(target, text)
+        }
+    }
+
+    /** Личное сообщение конкретному узлу mesh-сети (маршрутизация + ACK). */
+    fun sendMessageTo(nodeId: String, text: String) {
+        if (text.isBlank()) return
+        nearbyManager.sendMessageTo(nodeId, text)
+    }
+
+    /** Выбрать адресата тапом по узлу в списке (null → снова всем). */
+    fun selectTarget(nodeId: String?) {
+        _selectedTargetNodeId.value = nodeId
+    }
+
+    /** Выбрать адресата по шестизначному номеру. Возвращает найденный узел или null. */
+    fun selectTargetByShort(shortId: String): MeshNode? {
+        val digits = shortId.trim()
+        val node = meshNodes.value.firstOrNull { it.shortId == digits }
+        if (node != null) _selectedTargetNodeId.value = node.nodeId
+        return node
+    }
+
+    /** Найти узел по nodeId (для отображения выбранного адресата). */
+    fun findNode(nodeId: String?): MeshNode? =
+        if (nodeId == null) null else meshNodes.value.firstOrNull { it.nodeId == nodeId }
+
+    /** НОВОЕ (батч 7): экстренный SOS-сигнал на всю mesh-сеть. */
+    fun sendSos(note: String) {
+        nearbyManager.sendSos(note)
+    }
+
+    /** НОВОЕ (батч 7): очистить историю сообщений. */
+    fun clearMessages() {
+        nearbyManager.clearMessages()
+    }
+
+    /** НОВОЕ (батч 7): смена имени «на лету». */
+    fun updateDisplayName(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        nearbyManager.updateDisplayName(trimmed)
+        saveOfflineName(trimmed)
+        _identityState.value = OfflineIdentityState.Searching(displayName = trimmed)
     }
 
     fun disconnect() {

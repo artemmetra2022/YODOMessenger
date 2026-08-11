@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -69,6 +73,7 @@ import app.yodo.messenger.ui.theme.LocalColorTheme
  * Экран создания группы — расширенная версия в стиле CreateChannelScreen:
  * аватарка (с кропом), название, описание группы, выбор участников.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CreateGroupScreen(
     onBackClick: () -> Unit,
@@ -77,6 +82,8 @@ fun CreateGroupScreen(
 ) {
     var groupName by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    // НОВОЕ (конфиденциальность групп): выбранный режим доступа (как у каналов).
+    var accessMode by remember { mutableStateOf(app.yodo.messenger.domain.model.ChannelAccessMode.OPEN) }
     var query by remember { mutableStateOf("") }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -129,6 +136,27 @@ fun CreateGroupScreen(
                     }
                 }
             )
+        },
+        // ИСПРАВЛЕНО (AG): кнопка "Создать группу" теперь в bottomBar — всегда видна
+        // (раньше могла уходить за экран, как было в каналах), imePadding поднимает её над клавиатурой.
+        bottomBar = {
+            Button(
+                onClick = { viewModel.createGroup(groupName, description, accessMode) },
+                enabled = !uiState.isCreating && uiState.selectedUsers.size >= 2 && groupName.isNotBlank(),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(16.dp)
+            ) {
+                if (uiState.isCreating) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                } else {
+                    Icon(Icons.Filled.Group, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Создать группу")
+                }
+            }
         }
     ) { padding ->
         Column(
@@ -260,6 +288,24 @@ fun CreateGroupScreen(
                     maxLines = 4
                 )
 
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // НОВОЕ (конфиденциальность групп): выбор режима доступа — такой же, как у каналов.
+                Text(
+                    "Конфиденциальность группы",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colorTheme.primary,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                app.yodo.messenger.domain.model.ChannelAccessMode.values().forEach { mode ->
+                    AccessModeOption(
+                        mode = mode,
+                        selected = accessMode == mode,
+                        colorTheme = colorTheme,
+                        onClick = { accessMode = mode }
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
@@ -277,48 +323,43 @@ fun CreateGroupScreen(
                     color = colorTheme.primary,
                     modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
                 )
-                LazyRow(
+                // ИСПРАВЛЕНО (AG): вместо вертикальных аватарок с именами столбиком —
+                // компактные "таблетки" в ряд по несколько штук с маленькими аватарами.
+                FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp)
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(uiState.selectedUsers, key = { "chip_${it.uid}" }) { user ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(64.dp)
+                    uiState.selectedUsers.forEach { user ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(colorTheme.primary.copy(alpha = 0.12f))
+                                .clickable { viewModel.removeSelected(user) }
+                                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
                         ) {
-                            Box {
-                                UserAvatar(
-                                    displayName = user.displayName,
-                                    photoUrl = user.photoUrl,
-                                    avatarBase64 = user.avatarBase64,
-                                    size = 56.dp
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.error)
-                                        .clickable { viewModel.removeSelected(user) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = "Убрать",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                }
-                            }
+                            UserAvatar(
+                                displayName = user.displayName,
+                                photoUrl = user.photoUrl,
+                                avatarBase64 = user.avatarBase64,
+                                size = 28.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 user.displayName.substringBefore(" "),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.labelLarge,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 4.dp)
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Убрать",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -345,6 +386,8 @@ fun CreateGroupScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
+                // ИСПРАВЛЕНО (AG): более круглое поле поиска.
+                shape = RoundedCornerShape(28.dp),
                 singleLine = true
             )
 
@@ -391,23 +434,7 @@ fun CreateGroupScreen(
                         .padding(horizontal = 16.dp)
                 )
             }
-
-            // Кнопка создания
-            Button(
-                onClick = { viewModel.createGroup(groupName, description) },
-                enabled = !uiState.isCreating && uiState.selectedUsers.size >= 2 && groupName.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                if (uiState.isCreating) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                } else {
-                    Icon(Icons.Filled.Group, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Создать группу")
-                }
-            }
+            // ИСПРАВЛЕНО (AG): кнопка создания перенесена в bottomBar Scaffold выше.
         }
     }
 }

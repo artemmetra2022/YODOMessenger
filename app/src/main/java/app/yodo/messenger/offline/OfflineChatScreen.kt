@@ -37,7 +37,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -68,6 +72,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
@@ -137,6 +142,12 @@ fun OfflineChatScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back_cd))
+                    }
+                },
+                actions = {
+                    // НОВОЕ (батч 7): очистить историю чата.
+                    IconButton(onClick = { viewModel.clearMessages() }) {
+                        Icon(Icons.Filled.DeleteSweep, contentDescription = "Очистить чат")
                     }
                 }
             )
@@ -256,6 +267,7 @@ private fun NameEntryContent(
 private fun DeviceDiscoveryContent(viewModel: OfflineChatViewModel, connectionState: ConnectionState) {
     val devices by viewModel.discoveredDevices.collectAsState()
     val identityState by viewModel.identityState.collectAsState()
+    val myShortId by viewModel.myShortId.collectAsState()
     var showRadar by remember { mutableStateOf(true) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -282,6 +294,44 @@ private fun DeviceDiscoveryContent(viewModel: OfflineChatViewModel, connectionSt
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        // НОВОЕ (mesh): мой шестизначный номер — его можно сообщить другу.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, bottom = 4.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(YodoPrimary.copy(alpha = 0.10f))
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(YodoPrimary),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Hub, contentDescription = null, tint = Color.White)
+            }
+            Column(modifier = Modifier.padding(start = 12.dp)) {
+                Text(
+                    text = "Ваш номер в офлайн-чате",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "#$myShortId",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = YodoPrimary
+                )
+                Text(
+                    text = "Сообщите этот номер другу — и он напишет именно вам",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -358,7 +408,11 @@ private fun DeviceList(devices: List<NearbyDevice>, onDeviceClick: (NearbyDevice
 @Composable
 private fun ConnectedChatContent(viewModel: OfflineChatViewModel) {
     val messages by viewModel.messages.collectAsState()
-    val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
+    val meshNodes by viewModel.meshNodes.collectAsState()
+    val neighborCount by viewModel.neighborCount.collectAsState()
+    val myShortId by viewModel.myShortId.collectAsState()
+    val selectedTargetNodeId by viewModel.selectedTargetNodeId.collectAsState()
+    val selectedNode = meshNodes.firstOrNull { it.nodeId == selectedTargetNodeId }
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -367,17 +421,14 @@ private fun ConnectedChatContent(viewModel: OfflineChatViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFF22C55E)))
-            Text(
-                text = stringResource(R.string.offline_connected, connectedDeviceName ?: stringResource(R.string.offline_interlocutor)),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 8.dp)
-            )
-        }
+        MeshInfoBar(
+            myShortId = myShortId,
+            neighborCount = neighborCount,
+            nodes = meshNodes,
+            selectedNodeId = selectedTargetNodeId,
+            onSelectTarget = { viewModel.selectTarget(it) },
+            onSelectByShort = { viewModel.selectTargetByShort(it) }
+        )
 
         LazyColumn(
             state = listState,
@@ -389,11 +440,41 @@ private fun ConnectedChatContent(viewModel: OfflineChatViewModel) {
             }
         }
 
+        // Чип текущего адресата личного сообщения.
+        if (selectedNode != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(YodoPrimary.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🔒 Лично: ${selectedNode.name} (#${selectedNode.shortId})",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = YodoPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { viewModel.selectTarget(null) }) { Text("Писать всем") }
+            }
+        }
+
         Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // НОВОЕ (батч 7): кнопка SOS — экстренный сигнал на всю mesh-сеть.
+            IconButton(onClick = { viewModel.sendSos(inputText); inputText = "" }) {
+                Icon(Icons.Filled.Warning, contentDescription = "Отправить SOS", tint = Color(0xFFD32F2F))
+            }
             OutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
-                placeholder = { Text(stringResource(R.string.offline_message_placeholder)) },
+                placeholder = {
+                    Text(
+                        if (selectedNode != null) "Личное сообщение для #${selectedNode.shortId}"
+                        else stringResource(R.string.offline_message_placeholder)
+                    )
+                },
                 modifier = Modifier.weight(1f)
             )
             IconButton(
@@ -431,14 +512,235 @@ private fun OfflineMessageBubble(message: OfflineMessage) {
                 .background(bubbleColor)
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
+            // Имя (и номер) отправителя для входящих mesh-сообщений.
+            if (!message.isOutgoing && !message.senderName.isNullOrBlank()) {
+                val senderLabel = if (!message.senderShort.isNullOrBlank()) {
+                    message.senderName + "  #" + message.senderShort
+                } else {
+                    message.senderName
+                }
+                Text(
+                    text = if (!message.isBroadcast) "🔒 " + senderLabel else senderLabel,
+                    color = YodoPrimary,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
             Text(text = message.text, color = textColor, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.End)) {
+                // Сколько прыжков прошло сообщение через сеть.
+                if (!message.isOutgoing && message.hops > 0) {
+                    Text(
+                        text = "🔗 " + hopsLabel(message.hops) + "  ·  ",
+                        color = textColor.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                Text(
+                    text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
+                    color = textColor.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelMedium
+                )
+                // Статус доставки для исходящих личных сообщений.
+                if (message.isOutgoing && !message.isBroadcast) {
+                    Text(
+                        text = if (message.delivered) "  ✓✓" else "  ✓",
+                        color = textColor.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Склонение слова «прыжок» для числа прыжков. */
+private fun hopsLabel(hops: Int): String {
+    val n = hops % 100
+    if (n in 11..14) return "$hops прыжков"
+    return when (n % 10) {
+        1 -> "$hops прыжок"
+        2, 3, 4 -> "$hops прыжка"
+        else -> "$hops прыжков"
+    }
+}
+
+/**
+ * НОВОЕ (mesh). Панель состояния ячеистой сети: сколько прямых соседей,
+ * сколько всего узлов достижимо и через сколько прыжков.
+ */
+@Composable
+private fun MeshInfoBar(
+    myShortId: String,
+    neighborCount: Int,
+    nodes: List<MeshNode>,
+    selectedNodeId: String?,
+    onSelectTarget: (String?) -> Unit,
+    onSelectByShort: (String) -> MeshNode?
+) {
+    var expanded by remember { mutableStateOf(true) }
+    var numberQuery by remember { mutableStateOf("") }
+    var notFound by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        // Шапка: мой номер + сводка по сети.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(YodoPrimary.copy(alpha = 0.10f))
+                .clickable { expanded = !expanded }
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(YodoPrimary),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Hub, contentDescription = null, tint = Color.White)
+            }
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(
+                    text = "Ваш номер",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "#$myShortId",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = YodoPrimary
+                )
+                Text(
+                    text = "Соседей: $neighborCount · Всего узлов: ${nodes.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Скрыть" else "Узлы")
+            }
+        }
+
+        if (expanded) {
+            Spacer(modifier = Modifier.height(8.dp))
+            // Поиск собеседника по номеру.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = numberQuery,
+                    onValueChange = {
+                        numberQuery = it.filter { c -> c.isDigit() }.take(6)
+                        notFound = false
+                    },
+                    singleLine = true,
+                    placeholder = { Text("Номер друга, напр. 123456") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        val node = onSelectByShort(numberQuery)
+                        if (node == null) notFound = true else numberQuery = ""
+                    },
+                    enabled = numberQuery.length == 6
+                ) {
+                    Text("Найти")
+                }
+            }
+            if (notFound) {
+                Text(
+                    text = "Узел с таким номером пока не виден в сети",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color(0xFFDC2626),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            if (nodes.isEmpty()) {
+                Text(
+                    text = "Пока никого не видно. Попросите друга открыть офлайн-чат.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                nodes.forEach { node ->
+                    MeshNodeCard(
+                        node = node,
+                        selected = node.nodeId == selectedNodeId,
+                        onWrite = { onSelectTarget(node.nodeId) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+            }
+        }
+    }
+}
+
+/** Красивая карточка узла mesh-сети в списке «Узлы». */
+@Composable
+private fun MeshNodeCard(node: MeshNode, selected: Boolean, onWrite: () -> Unit) {
+    val bg = if (selected) YodoPrimary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .clickable { onWrite() }
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(
+                    if (node.isNeighbor) YodoPrimary.copy(alpha = 0.20f)
+                    else Color(0xFFF59E0B).copy(alpha = 0.20f)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
-                text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
-                color = textColor.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.align(Alignment.End)
+                text = node.name.take(1).uppercase().ifBlank { "?" },
+                color = if (node.isNeighbor) YodoPrimary else Color(0xFFB45309),
+                style = MaterialTheme.typography.titleMedium
             )
         }
+        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(
+                text = node.name.ifBlank { "Узел" },
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = if (node.shortId.isBlank()) "№ неизвестен" else "#${node.shortId}",
+                style = MaterialTheme.typography.labelMedium,
+                color = YodoPrimary
+            )
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    if (node.isNeighbor) Color(0xFF22C55E).copy(alpha = 0.18f)
+                    else Color(0xFFF59E0B).copy(alpha = 0.18f)
+                )
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = if (node.isNeighbor) "рядом" else hopsLabel(node.hopCount),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (node.isNeighbor) Color(0xFF15803D) else Color(0xFFB45309)
+            )
+        }
+        Spacer(modifier = Modifier.width(6.dp))
+        TextButton(onClick = onWrite) { Text("Написать") }
     }
 }
 

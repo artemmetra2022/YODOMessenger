@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,12 +34,15 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,12 +61,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.window.Dialog
+import app.yodo.messenger.data.local.HiddenPinResult
+import app.yodo.messenger.features.settings.PinCellsInput
+import kotlinx.coroutines.launch
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -108,14 +123,57 @@ fun ChatListScreen(
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
+    // НОВОЕ (чат поддержки): открытие админ-панели поддержки.
+    onOpenAdminPanel: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val activeFilter by viewModel.activeFilter.collectAsState()
     val chatFolders by viewModel.chatFolders.collectAsState()
+    // НОВОЕ (скрытые чаты): множество ID скрытых чатов для подписей меню.
+    val hiddenChatIds by viewModel.hiddenChatIds.collectAsState()
+    // НОВОЕ (скрытые чаты): список скрытых чатов и признак PIN для шторки "потянуть вниз".
+    val hiddenChats by viewModel.hiddenChats.collectAsState()
+    val isPinSet by viewModel.isPinSet.collectAsState()
     val colorTheme = LocalColorTheme.current
     var showFabMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
+    // НОВОЕ (папки): чат, для которого открыт выбор папки (добавить/убрать из папок).
+    var folderPickerChatId by remember { mutableStateOf<String?>(null) }
+    // НОВОЕ (папки): id папки, которую редактируем (переименовать/удалить/состав).
+    var manageFolderId by remember { mutableStateOf<String?>(null) }
+
+    // НОВОЕ (скрытые чаты): состояние шторки со скрытыми чатами.
+    val chatListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var showHiddenPinDialog by remember { mutableStateOf(false) }
+    var showHiddenWindow by remember { mutableStateOf(false) }
+    var showEmptyWindow by remember { mutableStateOf(false) }
+    var pullAccum by remember { mutableFloatStateOf(0f) }
+    val pullThreshold = 240f
+    // НОВОЕ (AF): состояние обновления и жест "потянуть вниз — обновить чаты".
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    // Жест "потянуть сверху вниз" на самом верху списка → ОБНОВИТЬ список чатов
+    // (раньше здесь открывался список скрытых чатов — по просьбе убрано, сама функция
+    // скрытия чатов осталась в меню долгого нажатия).
+    val hiddenPullConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val atTop = chatListState.firstVisibleItemIndex == 0 &&
+                    chatListState.firstVisibleItemScrollOffset == 0
+                if (atTop && available.y > 0f) {
+                    pullAccum += available.y
+                    if (pullAccum > pullThreshold) {
+                        pullAccum = 0f
+                        viewModel.refresh()
+                    }
+                } else if (available.y < 0f) {
+                    pullAccum = 0f
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -171,7 +229,9 @@ fun ChatListScreen(
                     tabs = tabs,
                     activeFilter = activeFilter,
                     onTabSelected = { viewModel.setFilter(it) },
-                    onAddFolder = { showFolderDialog = true }
+                    onAddFolder = { showFolderDialog = true },
+                    // НОВОЕ (папки): долгое нажатие на папке — управление (переименовать/удалить/состав).
+                    onFolderLongPress = { folderId -> manageFolderId = folderId }
                 )
             }
         },
@@ -204,6 +264,14 @@ fun ChatListScreen(
                         leadingIcon = { Icon(Icons.Filled.Contacts, contentDescription = null) },
                         onClick = { showFabMenu = false; onOpenContacts() }
                     )
+                    // НОВОЕ (чат поддержки): пункт "Админ-панель поддержки" — только для админов.
+                    if (viewModel.isSupportAdmin) {
+                        DropdownMenuItem(
+                            text = { Text("Админ-панель поддержки") },
+                            leadingIcon = { Icon(Icons.Filled.SupportAgent, contentDescription = null) },
+                            onClick = { showFabMenu = false; onOpenAdminPanel() }
+                        )
+                    }
                 }
             }
         }
@@ -232,7 +300,37 @@ fun ChatListScreen(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                     } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = chatListState,
+                            modifier = Modifier.fillMaxSize().nestedScroll(hiddenPullConnection)
+                        ) {
+                            // НОВОЕ (папки): внутри папки — кнопка "Добавить" для быстрого добавления
+                            // чатов/групп/каналов и редактирования состава.
+                            (activeFilter as? ChatFilter.Folder)?.let { folderFilter ->
+                                item(key = "folder_add_row") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { manageFolderId = folderFilter.folderId }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Add,
+                                            contentDescription = null,
+                                            tint = colorTheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = "Добавить чаты в папку",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = colorTheme.primary,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
                             // Строка архива
                             if (state.archivedChats.isNotEmpty()) {
                                 item(key = "archive_row") {
@@ -272,7 +370,9 @@ fun ChatListScreen(
                                     onToggleMute = { viewModel.toggleMuteChat(chat.chatId) },
                                     onDelete = { viewModel.deleteChat(chat.chatId) },
                                     onClearHistory = { viewModel.clearChatHistory(chat.chatId) },
-                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) }
+                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
+                                    isHidden = chat.chatId in hiddenChatIds,
+                                    onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) }
                                 )
                             }
                         }
@@ -288,6 +388,13 @@ fun ChatListScreen(
                     }
                 }
             }
+            // НОВОЕ (AF): индикатор обновления сверху при жесте "потянуть вниз".
+            if (isRefreshing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(28.dp),
+                    strokeWidth = 3.dp
+                )
+            }
         }
     }
 
@@ -301,17 +408,169 @@ fun ChatListScreen(
             }
         )
     }
+
+    // НОВОЕ (скрытые чаты): ввод PIN после жеста "потянуть вниз".
+    if (showHiddenPinDialog) {
+        HiddenChatsPinDialog(
+            onDismiss = { showHiddenPinDialog = false },
+            onSubmit = { pin ->
+                scope.launch {
+                    val result = viewModel.checkHiddenPin(pin)
+                    showHiddenPinDialog = false
+                    when (result) {
+                        HiddenPinResult.MAIN -> showHiddenWindow = true
+                        HiddenPinResult.DECOY, HiddenPinResult.NONE -> showEmptyWindow = true
+                    }
+                }
+            }
+        )
+    }
+
+    // НОВОЕ (скрытые чаты): окно со скрытыми чатами (верный PIN).
+    if (showHiddenWindow) {
+        HiddenChatsWindow(
+            chats = hiddenChats,
+            colorTheme = colorTheme,
+            onDismiss = { showHiddenWindow = false },
+            onChatClick = { chatId -> showHiddenWindow = false; onChatClick(chatId) },
+            onUnhide = { chatId -> viewModel.toggleChatHidden(chatId) }
+        )
+    }
+
+    // НОВОЕ (скрытые чаты): пустое окно для ложного/неверного PIN.
+    if (showEmptyWindow) {
+        HiddenChatsEmptyWindow(onDismiss = { showEmptyWindow = false })
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Горизонтальные табы фильтрации + папки
+// НОВОЕ (скрытые чаты): диалог ввода PIN для шторки
+// ---------------------------------------------------------------------------
+@Composable
+private fun HiddenChatsPinDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit
+) {
+    var pin by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Введите PIN-код") },
+        text = {
+            Column {
+                Text(
+                    "Введите код, чтобы открыть скрытые чаты.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                PinCellsInput(pin = pin, onPinChange = { pin = it }, length = 4)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(pin) }, enabled = pin.length >= 4) {
+                Text("Открыть")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+// ---------------------------------------------------------------------------
+// НОВОЕ (скрытые чаты): окно со скрытыми чатами
+// ---------------------------------------------------------------------------
+@Composable
+private fun HiddenChatsWindow(
+    chats: List<ChatPreview>,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onDismiss: () -> Unit,
+    onChatClick: (String) -> Unit,
+    onUnhide: (String) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Скрытые чаты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Закрыть") }
+                }
+                if (chats.isEmpty()) {
+                    Text(
+                        "Нет скрытых чатов",
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                        items(chats, key = { it.chatId }) { chat ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { onChatClick(chat.chatId) }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                UserAvatar(
+                                    displayName = chat.title,
+                                    photoUrl = chat.avatarUrl,
+                                    avatarBase64 = chat.avatarBase64,
+                                    size = 44.dp,
+                                    userId = chat.otherUserId ?: chat.chatId
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(chat.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(chat.lastMessage, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                TextButton(onClick = { onUnhide(chat.chatId) }) { Text("Вытащить") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// НОВОЕ (скрытые чаты): пустое окно (ложный/неверный PIN)
+// ---------------------------------------------------------------------------
+@Composable
+private fun HiddenChatsEmptyWindow(onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Чатов не найдено", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(onClick = onDismiss) { Text("Закрыть") }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Го��изонтальные табы фильтрации + папки
 // ---------------------------------------------------------------------------
 @Composable
 private fun ChatFilterTabs(
     tabs: List<FilterTab>,
     activeFilter: ChatFilter,
     onTabSelected: (ChatFilter) -> Unit,
-    onAddFolder: () -> Unit
+    onAddFolder: () -> Unit,
+    onFolderLongPress: (String) -> Unit = {}
 ) {
     LazyRow(
         modifier = Modifier
@@ -322,12 +581,14 @@ private fun ChatFilterTabs(
     ) {
         items(tabs) { tab ->
             val isActive = tab.filter == activeFilter
-            
+            // НОВОЕ (папки): для пользовательских папок доступно долгое нажатие.
+            val folderId = (tab.filter as? ChatFilter.Folder)?.folderId
             FilterChip(
                 label = tab.label,
                 isActive = isActive,
                 badge = tab.badge,
-                onClick = { onTabSelected(tab.filter) }
+                onClick = { onTabSelected(tab.filter) },
+                onLongClick = if (folderId != null) ({ onFolderLongPress(folderId) }) else null
             )
         }
         
@@ -343,7 +604,8 @@ private fun FilterChip(
     label: String,
     isActive: Boolean,
     badge: Int,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     val colorTheme = LocalColorTheme.current
     val bgColor = if (isActive) colorTheme.primary else colorTheme.primary.copy(alpha = 0.12f)
@@ -352,7 +614,9 @@ private fun FilterChip(
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = bgColor,
-        modifier = Modifier.clickable { onClick() }
+        modifier = if (onLongClick != null)
+            Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        else Modifier.clickable { onClick() }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
@@ -451,6 +715,180 @@ private fun AddFolderDialog(
     )
 }
 
+// НОВОЕ (папки — добавить чат в папку): выбор одной или нескольких папок для чата.
+// Показывает чекбоксы по текущему членству; можно создать новую папку прямо здесь.
+@Composable
+private fun FolderPickerDialog(
+    folders: List<ChatFolder>,
+    chatId: String,
+    onToggle: (folderId: String, add: Boolean) -> Unit,
+    onCreateFolder: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var showCreate by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить в папку") },
+        text = {
+            Column {
+                if (folders.isEmpty()) {
+                    Text(
+                        "У вас пока нет папок. Создайте первую, чтобы сгруппировать чаты.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        items(folders) { folder ->
+                            val inFolder = chatId in folder.chatIds
+                            var checked by remember(folder.id, inFolder) { mutableStateOf(inFolder) }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        checked = !checked
+                                        onToggle(folder.id, checked)
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        checked = it
+                                        onToggle(folder.id, it)
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(folder.name, style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                if (showCreate) {
+                    var newName by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Название новой папки") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            TextButton(
+                                onClick = { if (newName.isNotBlank()) { onCreateFolder(newName.trim()); newName = ""; showCreate = false } },
+                                enabled = newName.isNotBlank()
+                            ) { Text("OK") }
+                        }
+                    )
+                } else {
+                    TextButton(onClick = { showCreate = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Новая папка")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Готово") }
+        }
+    )
+}
+
+// НОВОЕ (папки — удалить/редактировать состав): управление папкой.
+// Переименование, удаление и чеклист всех чатов/групп/каналов для быстрого добавления.
+@Composable
+private fun ManageFolderDialog(
+    folder: ChatFolder,
+    allChats: List<ChatPreview>,
+    onRename: (String) -> Unit,
+    onToggleChat: (chatId: String, add: Boolean) -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf(folder.name) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Папка: ${folder.name}") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название папки") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        if (name.isNotBlank() && name.trim() != folder.name) {
+                            TextButton(onClick = { onRename(name.trim()) }) { Text("Сохр.") }
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Состав папки — отметьте чаты/группы/каналы:", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(4.dp))
+                if (allChats.isEmpty()) {
+                    Text("Нет доступных чатов.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                        items(allChats, key = { it.chatId }) { chat ->
+                            val inFolder = chat.chatId in folder.chatIds
+                            var checked by remember(chat.chatId, inFolder) { mutableStateOf(inFolder) }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        checked = !checked
+                                        onToggleChat(chat.chatId, checked)
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        checked = it
+                                        onToggleChat(chat.chatId, it)
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                val typeLabel = when (chat.type) {
+                                    ChatType.GROUP -> "Группа"
+                                    ChatType.CHANNEL -> "Канал"
+                                    ChatType.PRIVATE -> "Чат"
+                                }
+                                Column {
+                                    Text(chat.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                                    Text(typeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                if (confirmDelete) {
+                    Text("Удалить папку? Сами чаты не удаляются.", color = Color.Red, style = MaterialTheme.typography.bodyMedium)
+                    Row {
+                        TextButton(onClick = onDelete) { Text("Удалить", color = Color.Red) }
+                        TextButton(onClick = { confirmDelete = false }) { Text("Отмена") }
+                    }
+                } else {
+                    TextButton(onClick = { confirmDelete = true }) {
+                        Icon(Icons.Filled.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Удалить папку", color = Color.Red)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Готово") }
+        }
+    )
+}
+
 @Composable
 private fun emptyFilterMessage(filter: ChatFilter): String = when (filter) {
     ChatFilter.ALL     -> stringResource(R.string.chat_list_empty_all)
@@ -472,7 +910,9 @@ internal fun SwipeableChatListItem(
     onToggleMute: () -> Unit,
     onDelete: () -> Unit,
     onClearHistory: () -> Unit,
-    onToggleArchive: () -> Unit = {}
+    onToggleArchive: () -> Unit = {},
+    isHidden: Boolean = false,
+    onToggleHidden: () -> Unit = {}
 ) {
     var offsetX by remember { mutableFloatStateOf(0f) }
     var showMenu by remember { mutableStateOf(false) }
@@ -491,7 +931,8 @@ internal fun SwipeableChatListItem(
         Box(modifier = Modifier.offset { IntOffset(offsetX.roundToInt(), 0) }) {
             ChatListItem(
                 chat = chat, colorTheme = colorTheme,
-                onClick = onClick, onLongClick = { showMenu = true }
+                onClick = onClick, onLongClick = { showMenu = true },
+                isHidden = isHidden
             )
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -499,6 +940,8 @@ internal fun SwipeableChatListItem(
             DropdownMenuItem(text = { Text(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute)) }, onClick = { showMenu = false; onToggleMute() })
             DropdownMenuItem(text = { Text(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action)) }, onClick = { showMenu = false; onToggleArchive() })
             DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_clear)) }, onClick = { showMenu = false; onClearHistory() })
+            // НОВОЕ (скрытые чаты): скрыть/показать чат (виден только под основным PIN).
+            DropdownMenuItem(text = { Text(if (isHidden) "Показать чат" else "Скрыть чат") }, onClick = { showMenu = false; onToggleHidden() })
             DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_delete), color = Color.Red) }, onClick = { showMenu = false; onDelete() })
         }
     }
@@ -526,9 +969,13 @@ private fun ChatListItem(
     chat: ChatPreview,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    isHidden: Boolean = false
 ) {
-    val isSavedChat = chat.type == ChatType.PRIVATE && chat.otherUserId == null
+    // ИСПРАВЛЕНО (логотип поддержки): чат поддержки (support_<uid>) раньше
+    // попадал в ветку «Избранное» и показывал иконку-закладку. Теперь у него свой логотип.
+    val isSupportChat = chat.chatId.startsWith("support_")
+    val isSavedChat = !isSupportChat && chat.type == ChatType.PRIVATE && chat.otherUserId == null
     val isChannel = chat.type == ChatType.CHANNEL
 
     Row(
@@ -538,7 +985,21 @@ private fun ChatListItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Аватар
-        if (isSavedChat) {
+        if (isSupportChat) {
+            // НОВОЕ (логотип поддержки): фирменный знак поддержки вместо закладки.
+            Box(
+                modifier = Modifier.size(56.dp).clip(CircleShape)
+                    .background(colorTheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_support_logo),
+                    contentDescription = "Поддержка YodoMessenger",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        } else if (isSavedChat) {
             Box(
                 modifier = Modifier.size(56.dp).clip(CircleShape)
                     .background(colorTheme.primary.copy(alpha = 0.15f)),
@@ -593,6 +1054,11 @@ private fun ChatListItem(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // НОВОЕ (скрытые чаты): маркер-замок у скрытого чата (виден только под основным PIN).
+                    if (isHidden) {
+                        Icon(Icons.Filled.Lock, contentDescription = "Скрытый чат",
+                            modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = colorTheme.primary)
+                    }
                     if (chat.isMuted) {
                         Icon(Icons.Filled.NotificationsOff, contentDescription = null,
                             modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = Color.Gray)

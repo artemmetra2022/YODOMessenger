@@ -40,6 +40,9 @@ sealed class PinCheckResult {
     data class LockedOut(val unlockAtMillis: Long) : PinCheckResult()
 }
 
+// НОВОЕ (скрытые чаты): результат проверки PIN для «шторки скрытых чатов».
+enum class HiddenPinResult { MAIN, DECOY, NONE }
+
 // НОВОЕ (п.13): типы фона чата
 enum class ChatBackgroundType(val displayName: String) {
     DEFAULT("Стандартный"),
@@ -55,7 +58,8 @@ private const val PIN_LOCKOUT_MS = 30_000L
 
 @Singleton
 class UserSettingsPreferences @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val appLockState: AppLockState
 ) {
     private val sendOnEnterKey = booleanPreferencesKey("send_on_enter")
     private val fontSizeKey = stringPreferencesKey("font_size")
@@ -72,7 +76,19 @@ class UserSettingsPreferences @Inject constructor(
     private val pinRequirementKey = stringPreferencesKey("pin_requirement")
     private val pinFailedAttemptsKey = intPreferencesKey("pin_failed_attempts")
     private val pinLockedUntilKey = longPreferencesKey("pin_locked_until")
+    // НОВОЕ: задержка (в секундах) перед блокировкой при сворачивании (0 = сразу).
+    private val pinLockDelaySecondsKey = intPreferencesKey("pin_lock_delay_seconds")
+    // НОВОЕ (скрытые чаты): ложный (decoy) PIN-код и набор ID скрытых чатов.
+    private val decoyPinHashKey = stringPreferencesKey("decoy_pin_hash")
+    private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
+    private val hiddenChatIdsKey = stringSetPreferencesKey("hidden_chat_ids")
     private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
+    // НОВОЕ: тихие часы, пауза уведомлений (snooze) и скрытие текста в уведомлениях.
+    private val quietHoursEnabledKey = booleanPreferencesKey("quiet_hours_enabled")
+    private val quietHoursStartKey = intPreferencesKey("quiet_hours_start")
+    private val quietHoursEndKey = intPreferencesKey("quiet_hours_end")
+    private val hideNotificationPreviewKey = booleanPreferencesKey("hide_notification_preview")
+    private val notificationsSnoozedUntilKey = longPreferencesKey("notifications_snoozed_until")
 
     // НОВОЕ (п.18): автоудаление аккаунта
     private val autoDeleteEnabledKey = booleanPreferencesKey("auto_delete_enabled")
@@ -97,15 +113,31 @@ class UserSettingsPreferences @Inject constructor(
     val notificationVibration: Flow<Boolean> = context.settingsDataStore.data.map { it[notificationVibrationKey] ?: true }
     val muteAllNotifications: Flow<Boolean> = context.settingsDataStore.data.map { it[muteAllNotificationsKey] ?: false }
     val hideKeyboardOnSend: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnSendKey] ?: true }
-    val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: false }
+    // НОВОЕ: расширенные опросы (включая викторины) включены по умолчанию —
+    // пользователю не нужно включать их вручную в настройках.
+    val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: true }
 
     val pinRequirement: Flow<PinRequirement> = context.settingsDataStore.data.map { prefs ->
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
     }
     val isPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[pinHashKey].isNullOrBlank() }
+    // НОВОЕ: через сколько секунд после сворачивания блокировать приложение (0 = сразу).
+    val pinLockDelaySeconds: Flow<Int> = context.settingsDataStore.data.map { it[pinLockDelaySecondsKey] ?: 0 }
+    // НОВОЕ (скрытые чаты): установлен ли ложный PIN и множество скрытых чатов.
+    val isDecoyPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[decoyPinHashKey].isNullOrBlank() }
+    val hiddenChatIds: Flow<Set<String>> = context.settingsDataStore.data.map { it[hiddenChatIdsKey] ?: emptySet() }
+    /** НОВОЕ (скрытые чаты): активен ли сейчас режим ложного PIN (только runtime). */
+    val decoyMode: kotlinx.coroutines.flow.StateFlow<Boolean> = appLockState.decoyMode
 
     val notificationPermissionAsked: Flow<Boolean> =
         context.settingsDataStore.data.map { it[notificationPermissionAskedKey] ?: false }
+
+    // НОВОЕ: тихие часы (по умолчанию с 22:00 до 07:00), пауза и скрытие превью.
+    val quietHoursEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[quietHoursEnabledKey] ?: false }
+    val quietHoursStart: Flow<Int> = context.settingsDataStore.data.map { it[quietHoursStartKey] ?: 22 }
+    val quietHoursEnd: Flow<Int> = context.settingsDataStore.data.map { it[quietHoursEndKey] ?: 7 }
+    val hideNotificationPreview: Flow<Boolean> = context.settingsDataStore.data.map { it[hideNotificationPreviewKey] ?: false }
+    val notificationsSnoozedUntil: Flow<Long> = context.settingsDataStore.data.map { it[notificationsSnoozedUntilKey] ?: 0L }
 
     // НОВОЕ (п.18): автоудаление аккаунта
     val autoDeleteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[autoDeleteEnabledKey] ?: false }
@@ -129,6 +161,22 @@ class UserSettingsPreferences @Inject constructor(
 
     suspend fun setNotificationPermissionAsked(asked: Boolean) {
         context.settingsDataStore.edit { it[notificationPermissionAskedKey] = asked }
+    }
+
+    // НОВОЕ: тихие часы / пауза / скрытие превью.
+    suspend fun setQuietHoursEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[quietHoursEnabledKey] = enabled } }
+    suspend fun setQuietHours(startHour: Int, endHour: Int) {
+        context.settingsDataStore.edit {
+            it[quietHoursStartKey] = ((startHour % 24) + 24) % 24
+            it[quietHoursEndKey] = ((endHour % 24) + 24) % 24
+        }
+    }
+    suspend fun setHideNotificationPreview(enabled: Boolean) { context.settingsDataStore.edit { it[hideNotificationPreviewKey] = enabled } }
+    suspend fun snoozeNotificationsFor(durationMillis: Long) {
+        context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = System.currentTimeMillis() + durationMillis }
+    }
+    suspend fun clearNotificationSnooze() {
+        context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = 0L }
     }
     suspend fun setSendOnEnter(enabled: Boolean) { context.settingsDataStore.edit { it[sendOnEnterKey] = enabled } }
     suspend fun setFontSize(size: FontSize) { context.settingsDataStore.edit { it[fontSizeKey] = size.name } }
@@ -154,12 +202,64 @@ class UserSettingsPreferences @Inject constructor(
         context.settingsDataStore.edit {
             it.remove(pinHashKey)
             it.remove(pinSaltKey)
+            // Снимаем и ложный PIN — он не имеет смысла без основного.
+            it.remove(decoyPinHashKey)
+            it.remove(decoyPinSaltKey)
             it[pinRequirementKey] = PinRequirement.NEVER.name
+        }
+        appLockState.setDecoyMode(false)
+    }
+
+    // НОВОЕ (скрытые чаты): установка/снятие ложного (decoy) PIN-кода.
+    suspend fun setDecoyPin(pin: String) {
+        val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val hash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
+        context.settingsDataStore.edit {
+            it[decoyPinSaltKey] = salt
+            it[decoyPinHashKey] = hash
+        }
+    }
+
+    suspend fun clearDecoyPin() {
+        context.settingsDataStore.edit {
+            it.remove(decoyPinHashKey)
+            it.remove(decoyPinSaltKey)
+        }
+    }
+
+    // НОВОЕ (скрытые чаты): пометить/снять пометку "скрытый" для чата.
+    suspend fun setChatHidden(chatId: String, hidden: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[hiddenChatIdsKey] ?: emptySet()
+            prefs[hiddenChatIdsKey] = if (hidden) current + chatId else current - chatId
         }
     }
 
     suspend fun setPinRequirement(requirement: PinRequirement) {
         context.settingsDataStore.edit { it[pinRequirementKey] = requirement.name }
+    }
+
+    // НОВОЕ: задать задержку блокировки при сворачивании (в секундах, 0 = сразу).
+    suspend fun setPinLockDelaySeconds(seconds: Int) {
+        context.settingsDataStore.edit { it[pinLockDelaySecondsKey] = seconds.coerceAtLeast(0) }
+    }
+
+    // НОВОЕ (скрытые чаты): без побочных эффектов определить, какой PIN введён —
+    // основной (MAIN), ложный (DECOY) или ни один (NONE). Используется для
+    // «шторки скрытых чатов»: основной → показать скрытые, ложный → пусто.
+    suspend fun checkHiddenPin(pin: String): HiddenPinResult {
+        val prefs = context.settingsDataStore.data.first()
+        val salt = prefs[pinSaltKey]
+        val storedHash = prefs[pinHashKey]
+        if (salt != null && storedHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, salt) == storedHash
+        ) return HiddenPinResult.MAIN
+        val decoySalt = prefs[decoyPinSaltKey]
+        val decoyHash = prefs[decoyPinHashKey]
+        if (decoySalt != null && decoyHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, decoySalt) == decoyHash
+        ) return HiddenPinResult.DECOY
+        return HiddenPinResult.NONE
     }
 
     suspend fun verifyPin(pin: String): PinCheckResult {
@@ -175,25 +275,40 @@ class UserSettingsPreferences @Inject constructor(
             return PinCheckResult.Success
         }
         val candidateHash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
-        return if (candidateHash == storedHash) {
+        if (candidateHash == storedHash) {
+            // Введён основной PIN — обычный режим (скрытые чаты видны).
+            appLockState.setDecoyMode(false)
             context.settingsDataStore.edit {
                 it[pinFailedAttemptsKey] = 0
                 it.remove(pinLockedUntilKey)
             }
-            PinCheckResult.Success
-        } else {
-            val failedAttempts = (prefs[pinFailedAttemptsKey] ?: 0) + 1
-            if (failedAttempts >= MAX_PIN_ATTEMPTS) {
-                val unlockAt = now + PIN_LOCKOUT_MS
-                context.settingsDataStore.edit {
-                    it[pinFailedAttemptsKey] = 0
-                    it[pinLockedUntilKey] = unlockAt
-                }
-                PinCheckResult.LockedOut(unlockAt)
-            } else {
-                context.settingsDataStore.edit { it[pinFailedAttemptsKey] = failedAttempts }
-                PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failedAttempts)
+            return PinCheckResult.Success
+        }
+        // НОВОЕ (скрытые чаты): если основной PIN не подошёл, проверяем ложный (decoy) PIN.
+        // При его вводе приложение открывается в decoy-режиме, где скрытые чаты не видны.
+        val decoySalt = prefs[decoyPinSaltKey]
+        val decoyHash = prefs[decoyPinHashKey]
+        if (decoySalt != null && decoyHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, decoySalt) == decoyHash
+        ) {
+            appLockState.setDecoyMode(true)
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it.remove(pinLockedUntilKey)
             }
+            return PinCheckResult.Success
+        }
+        val failedAttempts = (prefs[pinFailedAttemptsKey] ?: 0) + 1
+        return if (failedAttempts >= MAX_PIN_ATTEMPTS) {
+            val unlockAt = now + PIN_LOCKOUT_MS
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it[pinLockedUntilKey] = unlockAt
+            }
+            PinCheckResult.LockedOut(unlockAt)
+        } else {
+            context.settingsDataStore.edit { it[pinFailedAttemptsKey] = failedAttempts }
+            PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failedAttempts)
         }
     }
 
@@ -258,4 +373,113 @@ class UserSettingsPreferences @Inject constructor(
         }
     }
 
+    // ============ НОВОЕ (Batch 7): Центр безопасности и статусы ============
+    // Двухфакторный пароль при входе (локальный, PBKDF2 через PinHasher),
+    // 3 контрольных вопроса для сброса, защита от скриншотов, эмодзи/текстовый статус.
+    private val tfaHashKey = stringPreferencesKey("tfa_hash")
+    private val tfaSaltKey = stringPreferencesKey("tfa_salt")
+    private val tfaHintKey = stringPreferencesKey("tfa_hint")
+    private val tfaFailedKey = intPreferencesKey("tfa_failed_attempts")
+    private val tfaLockedUntilKey = longPreferencesKey("tfa_locked_until")
+    private val secQ1Key = stringPreferencesKey("sec_q1")
+    private val secQ2Key = stringPreferencesKey("sec_q2")
+    private val secQ3Key = stringPreferencesKey("sec_q3")
+    private val secA1HashKey = stringPreferencesKey("sec_a1_hash")
+    private val secA1SaltKey = stringPreferencesKey("sec_a1_salt")
+    private val secA2HashKey = stringPreferencesKey("sec_a2_hash")
+    private val secA2SaltKey = stringPreferencesKey("sec_a2_salt")
+    private val secA3HashKey = stringPreferencesKey("sec_a3_hash")
+    private val secA3SaltKey = stringPreferencesKey("sec_a3_salt")
+    private val screenshotProtectionKey = booleanPreferencesKey("screenshot_protection")
+    private val emojiStatusKey = stringPreferencesKey("emoji_status")
+    private val customStatusKey = stringPreferencesKey("custom_status")
+
+    val isTwoFactorSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[tfaHashKey].isNullOrBlank() }
+    val twoFactorHint: Flow<String> = context.settingsDataStore.data.map { it[tfaHintKey] ?: "" }
+    val recoveryQuestions: Flow<List<String>> = context.settingsDataStore.data.map { prefs ->
+        listOf(prefs[secQ1Key] ?: "", prefs[secQ2Key] ?: "", prefs[secQ3Key] ?: "")
+    }
+    val isRecoverySet: Flow<Boolean> = context.settingsDataStore.data.map {
+        !it[secA1HashKey].isNullOrBlank() && !it[secA2HashKey].isNullOrBlank() && !it[secA3HashKey].isNullOrBlank()
+    }
+    val screenshotProtection: Flow<Boolean> = context.settingsDataStore.data.map { it[screenshotProtectionKey] ?: false }
+    val emojiStatus: Flow<String> = context.settingsDataStore.data.map { it[emojiStatusKey] ?: "" }
+    val customStatus: Flow<String> = context.settingsDataStore.data.map { it[customStatusKey] ?: "" }
+
+    suspend fun setTwoFactorPassword(password: String, hint: String?) {
+        val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val hash = app.yodo.messenger.core.util.PinHasher.hash(password, salt)
+        context.settingsDataStore.edit {
+            it[tfaSaltKey] = salt
+            it[tfaHashKey] = hash
+            it[tfaHintKey] = hint?.trim().orEmpty()
+            it[tfaFailedKey] = 0
+            it.remove(tfaLockedUntilKey)
+        }
+    }
+
+    suspend fun clearTwoFactor() {
+        context.settingsDataStore.edit {
+            it.remove(tfaHashKey); it.remove(tfaSaltKey); it.remove(tfaHintKey)
+            it.remove(tfaFailedKey); it.remove(tfaLockedUntilKey)
+        }
+    }
+
+    suspend fun verifyTwoFactor(password: String): PinCheckResult {
+        val prefs = context.settingsDataStore.data.first()
+        val now = System.currentTimeMillis()
+        val lockedUntil = prefs[tfaLockedUntilKey] ?: 0L
+        if (lockedUntil > now) return PinCheckResult.LockedOut(lockedUntil)
+        val salt = prefs[tfaSaltKey]
+        val storedHash = prefs[tfaHashKey]
+        if (salt == null || storedHash == null) return PinCheckResult.Success
+        if (app.yodo.messenger.core.util.PinHasher.hash(password, salt) == storedHash) {
+            context.settingsDataStore.edit { it[tfaFailedKey] = 0; it.remove(tfaLockedUntilKey) }
+            return PinCheckResult.Success
+        }
+        val failed = (prefs[tfaFailedKey] ?: 0) + 1
+        return if (failed >= MAX_PIN_ATTEMPTS) {
+            val unlockAt = now + PIN_LOCKOUT_MS
+            context.settingsDataStore.edit { it[tfaFailedKey] = 0; it[tfaLockedUntilKey] = unlockAt }
+            PinCheckResult.LockedOut(unlockAt)
+        } else {
+            context.settingsDataStore.edit { it[tfaFailedKey] = failed }
+            PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failed)
+        }
+    }
+
+    suspend fun setRecoveryQuestions(questions: List<String>, answers: List<String>) {
+        if (questions.size < 3 || answers.size < 3) return
+        val s1 = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val s2 = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val s3 = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        context.settingsDataStore.edit {
+            it[secQ1Key] = questions[0].trim(); it[secQ2Key] = questions[1].trim(); it[secQ3Key] = questions[2].trim()
+            it[secA1SaltKey] = s1; it[secA1HashKey] = app.yodo.messenger.core.util.PinHasher.hash(answers[0].trim().lowercase(), s1)
+            it[secA2SaltKey] = s2; it[secA2HashKey] = app.yodo.messenger.core.util.PinHasher.hash(answers[1].trim().lowercase(), s2)
+            it[secA3SaltKey] = s3; it[secA3HashKey] = app.yodo.messenger.core.util.PinHasher.hash(answers[2].trim().lowercase(), s3)
+        }
+    }
+
+    suspend fun verifyRecoveryAnswers(answers: List<String>): Boolean {
+        if (answers.size < 3) return false
+        val prefs = context.settingsDataStore.data.first()
+        val s1 = prefs[secA1SaltKey]; val h1 = prefs[secA1HashKey]
+        val s2 = prefs[secA2SaltKey]; val h2 = prefs[secA2HashKey]
+        val s3 = prefs[secA3SaltKey]; val h3 = prefs[secA3HashKey]
+        if (s1 == null || h1 == null || s2 == null || h2 == null || s3 == null || h3 == null) return false
+        return app.yodo.messenger.core.util.PinHasher.hash(answers[0].trim().lowercase(), s1) == h1 &&
+            app.yodo.messenger.core.util.PinHasher.hash(answers[1].trim().lowercase(), s2) == h2 &&
+            app.yodo.messenger.core.util.PinHasher.hash(answers[2].trim().lowercase(), s3) == h3
+    }
+
+    suspend fun resetTwoFactorWithAnswers(answers: List<String>, newPassword: String): Boolean {
+        if (!verifyRecoveryAnswers(answers)) return false
+        setTwoFactorPassword(newPassword, null)
+        return true
+    }
+
+    suspend fun setScreenshotProtection(enabled: Boolean) { context.settingsDataStore.edit { it[screenshotProtectionKey] = enabled } }
+    suspend fun setEmojiStatus(value: String) { context.settingsDataStore.edit { it[emojiStatusKey] = value } }
+    suspend fun setCustomStatus(value: String) { context.settingsDataStore.edit { it[customStatusKey] = value } }
 }

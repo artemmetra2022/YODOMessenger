@@ -237,12 +237,17 @@ private data class ForwardSection(val title: String, val chats: List<ChatPreview
 /** п.36: делит список чатов на информативные секции вместо одного плоского списка. */
 @androidx.compose.runtime.Composable
 private fun groupChatsForForward(chats: List<ChatPreview>): List<ForwardSection> {
-    val pinned = chats.filter { it.isPinned }
-    val remaining = chats.filterNot { it.isPinned }
+    // НОВОЕ: «Избранное» (сохранённые сообщения) всегда первым в меню пересылки.
+    val isSaved: (ChatPreview) -> Boolean = { it.type == ChatType.PRIVATE && it.otherUserId == null }
+    val saved = chats.filter(isSaved)
+    val rest = chats.filterNot(isSaved)
+    val pinned = rest.filter { it.isPinned }
+    val remaining = rest.filterNot { it.isPinned }
     val channels = remaining.filter { it.type == ChatType.CHANNEL }
     val groups = remaining.filter { it.type == ChatType.GROUP }
     val personal = remaining.filter { it.type == ChatType.PRIVATE }
     return listOf(
+        ForwardSection(stringResource(R.string.forward_saved_messages), saved),
         ForwardSection(stringResource(R.string.forward_section_pinned), pinned),
         ForwardSection(stringResource(R.string.forward_section_channels), channels),
         ForwardSection(stringResource(R.string.forward_section_groups), groups),
@@ -370,7 +375,10 @@ private fun ForwardChatItem(
             }
             // Дополнительная информативная строка
             val subtitle = when {
-                isChannel -> stringResource(R.string.forward_official_channel)
+                // Официальным считается только верифицированный канал (YodoMessenger и
+                // поддержка). Остальные каналы — обычные, поэтому у них нейтральная подпись.
+                isChannel && chat.isVerified -> stringResource(R.string.forward_official_channel)
+                isChannel -> stringResource(R.string.forward_channel)
                 isSavedChat -> stringResource(R.string.forward_saved_messages)
                 isGroup -> stringResource(R.string.forward_group_chat)
                 chat.isOnline -> stringResource(R.string.forward_online)

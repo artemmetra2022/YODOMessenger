@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +62,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import app.yodo.messenger.util.ImageUtils
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -92,6 +98,8 @@ fun ChannelProfileScreen(
     onChatOpened: (String) -> Unit,
     onEditChannel: (String) -> Unit,
     onOpenUserProfile: (String) -> Unit,
+    // НОВОЕ (система ролей + журнал администраторов): переход к экрану управления ролями.
+    onManageRoles: (String) -> Unit = {},
     // НОВОЕ: канал удалён владельцем — экран должен закрыться в список чатов.
     onChannelDeleted: () -> Unit = onBackClick,
     viewModel: ChannelProfileViewModel = hiltViewModel()
@@ -167,7 +175,22 @@ fun ChannelProfileScreen(
                         // ═══ Кнопки подписки ═══
                         // У официального канала подписки нет — он виден всем и закреплён в списке.
                         if (!profile.isVerified) {
-                            if (!profile.isSubscribed) {
+                            if (!profile.isSubscribed &&
+                                profile.accessMode == app.yodo.messenger.domain.model.ChannelAccessMode.MODERATED) {
+                                // НОВОЕ (модерируемый канал): подача/отмена заявки на вступление.
+                                if (profile.hasPendingJoinRequest) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.toggleSubscription() },
+                                        modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp)
+                                    ) { Text("Заявка отправлена · отменить") }
+                                } else {
+                                    Button(
+                                        onClick = { viewModel.toggleSubscription() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
+                                        modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp)
+                                    ) { Text("Подать заявку", color = Color.White, fontWeight = FontWeight.SemiBold) }
+                                }
+                            } else if (!profile.isSubscribed) {
                                 GradientSubscribeButton(
                                     colorTheme = colorTheme,
                                     onClick = { viewModel.toggleSubscription() },
@@ -241,6 +264,16 @@ fun ChannelProfileScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Редактировать канал")
                             }
+                            // НОВОЕ (система ролей + журнал администраторов): переход к управлению
+                            // ролями участников канала и просмотру журнала действий администраторов.
+                            OutlinedButton(
+                                onClick = { onManageRoles(viewModel.chatId) },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Роли и права")
+                            }
                             // НОВОЕ: удаление канала владельцем — необратимое действие,
                             // требует явного подтверждения в диалоге.
                             OutlinedButton(
@@ -291,17 +324,54 @@ private fun ChannelHero(
     colorTheme: ColorTheme
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+        // ИСПРАВЛЕНИЕ (баг «обложка обрезается наполовину синим фоном»): раньше
+        // обложка рисовалась отдельной полосой высотой 140.dp НАД градиентным
+        // блоком шапки — из-за этого она визуально "резалась" границей между
+        // двумя блоками, а не служила фоном для всего блока. Теперь обложка —
+        // это фон самого блока шапки (Box), поверх неё — затемняющий градиент
+        // для читаемости текста, а сам блок занимает всю высоту шапки без разрыва.
+        val coverBmp = profile.coverBase64?.let { cover ->
+            remember(cover) { ImageUtils.decodeBase64ToBitmap(cover) }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(colorTheme.primary, colorTheme.accent),
-                    )
+                .then(
+                    if (coverBmp == null) {
+                        Modifier.background(
+                            Brush.linearGradient(
+                                colors = listOf(colorTheme.primary, colorTheme.accent),
+                            )
+                        )
+                    } else Modifier
                 )
                 .padding(top = 28.dp, bottom = 56.dp, start = 24.dp, end = 24.dp),
             contentAlignment = Alignment.Center
         ) {
+            if (coverBmp != null) {
+                Image(
+                    bitmap = coverBmp.asImageBitmap(),
+                    contentDescription = "Обложка канала",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .matchParentSize()
+                        .align(Alignment.Center)
+                )
+                // Затемняющий градиент поверх фото — чтобы заголовок и текст
+                // оставались читаемыми на любой обложке.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.35f),
+                                    Color.Black.copy(alpha = 0.55f)
+                                )
+                            )
+                        )
+                )
+            }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -335,6 +405,20 @@ private fun ChannelHero(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 6.dp)
                     )
+                }
+                // НОВОЕ (F5): чипы категории и тегов.
+                if (!profile.category.isNullOrBlank() || profile.tags.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        profile.category?.takeIf { it.isNotBlank() }?.let { cat ->
+                            ChannelMetaChip(text = cat, highlighted = true)
+                        }
+                        profile.tags.take(3).forEach { tag ->
+                            ChannelMetaChip(text = "#$tag", highlighted = false)
+                        }
+                    }
                 }
                 Text(
                     buildString {
@@ -391,12 +475,28 @@ private fun ChannelHero(
     }
 }
 
+/** НОВОЕ (F5): чип категории/тега канала на полупрозрачном фоне. */
+@Composable
+private fun ChannelMetaChip(text: String, highlighted: Boolean) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Medium,
+        color = Color.White,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = if (highlighted) 0.28f else 0.16f))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    )
+}
+
 /** Плоский аватар канала на белой подложке с тонкой обводкой — без вращающегося кольца. */
 @Composable
 private fun ChannelAvatarFlat(avatarBase64: String?, title: String) {
+    // Увеличенный аватар канала (переработка каналов — крупнее интерфейс).
     Box(
         modifier = Modifier
-            .size(96.dp)
+            .size(120.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)
             .shadow(4.dp, CircleShape)
@@ -407,7 +507,7 @@ private fun ChannelAvatarFlat(avatarBase64: String?, title: String) {
             displayName = title,
             photoUrl = null,
             avatarBase64 = avatarBase64,
-            size = 88.dp
+            size = 110.dp
         )
     }
 }

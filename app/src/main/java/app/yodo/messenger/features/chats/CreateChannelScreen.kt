@@ -5,6 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,7 +22,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.HowToReg
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -63,6 +69,8 @@ fun CreateChannelScreen(
     var channelName by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+    // НОВОЕ (режимы доступа): выбранный режим доступа канала.
+    var accessMode by remember { mutableStateOf(app.yodo.messenger.domain.model.ChannelAccessMode.OPEN) }
     val uiState by viewModel.uiState.collectAsState()
     val createdChatId by viewModel.createdChatId.collectAsState()
     val avatarBitmap by viewModel.avatarBitmap.collectAsState()
@@ -114,8 +122,11 @@ fun CreateChannelScreen(
             )
         }
     ) { padding ->
+        // ИСПРАВЛЕНО (кнопка «Создать» не была видна): раньше Column не прокручивался
+        // и использовал Spacer(weight(1f)) — из-за блока выбора режима доступа кнопка
+        // уезжала за нижний край экрана. Теперь экран прокручивается, кнопка всегда доступна.
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ═══ Аватарка канала ═══
@@ -215,9 +226,28 @@ fun CreateChannelScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            // НОВОЕ (режимы доступа): выбор режима доступа канала.
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Режим доступа",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            app.yodo.messenger.domain.model.ChannelAccessMode.values().forEach { mode ->
+                AccessModeOption(
+                    mode = mode,
+                    selected = accessMode == mode,
+                    colorTheme = colorTheme,
+                    onClick = { accessMode = mode },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
             Button(
-                onClick = { viewModel.createChannel(channelName, description) },
+                onClick = { viewModel.createChannel(channelName, description, accessMode) },
                 enabled = !uiState.isCreating && channelName.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().padding(16.dp)
             ) {
@@ -229,6 +259,59 @@ fun CreateChannelScreen(
                     Text("Создать канал")
                 }
             }
+        }
+    }
+}
+
+/**
+ * НОВОЕ (режимы доступа каналов): карточка выбора режима доступа (радио-стиль).
+ * Используется и при создании, и при редактировании канала.
+ */
+@Composable
+fun AccessModeOption(
+    mode: app.yodo.messenger.domain.model.ChannelAccessMode,
+    selected: Boolean,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val icon = when (mode) {
+        app.yodo.messenger.domain.model.ChannelAccessMode.OPEN -> Icons.Filled.Public
+        app.yodo.messenger.domain.model.ChannelAccessMode.MODERATED -> Icons.Filled.HowToReg
+        app.yodo.messenger.domain.model.ChannelAccessMode.HIDDEN -> Icons.Filled.Lock
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .background(
+                if (selected) colorTheme.primary.copy(alpha = 0.12f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            )
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon, contentDescription = null,
+            tint = if (selected) colorTheme.primary else Color.Gray,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                mode.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+            Text(
+                mode.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (selected) {
+            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = colorTheme.primary)
         }
     }
 }

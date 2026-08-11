@@ -55,7 +55,16 @@ fun PhoneLoginScreen(
     ) {
         Text(stringResource(R.string.phone_login_title), style = MaterialTheme.typography.headlineLarge)
 
-        if (!codeWasSent) {
+        // ЗАГЛУШКА (по просьбе): вход по телефону временно недоступен.
+        Text(
+            text = "Вход по телефону пока не работает",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(top = 20.dp)
+        )
+
+        @Suppress("UNUSED_EXPRESSION")
+        if (false) {
             OutlinedTextField(
                 value = phone,
                 onValueChange = { phone = it },

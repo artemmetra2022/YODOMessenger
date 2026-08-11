@@ -71,6 +71,13 @@ fun EditChannelScreen(
     var initialized by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
     var adminQuery by remember { mutableStateOf("") }
+    // НОВОЕ (F5): категория/теги/обложка канала.
+    var category by remember { mutableStateOf("") }
+    var tags by remember { mutableStateOf("") }
+    var pendingCoverUri by remember { mutableStateOf<Uri?>(null) }
+    val coverPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let { pendingCoverUri = it } }
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -80,6 +87,8 @@ fun EditChannelScreen(
         if (!initialized && uiState.profile != null) {
             title = uiState.profile!!.title
             description = uiState.profile!!.description
+            category = uiState.profile!!.category.orEmpty()
+            tags = uiState.profile!!.tags.joinToString(", ")
             initialized = true
         }
     }
@@ -99,6 +108,20 @@ fun EditChannelScreen(
             onCropped = { bitmap ->
                 pendingCropUri = null
                 viewModel.uploadAvatar(bitmap)
+            }
+        )
+        return
+    }
+
+    // НОВОЕ (F5): поток кропа обложки — переиспользуем экран кропа.
+    val coverCropUri = pendingCoverUri
+    if (coverCropUri != null) {
+        AvatarCropScreen(
+            imageUri = coverCropUri,
+            onBackClick = { pendingCoverUri = null },
+            onCropped = { bitmap ->
+                pendingCoverUri = null
+                viewModel.uploadCover(bitmap)
             }
         )
         return
@@ -194,6 +217,69 @@ fun EditChannelScreen(
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
                 } else {
                     Text("Сохранить изменения")
+                }
+            }
+
+            // НОВОЕ (F5): категория, теги и обложка канала.
+            HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+            Text(
+                "Категория и теги",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Помогают находить канал в поиске.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            OutlinedTextField(
+                value = category,
+                onValueChange = { category = it },
+                label = { Text("Категория (напр. Новости, Музыка)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            )
+            OutlinedTextField(
+                value = tags,
+                onValueChange = { tags = it },
+                label = { Text("Теги через запятую") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            )
+            Button(
+                onClick = { viewModel.saveMeta(category, tags) },
+                enabled = !uiState.isSavingMeta,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                if (uiState.isSavingMeta) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                } else {
+                    Text("Сохранить категорию и теги")
+                }
+            }
+
+            Text(
+                "Обложка канала",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+            Text(
+                "Баннер вверху профиля канала.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Button(
+                onClick = { coverPicker.launch("image/*") },
+                enabled = !uiState.isUploadingCover,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                if (uiState.isUploadingCover) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                } else {
+                    Text(if (uiState.profile?.coverBase64 != null) "Изменить обложку" else "Загрузить обложку")
                 }
             }
 

@@ -3,7 +3,10 @@ package app.yodo.messenger.data.repository
 import android.graphics.Bitmap
 import android.net.Uri
 import app.yodo.messenger.core.util.toUserMessage
+import app.yodo.messenger.domain.model.GlobalBlock
+import app.yodo.messenger.domain.model.ProfileHistoryEntry
 import app.yodo.messenger.domain.model.YodoUser
+import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.ProfileUpdateResult
 import app.yodo.messenger.domain.repository.UserRepository
 import app.yodo.messenger.util.ImageUtils
@@ -53,6 +56,7 @@ class UserRepositoryImpl @Inject constructor(
         if (trimmed.isBlank()) return ProfileUpdateResult.Error("Имя не может быть пустым")
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("displayName", "Имя", trimmed)
             user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(trimmed).build()).await()
             firestore.collection("users").document(user.uid)
                 .update(mapOf("displayName" to trimmed, "displayNameLowercase" to trimmed.lowercase())).await()
@@ -60,10 +64,29 @@ class UserRepositoryImpl @Inject constructor(
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось обновить имя")) }
     }
 
+    override suspend fun updateEmojiStatus(emoji: String): ProfileUpdateResult {
+        val trimmed = emoji.trim().take(8)
+        val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
+        return try {
+            firestore.collection("users").document(user.uid).update("emojiStatus", trimmed).await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось обновить статус")) }
+    }
+
+    override suspend fun updateCustomStatus(status: String): ProfileUpdateResult {
+        val trimmed = status.trim().take(100)
+        val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
+        return try {
+            firestore.collection("users").document(user.uid).update("customStatus", trimmed).await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось обновить статус")) }
+    }
+
     override suspend fun updateBio(bio: String): ProfileUpdateResult {
         val trimmed = bio.trim().take(150)
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("bio", "Описание", trimmed)
             firestore.collection("users").document(user.uid).update("bio", trimmed).await()
             ProfileUpdateResult.Success
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось обновить описание")) }
@@ -76,6 +99,7 @@ class UserRepositoryImpl @Inject constructor(
             return ProfileUpdateResult.Error("Username: 3-20 символов, только латиница, цифры и \"_\"")
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("username", "Имя пользователя", normalized)
             firestore.runTransaction { transaction ->
                 val usernameRef = firestore.collection("usernames").document(normalized)
                 val usernameSnapshot = transaction.get(usernameRef)
@@ -103,6 +127,7 @@ class UserRepositoryImpl @Inject constructor(
             } ?: return ProfileUpdateResult.Error("Не удалось обработать изображение")
             firestore.collection("users").document(user.uid)
                 .update(mapOf("avatarBase64" to base64, "avatarUrl" to null)).await()
+            logAvatarChange()
             ProfileUpdateResult.Success
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось загрузить фото")) }
     }
@@ -115,6 +140,7 @@ class UserRepositoryImpl @Inject constructor(
             } ?: return ProfileUpdateResult.Error("Не удалось обработать изображение")
             firestore.collection("users").document(user.uid)
                 .update(mapOf("avatarBase64" to base64, "avatarUrl" to null)).await()
+            logAvatarChange()
             ProfileUpdateResult.Success
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось загрузить фото")) }
     }
@@ -141,7 +167,7 @@ class UserRepositoryImpl @Inject constructor(
         if (normalized.isEmpty()) return emptyList()
         val usersRef = firestore.collection("users")
         return try {
-            // Firestore whereIn поддерживает максимум 30 значений за запрос — делим на пачки.
+            // Firestore whereIn поддерживает максимум 30 ��начений за запрос — ��елим на пачки.
             normalized.chunked(30).flatMap { chunk ->
                 usersRef.whereIn("phoneNumber", chunk).get().await().documents
             }.distinctBy { it.id }
@@ -157,9 +183,66 @@ class UserRepositoryImpl @Inject constructor(
         } catch (e: Exception) { null }
     }
 
+    // НОВОЕ (История изменений профиля): запись одного изменения в журнал.
+    // Читает старое значение поля и если оно отличается — добавляет запись
+    // в users/{uid}/profileHistory. Ошибки журналирования не ломают само обновление.
+    private suspend fun logProfileChange(field: String, fieldLabel: String, newValue: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        runCatching {
+            val userRef = firestore.collection("users").document(uid)
+            val oldValue = userRef.get().await().getString(field) ?: ""
+            if (oldValue == newValue) return
+            userRef.collection("profileHistory").add(
+                mapOf(
+                    "field" to field,
+                    "fieldLabel" to fieldLabel,
+                    "oldValue" to oldValue,
+                    "newValue" to newValue,
+                    "timestamp" to System.currentTimeMillis()
+                )
+            ).await()
+        }
+    }
+
+    // НОВОЕ (История изменений профиля): отдельная запись про смену аватарки.
+    private suspend fun logAvatarChange() {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        runCatching {
+            firestore.collection("users").document(uid).collection("profileHistory").add(
+                mapOf(
+                    "field" to "avatar",
+                    "fieldLabel" to "Фото профиля",
+                    "oldValue" to "",
+                    "newValue" to "Обновлено",
+                    "timestamp" to System.currentTimeMillis()
+                )
+            ).await()
+        }
+    }
+
+    override suspend fun getProfileHistory(): List<ProfileHistoryEntry> {
+        val uid = firebaseAuth.currentUser?.uid ?: return emptyList()
+        return try {
+            firestore.collection("users").document(uid).collection("profileHistory")
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(200).get().await()
+                .documents.map { d ->
+                    ProfileHistoryEntry(
+                        id = d.id,
+                        field = d.getString("field") ?: "",
+                        fieldLabel = d.getString("fieldLabel") ?: "",
+                        oldValue = d.getString("oldValue") ?: "",
+                        newValue = d.getString("newValue") ?: "",
+                        timestamp = d.getLong("timestamp") ?: 0L
+                    )
+                }
+        } catch (e: Exception) { emptyList() }
+    }
+
     override suspend fun updateAboutMe(aboutMe: String): ProfileUpdateResult {
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("aboutMe", "О себе", aboutMe.trim().take(300))
             firestore.collection("users").document(user.uid)
                 .update("aboutMe", aboutMe.trim().take(300)).await()
             ProfileUpdateResult.Success
@@ -175,6 +258,7 @@ class UserRepositoryImpl @Inject constructor(
         }
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("birthDate", "Дата рождения", trimmed)
             firestore.collection("users").document(user.uid)
                 .update("birthDate", trimmed).await()
             ProfileUpdateResult.Success
@@ -184,6 +268,7 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun updateLocation(location: String): ProfileUpdateResult {
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("location", "Местоположение", location.trim().take(100))
             firestore.collection("users").document(user.uid)
                 .update("location", location.trim().take(100)).await()
             ProfileUpdateResult.Success
@@ -193,6 +278,7 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun updateWebsite(website: String): ProfileUpdateResult {
         val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
+            logProfileChange("website", "Сайт", website.trim().take(200))
             firestore.collection("users").document(user.uid)
                 .update("website", website.trim().take(200)).await()
             ProfileUpdateResult.Success
@@ -250,6 +336,80 @@ class UserRepositoryImpl @Inject constructor(
         } catch (e: Exception) { false }
     }
 
+    // НОВОЕ (реальная блокировка): читаем документ другого пользователя
+    // и проверяем, есть ли я в его списке заблокированны�� (users читаются публично).
+    override suspend fun isBlockedBy(uid: String): Boolean {
+        val me = firebaseAuth.currentUser?.uid ?: return false
+        return try {
+            val theirDoc = firestore.collection("users").document(uid).get().await()
+            val theirBlocked = (theirDoc.get("blockedUsers") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            me in theirBlocked
+        } catch (e: Exception) { false }
+    }
+
+    // НОВОЕ (AD): глобальная блокировка аккаунта администратором приложения (2 почты).
+    private fun globalBlocksRef() = firestore.collection("globalBlocks")
+
+    private fun isAdminEmail(): Boolean =
+        firebaseAuth.currentUser?.email?.lowercase() in ChatRepository.ADMIN_EMAILS
+
+    private fun parseGlobalBlock(uid: String, data: Map<String, Any?>) = GlobalBlock(
+        userId = uid,
+        reason = data["reason"] as? String ?: "",
+        blockedBy = data["blockedBy"] as? String ?: "",
+        blockedByName = data["blockedByName"] as? String ?: "",
+        blockedAt = (data["blockedAt"] as? Number)?.toLong() ?: 0L
+    )
+
+    override fun observeMyGlobalBlock(): Flow<GlobalBlock?> = callbackFlow {
+        val uid = firebaseAuth.currentUser?.uid
+        if (uid == null) { trySend(null); close(); return@callbackFlow }
+        val reg = globalBlocksRef().document(uid).addSnapshotListener { snapshot, _ ->
+            if (snapshot != null && snapshot.exists()) {
+                @Suppress("UNCHECKED_CAST")
+                val data = snapshot.data as? Map<String, Any?> ?: emptyMap()
+                trySend(parseGlobalBlock(uid, data))
+            } else {
+                trySend(null)
+            }
+        }
+        awaitClose { reg.remove() }
+    }
+
+    override suspend fun setGlobalBlock(uid: String, reason: String): ProfileUpdateResult {
+        if (!isAdminEmail()) return ProfileUpdateResult.Error("Нет прав администратора")
+        val me = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
+        return try {
+            val myName = firestore.collection("users").document(me.uid).get().await()
+                .getString("displayName") ?: (me.email ?: "Админ")
+            globalBlocksRef().document(uid).set(mapOf(
+                "reason" to reason.take(500),
+                "blockedBy" to me.uid,
+                "blockedByName" to myName,
+                "blockedAt" to System.currentTimeMillis()
+            )).await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось заблокировать аккаунт")) }
+    }
+
+    override suspend fun removeGlobalBlock(uid: String): ProfileUpdateResult {
+        if (!isAdminEmail()) return ProfileUpdateResult.Error("Нет прав администратора")
+        return try {
+            globalBlocksRef().document(uid).delete().await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось снять блокировку")) }
+    }
+
+    override suspend fun getGlobalBlock(uid: String): GlobalBlock? {
+        return try {
+            val doc = globalBlocksRef().document(uid).get().await()
+            if (!doc.exists()) return null
+            @Suppress("UNCHECKED_CAST")
+            val data = doc.data as? Map<String, Any?> ?: return null
+            parseGlobalBlock(uid, data)
+        } catch (e: Exception) { null }
+    }
+
     private fun com.google.firebase.firestore.DocumentSnapshot.toYodoUser(uid: String) = YodoUser(
         uid = uid,
         displayName = getString("displayName") ?: "",
@@ -268,6 +428,10 @@ class UserRepositoryImpl @Inject constructor(
         showLocation = getBoolean("showLocation") ?: true,
         showWebsite = getBoolean("showWebsite") ?: true,
         showPhoneNumber = getBoolean("showPhoneNumber") ?: false,
-        showEmail = getBoolean("showEmail") ?: false
+        showEmail = getBoolean("showEmail") ?: false,
+        publicKey = getString("publicKey"),
+        publicId = getString("publicId"),
+        emojiStatus = getString("emojiStatus"),
+        customStatus = getString("customStatus")
     )
 }

@@ -5,9 +5,8 @@ sealed class Routes(val route: String) {
     data object Welcome : Routes("welcome")
     data object Login : Routes("login")
     data object PhoneLogin : Routes("phone_login")
+    data object ForgotPassword : Routes("forgot_password")
     data object Register : Routes("register")
-    // НОВОЕ: обучение (онбординг) после регистрации — краткий обзор разделов.
-    data object Onboarding : Routes("onboarding")
     data object ChatList : Routes("chat_list")
     data object Search : Routes("search")
     data object CreateGroup : Routes("create_group")
@@ -19,6 +18,12 @@ sealed class Routes(val route: String) {
     data object ForwardMessage : Routes("forward_message")
     data object Profile : Routes("profile")
     data object Settings : Routes("settings")
+    // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
+    data object Tools : Routes("tools")
+    data object SecurityCenter : Routes("security_center")
+    // НОВОЕ (Y): смена аккаунта и добавление нового аккаунта.
+    data object SwitchAccount : Routes("switch_account")
+    data object AddAccount : Routes("add_account")
     data object BlockedUsers : Routes("blocked_users")
     // НОВОЕ (архивация чатов)
     data object ArchivedChats : Routes("archived_chats")
@@ -26,6 +31,12 @@ sealed class Routes(val route: String) {
     // НОВОЕ: экраны-заглушки для блока профиля (История/QR-код/Звонки/Устройства)
     data object ProfileHistory : Routes("profile_history")
     data object QrCode : Routes("qr_code")
+    data object ScanContact : Routes("scan_contact")
+    // НОВОЕ (поделиться контактом абонента): QR-карточка контакта собеседника.
+    data object ContactQr : Routes("contact_qr/{userId}") {
+        fun createRoute(userId: String) = "contact_qr/$userId"
+        const val ARG_USER_ID = "userId"
+    }
     data object RecentCalls : Routes("recent_calls")
     data object Devices : Routes("devices")
 
@@ -70,4 +81,30 @@ sealed class Routes(val route: String) {
         const val ARG_USER_ID = "userId"
     }
     data object ImageViewer : Routes("image_viewer")
+
+    // НОВОЕ (система ролей + журнал администраторов):
+    data object ManageRoles : Routes("manage_roles/{chatId}") {
+        fun createRoute(chatId: String) = "manage_roles/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    data object AdminLog : Routes("admin_log/{chatId}") {
+        fun createRoute(chatId: String) = "admin_log/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    // НОВОЕ (система жалоб с очередью, п.5 ТЗ):
+    data object ReportQueue : Routes("report_queue/{chatId}") {
+        fun createRoute(chatId: String) = "report_queue/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    data object ReportDetail : Routes("report_detail/{chatId}/{reportId}") {
+        fun createRoute(chatId: String, reportId: String) = "report_detail/$chatId/$reportId"
+        const val ARG_CHAT_ID = "chatId"
+        const val ARG_REPORT_ID = "reportId"
+    }
+    // НОВОЕ (AC): глобальный раздел «Жалобы» для главных админов (2 почты).
+    data object ReportInbox : Routes("report_inbox")
+    // НОВОЕ (чат поддержки): экран админ-панели поддержки.
+    data object AdminPanel : Routes("admin_panel")
+
+    // НОВОЕ: личный блокнот «Заметки».
 }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Visibility
@@ -70,6 +71,8 @@ fun RegisterScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    val passwordStrength = remember(password) { evaluatePasswordStrength(password) }
+    val isPasswordAcceptable = passwordStrength.level == PasswordStrengthLevel.STRONG
 
     val colorTheme = LocalColorTheme.current
     val uiState by viewModel.uiState.collectAsState()
@@ -177,17 +180,30 @@ fun RegisterScreen(
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                            contentDescription = if (passwordVisible) stringResource(R.string.auth_hide_password) else stringResource(R.string.auth_show_password)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { password = generateStrongPassword() ; passwordVisible = true }) {
+                            Icon(
+                                Icons.Filled.AutoAwesome,
+                                contentDescription = "Сгенерировать надёжный пароль"
+                            )
+                        }
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (passwordVisible) stringResource(R.string.auth_hide_password) else stringResource(R.string.auth_show_password)
+                            )
+                        }
                     }
                 },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (password.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                PasswordStrengthIndicator(result = passwordStrength)
+            }
 
             if (uiState is AuthUiState.Error) {
                 Text(
@@ -197,39 +213,13 @@ fun RegisterScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                    .clickable { viewModel.setAdvancedPollsEnabled(!advancedPollsEnabled) }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Poll, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(22.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.register_advanced_polls_title), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text(
-                        stringResource(R.string.register_advanced_polls_subtitle),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = advancedPollsEnabled,
-                    onCheckedChange = { viewModel.setAdvancedPollsEnabled(it) },
-                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colorTheme.primary)
-                )
-            }
+            // УДАЛЕНО (по просьбе): блок «Расширенные опросы» убран из регистрации.
 
             Spacer(modifier = Modifier.height(20.dp))
 
             Button(
                 onClick = { viewModel.register(name, username, email, password) },
-                enabled = uiState !is AuthUiState.Loading,
+                enabled = uiState !is AuthUiState.Loading && isPasswordAcceptable,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
                 modifier = Modifier.fillMaxWidth().height(52.dp)

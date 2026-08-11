@@ -31,6 +31,11 @@ class CommentsViewModel @Inject constructor(
     val messageId: String = checkNotNull(savedStateHandle["messageId"])
     val currentUserId: String? get() = firebaseAuth.currentUser?.uid
 
+    // НОВОЕ (модерация): два доверенных email-адреса могут удалять ЛЮБЫЕ комментарии.
+    val isGlobalAdmin: Boolean
+        get() = firebaseAuth.currentUser?.email?.lowercase() in
+            app.yodo.messenger.domain.repository.ChatRepository.ADMIN_EMAILS
+
     private val _message = MutableStateFlow<Message?>(null)
     val message: StateFlow<Message?> = _message
 

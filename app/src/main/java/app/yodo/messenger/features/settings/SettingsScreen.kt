@@ -39,6 +39,10 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Image
@@ -110,6 +114,14 @@ fun SettingsScreen(
     onProfileClick: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
     onOpenBlockedUsers: () -> Unit = {},
+    // НОВОЕ (Y): переход на экран смены аккаунта.
+    onSwitchAccount: () -> Unit = {},
+    // НОВОЕ (батч 7): открыть «Фишки и инструменты».
+    onOpenTools: () -> Unit = {},
+    // НОВОЕ (батч 7): открыть «Центр безопасности».
+    onOpenSecurity: () -> Unit = {},
+    // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
+    onOpenReports: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currentLanguage by viewModel.currentLanguage.collectAsState()
@@ -121,6 +133,9 @@ fun SettingsScreen(
     val showReadReceipts by viewModel.showReadReceipts.collectAsState()
     val pinRequirement by viewModel.pinRequirement.collectAsState()
     val isPinSet by viewModel.isPinSet.collectAsState()
+    // НОВОЕ (скрытые чаты): установлен ли ложный PIN.
+    val isDecoyPinSet by viewModel.isDecoyPinSet.collectAsState()
+    val pinLockDelaySeconds by viewModel.pinLockDelaySeconds.collectAsState()
     val showBirthDate by viewModel.showBirthDate.collectAsState()
     val showAboutMe by viewModel.showAboutMe.collectAsState()
     val showLocation by viewModel.showLocation.collectAsState()
@@ -133,6 +148,12 @@ fun SettingsScreen(
     val notificationSound by viewModel.notificationSound.collectAsState()
     val notificationVibration by viewModel.notificationVibration.collectAsState()
     val muteAllNotifications by viewModel.muteAllNotifications.collectAsState()
+    // НОВОЕ: тихие часы, пауза и скрытие превью.
+    val quietHoursEnabled by viewModel.quietHoursEnabled.collectAsState()
+    val quietHoursStart by viewModel.quietHoursStart.collectAsState()
+    val quietHoursEnd by viewModel.quietHoursEnd.collectAsState()
+    val hideNotificationPreview by viewModel.hideNotificationPreview.collectAsState()
+    val notificationsSnoozedUntil by viewModel.notificationsSnoozedUntil.collectAsState()
     val accountDeleted by viewModel.accountDeleted.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val errorMessageResId by viewModel.errorMessageResId.collectAsState()
@@ -308,9 +329,9 @@ fun SettingsScreen(
                 }
             }
 
-            // ════════════════════════════════════════
-            // КАСТОМИЗАЦИЯ
-            // ════════════════════════════════════════
+            // ══════════���═════════════════════════════
+            // КАСТОМИЗАЦ��Я
+            // ══════════��═════════════════════════════
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
                 SettingsSectionHeader(
@@ -611,14 +632,45 @@ fun SettingsScreen(
                     PinSetupDialog(
                         isPinSet = isPinSet,
                         currentRequirement = pinRequirement,
+                        currentLockDelaySeconds = pinLockDelaySeconds,
                         onDismiss = { showPinDialog = false },
                         onSavePin = { pin, requirement ->
                             viewModel.setPin(pin, requirement)
                             showPinDialog = false
                         },
                         onRequirementChanged = { viewModel.setPinRequirement(it) },
+                        onLockDelayChanged = { viewModel.setPinLockDelaySeconds(it) },
                         onDisablePin = { viewModel.clearPin(); showPinDialog = false }
                     )
+                }
+
+                // НОВОЕ (скрытые чаты): ложный (decoy) PIN — доступен только когда задан основной PIN.
+                if (isPinSet) {
+                    var showDecoyDialog by remember { mutableStateOf(false) }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SettingsCard {
+                        SettingsNavigateRow(
+                            icon = Icons.Filled.Lock,
+                            title = if (isDecoyPinSet) "Ложный PIN задан" else "Настроить ложный PIN",
+                            subtitle = "Вход по этому коду скрывает выбранные чаты",
+                            colorTheme = colorTheme,
+                            onClick = { showDecoyDialog = true }
+                        )
+                    }
+                    if (showDecoyDialog) {
+                        DecoyPinDialog(
+                            isDecoyPinSet = isDecoyPinSet,
+                            onDismiss = { showDecoyDialog = false },
+                            onSavePin = { pin ->
+                                viewModel.setDecoyPin(pin)
+                                showDecoyDialog = false
+                            },
+                            onDisablePin = {
+                                viewModel.clearDecoyPin()
+                                showDecoyDialog = false
+                            }
+                        )
+                    }
                 }
             }
 
@@ -636,7 +688,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Расширенный профиль
+            // Рас��иренный профиль
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
                 SettingsCard {
@@ -776,8 +828,80 @@ fun SettingsScreen(
             }
 
             // ════════════════════════════════════════
-            // АККАУНТ
+            // НОВОЕ: РАСШИРЕННЫЕ УВЕДОМЛЕНИЯ + БЛОКНОТ
             // ════════════════════════════════════════
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsToggleRow(
+                        icon = Icons.Filled.NotificationsOff,
+                        title = "Тихие часы",
+                        subtitle = "Не беспокоить в заданный ночной интервал",
+                        checked = quietHoursEnabled,
+                        onCheckedChange = { viewModel.setQuietHoursEnabled(it) },
+                        colorTheme = colorTheme
+                    )
+                    AnimatedVisibility(visible = quietHoursEnabled) {
+                        Column {
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                            SettingsNavigateRow(
+                                icon = Icons.Filled.Timer,
+                                title = "Начало: %02d:00".format(quietHoursStart),
+                                subtitle = "Нажмите, чтобы сдвинуть на +1 час",
+                                colorTheme = colorTheme,
+                                onClick = { viewModel.shiftQuietHoursStart(1) }
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                            SettingsNavigateRow(
+                                icon = Icons.Filled.Timer,
+                                title = "Конец: %02d:00".format(quietHoursEnd),
+                                subtitle = "Нажмите, чтобы сдвинуть на +1 час",
+                                colorTheme = colorTheme,
+                                onClick = { viewModel.shiftQuietHoursEnd(1) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsToggleRow(
+                        icon = Icons.Filled.RemoveRedEye,
+                        title = "Скрывать текст в уведомлениях",
+                        subtitle = "Показывать «Новое сообщение» без имени и текста",
+                        checked = hideNotificationPreview,
+                        onCheckedChange = { viewModel.setHideNotificationPreview(it) },
+                        colorTheme = colorTheme
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Timer,
+                        title = if (notificationsSnoozedUntil > System.currentTimeMillis()) "Пауза активна — выключить" else "Пауза уведомлений на 1 час",
+                        subtitle = if (notificationsSnoozedUntil > System.currentTimeMillis()) "Уведомления временно отключены" else "Тишина на ближайший час",
+                        colorTheme = colorTheme,
+                        onClick = {
+                            if (notificationsSnoozedUntil > System.currentTimeMillis()) viewModel.clearNotificationSnooze()
+                            else viewModel.snoozeNotifications(60L * 60L * 1000L)
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Timer,
+                        title = "Пауза уведомлений на 8 часов",
+                        subtitle = "Удобно на ночь или на встречу",
+                        colorTheme = colorTheme,
+                        onClick = { viewModel.snoozeNotifications(8L * 60L * 60L * 1000L) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.VolumeUp,
+                        title = "Отправить тестовое уведомление",
+                        subtitle = "Проверить, что уведомления работают",
+                        colorTheme = colorTheme,
+                        onClick = { viewModel.sendTestNotification() }
+                    )
+                }
+            }
+            // ═════════════════════════════���══════════
+            // АККА��НТ
+            // ══════════════════════════════════���═════
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
                 SettingsSectionHeader(
@@ -786,8 +910,55 @@ fun SettingsScreen(
                     colorTheme = colorTheme
                 )
             }
+            // НОВОЕ (AC): раздел «Жалобы» виден только главным админам (2 почты).
+            if (viewModel.isAppAdmin) {
+                item {
+                    SettingsCard {
+                        SettingsNavigateRow(
+                            icon = Icons.Filled.Flag,
+                            title = "Жалобы",
+                            subtitle = "Жалобы и обжалования пользователей на рассмотрение",
+                            colorTheme = colorTheme,
+                            onClick = onOpenReports
+                        )
+                    }
+                }
+            }
+            // НОВОЕ (батч 7): вход в раздел с 20 новыми функциями.
             item {
                 SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Star,
+                        title = "Фишки и инструменты",
+                        subtitle = "20 мини-функций: заметки, таймер, пароли, конвертеры и другое",
+                        colorTheme = colorTheme,
+                        onClick = onOpenTools
+                    )
+                }
+            }
+            // НОВОЕ (батч 7): Центр безопасности (2FA, контрольные вопросы, защита от скриншотов, статусы).
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Security,
+                        title = "Центр безопасности",
+                        subtitle = "Двухфакторная аутентификация, сброс через вопросы, защита от скриншотов, статусы",
+                        colorTheme = colorTheme,
+                        onClick = onOpenSecurity
+                    )
+                }
+            }
+            item {
+                SettingsCard {
+                    // НОВОЕ (Y): сменить аккаунт без повторного входа.
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.SwapHoriz,
+                        title = "Сменить аккаунт",
+                        subtitle = "Переключиться между аккаунтами или добавить новый",
+                        colorTheme = colorTheme,
+                        onClick = onSwitchAccount
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsNavigateRow(
                         icon = Icons.Filled.ExitToApp,
                         title = stringResource(R.string.settings_logout),
@@ -1090,7 +1261,9 @@ private fun PinSetupDialog(
     onDismiss: () -> Unit,
     onSavePin: (String, PinRequirement) -> Unit,
     onRequirementChanged: (PinRequirement) -> Unit,
-    onDisablePin: () -> Unit
+    onDisablePin: () -> Unit,
+    currentLockDelaySeconds: Int = 0,
+    onLockDelayChanged: (Int) -> Unit = {}
 ) {
     var pin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
@@ -1103,26 +1276,16 @@ private fun PinSetupDialog(
         title = { Text(if (isPinSet) stringResource(R.string.pin_dialog_change_title) else stringResource(R.string.pin_dialog_set_title)) },
         text = {
             Column {
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it },
-                    label = { Text(stringResource(R.string.pin_dialog_new_pin)) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // НОВОЕ: красивый ввод — каждая цифра в своей клеточке.
+                Text(stringResource(R.string.pin_dialog_new_pin), style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = confirmPin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) confirmPin = it },
-                    label = { Text(stringResource(R.string.pin_dialog_repeat_pin)) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                PinCellsInput(pin = pin, onPinChange = { pin = it; errorMessage = null }, length = 4)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(stringResource(R.string.pin_dialog_repeat_pin), style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                PinCellsInput(pin = confirmPin, onPinChange = { confirmPin = it; errorMessage = null }, length = 4, isError = errorMessage != null)
                 errorMessage?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1152,6 +1315,60 @@ private fun PinSetupDialog(
                         Text(requirement.displayName, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+
+                // НОВОЕ: выбор времени, через которое приложение блокируется после сворачивания.
+                if (selectedRequirement == PinRequirement.ON_BACKGROUND) {
+                    val presets = listOf(0 to "Сразу", 30 to "30 сек", 60 to "1 мин", 300 to "5 мин", 900 to "15 мин")
+                    var showCustom by remember { mutableStateOf(presets.none { it.first == currentLockDelaySeconds }) }
+                    var lockDelay by remember { mutableStateOf(currentLockDelaySeconds) }
+                    var customText by remember { mutableStateOf(if (presets.none { it.first == currentLockDelaySeconds }) currentLockDelaySeconds.toString() else "") }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Блокировать через", style = MaterialTheme.typography.labelLarge)
+                    presets.forEach { (seconds, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = !showCustom && lockDelay == seconds,
+                                    onClick = { showCustom = false; lockDelay = seconds; onLockDelayChanged(seconds) }
+                                )
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = !showCustom && lockDelay == seconds,
+                                onClick = { showCustom = false; lockDelay = seconds; onLockDelayChanged(seconds) }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = showCustom, onClick = { showCustom = true })
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = showCustom, onClick = { showCustom = true })
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Своё время (сек)", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (showCustom) {
+                        OutlinedTextField(
+                            value = customText,
+                            onValueChange = { new ->
+                                val digits = new.filter(Char::isDigit).take(5)
+                                customText = digits
+                                digits.toIntOrNull()?.let { onLockDelayChanged(it) }
+                            },
+                            label = { Text("Секунд") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1168,6 +1385,67 @@ private fun PinSetupDialog(
         dismissButton = {
             Row {
                 if (isPinSet) {
+                    TextButton(onClick = onDisablePin) {
+                        Text(stringResource(R.string.pin_dialog_disable), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        }
+    )
+}
+
+// НОВОЕ (скрытые чаты): диалог настройки ложного (decoy) PIN-кода.
+@Composable
+private fun DecoyPinDialog(
+    isDecoyPinSet: Boolean,
+    onDismiss: () -> Unit,
+    onSavePin: (String) -> Unit,
+    onDisablePin: () -> Unit
+) {
+    var pin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isDecoyPinSet) "Изменить ложный PIN" else "Ложный PIN") },
+        text = {
+            Column {
+                Text(
+                    "Введите отдельный PIN-код. При входе по нему приложение откроется без скрытых чатов — как будто их нет. Он должен отличаться от основного PIN.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Ложный PIN", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                PinCellsInput(pin = pin, onPinChange = { pin = it; errorMessage = null }, length = 4)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Повторите ложный PIN", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                PinCellsInput(pin = confirmPin, onPinChange = { confirmPin = it; errorMessage = null }, length = 4, isError = errorMessage != null)
+                errorMessage?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                when {
+                    pin.length < 4 -> errorMessage = "Минимум 4 цифры"
+                    pin != confirmPin -> errorMessage = "PIN-коды не совпадают"
+                    else -> onSavePin(pin)
+                }
+            }) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            Row {
+                if (isDecoyPinSet) {
                     TextButton(onClick = onDisablePin) {
                         Text(stringResource(R.string.pin_dialog_disable), color = MaterialTheme.colorScheme.error)
                     }

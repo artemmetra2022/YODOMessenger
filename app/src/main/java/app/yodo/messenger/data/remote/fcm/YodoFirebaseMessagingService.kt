@@ -51,8 +51,36 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
             val globallyMuted = userSettingsPreferences.muteAllNotifications.first()
             if (globallyMuted) return@launch
 
+            // НОВОЕ: пауза уведомлений (snooze) — молчим, пока не истечёт таймер.
+            val snoozedUntil = userSettingsPreferences.notificationsSnoozedUntil.first()
+            if (snoozedUntil > System.currentTimeMillis()) return@launch
+
+            // НОВОЕ: тихие часы — подавляем уведомления в заданном ночном окне.
+            val quietEnabled = userSettingsPreferences.quietHoursEnabled.first()
+            if (quietEnabled) {
+                val start = userSettingsPreferences.quietHoursStart.first()
+                val end = userSettingsPreferences.quietHoursEnd.first()
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val inQuiet = if (start <= end) hour in start until end else (hour >= start || hour < end)
+                if (inQuiet) return@launch
+            }
+
             val soundEnabled = userSettingsPreferences.notificationSound.first()
             val vibrationEnabled = userSettingsPreferences.notificationVibration.first()
+
+            // НОВОЕ: скрытие текста в уведомлениях — показываем обезличенное уведомление.
+            val hidePreview = userSettingsPreferences.hideNotificationPreview.first()
+            if (hidePreview) {
+                NotificationHelper.showMessageNotification(
+                    context = applicationContext,
+                    chatId = chatId,
+                    senderName = "Новое сообщение",
+                    messageText = "Откройте приложение, чтобы прочитать",
+                    soundEnabled = soundEnabled,
+                    vibrationEnabled = vibrationEnabled
+                )
+                return@launch
+            }
 
             // Копим историю на клиенте — rich-уведомление (MessagingStyle) показывает
             // стек последних сообщений чата, а не только это одно.

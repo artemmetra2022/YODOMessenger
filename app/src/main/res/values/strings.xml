@@ -29,6 +29,13 @@
     <string name="login_password">Пароль</string>
     <string name="login_submit">Войти</string>
     <string name="login_no_account">Ещё нет аккаунта? Регистрация</string>
+    <string name="login_forgot_password">Забыли пароль?</string>
+    <string name="reset_password_title">Сброс пароля</string>
+    <string name="reset_password_description">Введите email или username — мы отправим ссылку для сброса пароля на привязанную почту.</string>
+    <string name="reset_password_input_label">Email или username</string>
+    <string name="reset_password_submit">Отправить письмо</string>
+    <string name="reset_password_success">Письмо для сброса пароля отправлено. Проверьте почту (в том числе папку «Спам»).</string>
+    <string name="reset_password_back_to_login">Вернуться ко входу</string>
 
     <!-- Register -->
     <string name="register_name">Имя</string>
@@ -147,6 +154,7 @@
     <string name="group_info_not_found">Группа не найдена</string>
     <string name="group_info_members">Участники (%1$d)</string>
     <string name="group_info_creator">Создатель группы</string>
+    <string name="group_info_manage_roles">Роли и права</string>
     <string name="group_info_leave">Покинуть группу</string>
 
     <!-- InviteToChannel -->
@@ -197,7 +205,7 @@
     <string name="chat_clear_history">Очистить историю</string>
     <string name="chat_stats_menu">Статистика чата</string>
     <string name="chat_export">Экспорт чата</string>
-    <string name="chat_screenshot">Сделать скриншот</string>
+    <string name="chat_screenshot">Сделать с��риншот</string>
     <string name="chat_screenshot_saved">Скриншот сохранён в галерею</string>
     <string name="chat_screenshot_error">Не удалось сделать скриншот</string>
     <string name="chat_delete_channel">Удалить канал</string>
@@ -346,6 +354,7 @@
     <string name="forward_section_groups">Группы</string>
     <string name="forward_section_personal">Личные чаты</string>
     <string name="forward_official_channel">Официальный канал · рассылка от админов</string>
+    <string name="forward_channel">Канал</string>
     <string name="forward_saved_messages">Сохранённые сообщения</string>
     <string name="forward_group_chat">Групповой чат</string>
     <string name="forward_chat_default">Чат</string>
@@ -512,19 +521,4 @@
     <string name="nav_chats_cd">Чаты</string>
     <string name="nav_nearby_cd">Рядом</string>
     <string name="nav_offline_cd">Офлайн</string>
-
-    <!-- Обучение (онбординг) после регистрации -->
-    <string name="onboarding_skip">Пропустить</string>
-    <string name="onboarding_next">Далее</string>
-    <string name="onboarding_start">Приступить</string>
-    <string name="onboarding_welcome_title">Добро пожаловать в Yodo!</string>
-    <string name="onboarding_welcome_desc">Быстро покажем, что умеет приложение. Это займёт меньше минуты — или пропустите обучение в любой момент.</string>
-    <string name="onboarding_chats_title">Чаты</string>
-    <string name="onboarding_chats_desc">Личные переписки, группы и каналы — в одном месте. Отправляйте сообщения, фото, голосовые и файлы.</string>
-    <string name="onboarding_nearby_title">Рядом</string>
-    <string name="onboarding_nearby_desc">Находите людей поблизости и знакомьтесь без обмена контактами.</string>
-    <string name="onboarding_offline_title">Офлайн-режим</string>
-    <string name="onboarding_offline_desc">Общайтесь с людьми рядом даже без интернета — через прямое соединение между устройствами.</string>
-    <string name="onboarding_settings_title">Профиль и настройки</string>
-    <string name="onboarding_settings_desc">Настройте тему, приватность и PIN-код, управляйте профилем и устройствами.</string>
 </resources>

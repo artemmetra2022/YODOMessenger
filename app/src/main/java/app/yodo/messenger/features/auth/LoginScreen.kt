@@ -70,6 +70,7 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit,
     onNavigateToRegister: () -> Unit,
     onNavigateToPhoneLogin: () -> Unit,
+    onNavigateToForgotPassword: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     var emailOrUsername by remember { mutableStateOf("") }
@@ -183,7 +184,17 @@ fun LoginScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                stringResource(R.string.login_forgot_password),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorTheme.primary,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .clickable { onNavigateToForgotPassword() }
+                    .padding(top = 12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             Button(
                 onClick = { viewModel.login(emailOrUsername, password) },

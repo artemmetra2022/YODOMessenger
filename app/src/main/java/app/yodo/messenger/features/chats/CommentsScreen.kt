@@ -236,12 +236,14 @@ fun CommentsScreen(
             items(comments, key = { it.id }) { comment ->
                 val (photoUrl, avatarBase64) = avatars[comment.senderId] ?: (null to null)
                 val isOwn = comment.senderId == viewModel.currentUserId
+                // НОВОЕ (модерация): свой комментарий или админ (2 почты) — можно удалить любой.
+                val canDelete = isOwn || viewModel.isGlobalAdmin
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .combinedClickable(
                             onClick = {},
-                            onLongClick = if (isOwn) { { deleteTarget = comment } } else null
+                            onLongClick = if (canDelete) { { deleteTarget = comment } } else null
                         )
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.Top

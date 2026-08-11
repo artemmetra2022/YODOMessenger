@@ -35,14 +35,20 @@ class CreateChannelViewModel @Inject constructor(
     fun setAvatar(bitmap: Bitmap) { _avatarBitmap.value = bitmap }
     fun clearAvatar() { _avatarBitmap.value = null }
 
-    fun createChannel(title: String, description: String) {
+    // НОВОЕ (режимы доступа): выбранный режим доступа канала (по умолчанию — открытый).
+    fun createChannel(
+        title: String,
+        description: String,
+        accessMode: app.yodo.messenger.domain.model.ChannelAccessMode =
+            app.yodo.messenger.domain.model.ChannelAccessMode.OPEN
+    ) {
         if (title.isBlank()) {
             _uiState.value = _uiState.value.copy(errorMessage = "Введите название канала")
             return
         }
         _uiState.value = _uiState.value.copy(isCreating = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = chatRepository.createChannel(title, description, _avatarBitmap.value)) {
+            when (val result = chatRepository.createChannel(title, description, _avatarBitmap.value, accessMode)) {
                 is CreateChatResult.Success -> {
                     _uiState.value = _uiState.value.copy(isCreating = false)
                     _createdChatId.value = result.chatId

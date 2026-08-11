@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.domain.model.Post
+import app.yodo.messenger.domain.model.PostComment
 import app.yodo.messenger.domain.repository.PostRepository
 import app.yodo.messenger.domain.repository.PostResult
 import com.google.firebase.auth.FirebaseAuth
@@ -59,6 +60,72 @@ class PostsViewModel @Inject constructor(
     fun deletePost(postId: String) {
         viewModelScope.launch {
             postRepository.deletePost(postId)
+        }
+    }
+
+    // НОВОЕ (VK-стиль): лайк/дизлайк поста.
+    fun toggleLike(postId: String) {
+        viewModelScope.launch { postRepository.toggleLike(postId) }
+    }
+
+    // НОВОЕ (VK-стиль): отметить просмотр поста (один раз за сессию на каждый пост).
+    private val viewedPostIds = mutableSetOf<String>()
+    fun registerView(postId: String) {
+        if (!viewedPostIds.add(postId)) return
+        viewModelScope.launch { postRepository.registerView(postId) }
+    }
+
+    // НОВОЕ (AK): комментарии под постом.
+    // Комментарии грузятся только для открытого поста, чтобы не держать десятки
+    // лишних подписок на всю стену сразу.
+    private val _openCommentsPostId = MutableStateFlow<String?>(null)
+    val openCommentsPostId: StateFlow<String?> = _openCommentsPostId
+
+    private val _comments = MutableStateFlow<List<PostComment>>(emptyList())
+    val comments: StateFlow<List<PostComment>> = _comments
+
+    private val _isSendingComment = MutableStateFlow(false)
+    val isSendingComment: StateFlow<Boolean> = _isSendingComment
+
+    private var commentsJob: kotlinx.coroutines.Job? = null
+
+    fun openComments(postId: String) {
+        if (_openCommentsPostId.value == postId) return
+        _openCommentsPostId.value = postId
+        _comments.value = emptyList()
+        commentsJob?.cancel()
+        commentsJob = viewModelScope.launch {
+            postRepository.observeComments(postId).collect { _comments.value = it }
+        }
+    }
+
+    fun closeComments() {
+        commentsJob?.cancel()
+        commentsJob = null
+        _openCommentsPostId.value = null
+        _comments.value = emptyList()
+    }
+
+    fun sendComment(text: String) {
+        val postId = _openCommentsPostId.value ?: return
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            _isSendingComment.value = true
+            when (val result = postRepository.addComment(postId, text)) {
+                is PostResult.Success -> { /* список обновится через observeComments */ }
+                is PostResult.Error -> _errorMessage.value = result.message
+            }
+            _isSendingComment.value = false
+        }
+    }
+
+    fun deleteComment(commentId: String) {
+        val postId = _openCommentsPostId.value ?: return
+        viewModelScope.launch {
+            when (val result = postRepository.deleteComment(postId, commentId)) {
+                is PostResult.Success -> {}
+                is PostResult.Error -> _errorMessage.value = result.message
+            }
         }
     }
 

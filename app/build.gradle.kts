@@ -113,6 +113,19 @@ dependencies {
     // QR-код — только ядро ZXing (без Android Embedded, рисуем на Canvas сами)
     implementation("com.google.zxing:core:3.5.3")
 
+    // НОВОЕ (сквозное шифрование): Google Tink — гибридное шифрование HPKE (X25519 + AES-256-GCM).
+    implementation("com.google.crypto.tink:tink-android:1.13.0")
+
+    // НОВОЕ (офлайн обмен контактами по QR): CameraX для встроенного сканера QR-кодов.
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+    // НОВОЕ (офлайн обмен контактами по QR): полноценный Guava, а не только пустышка
+    // listenablefuture:1.0 — иначе Kotlin не может разрешить тип ListenableFuture,
+    // который возвращает ProcessCameraProvider.getInstance(...) из camera-lifecycle.
+    implementation("com.google.guava:guava:31.0.1-android")
+
     // Firebase (Auth / FCM / Storage) — временный backend до готовности своего сервера
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-auth-ktx")

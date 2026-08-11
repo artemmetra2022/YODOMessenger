@@ -1,5 +1,6 @@
 package app.yodo.messenger.data.repository
 
+import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.Comment
@@ -31,7 +32,8 @@ import javax.inject.Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val firebaseAuth: FirebaseAuth,
-    private val userSettingsPreferences: UserSettingsPreferences
+    private val userSettingsPreferences: UserSettingsPreferences,
+    private val cryptoManager: CryptoManager
 ) : MessageRepository {
 
     override fun observeMessages(chatId: String): Flow<List<Message>> = callbackFlow {
@@ -70,7 +72,8 @@ class MessageRepositoryImpl @Inject constructor(
         chatId: String,
         data: MutableMap<String, Any?>,
         hasTtlOverride: Boolean = false,
-        ttlOverrideSeconds: Long? = null
+        ttlOverrideSeconds: Long? = null,
+        silent: Boolean = false
     ): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
         return try {
@@ -82,6 +85,12 @@ class MessageRepositoryImpl @Inject constructor(
             data["timestamp"] = now
             data["status"] = "SENT"
             data["notified"] = false
+            // НОВОЕ (секретная фича «тихие публикации»): silent-пост не триггерит push
+            // (серверная функция уведомлений пропускает notified=true) и не «пикает».
+            if (silent) {
+                data["silent"] = true
+                data["notified"] = true
+            }
             // п.38 + переработка per-message: если пользователь явно выбрал таймер для этого
             // сообщения — используем его (в т.ч. явное "выключено"); иначе — TTL чата по умолчанию.
             val ttlSeconds = if (hasTtlOverride) ttlOverrideSeconds else chatSnapshot.getLong("disappearingTtlSeconds")
@@ -89,8 +98,10 @@ class MessageRepositoryImpl @Inject constructor(
                 data["expiresAt"] = now + ttlSeconds * 1000L
             }
             val newDocRef = chatRef.collection("messages").add(data).await()
-            val previewText = (data["text"] as? String)?.takeIf { it.isNotBlank() }
+            val previewText = if (data["encrypted"] == true) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
                 ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
+                else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
+                else if (data.containsKey("imagesBase64")) "📷 Фото (${(data["imagesBase64"] as? List<*>)?.size ?: 1})"
                 else if (data.containsKey("imageBase64")) "📷 Фото"
                 else if (data.containsKey("locationLat")) "📍 Геопозиция"
                 else if (data.containsKey("fileBase64")) "📎 ${data["fileName"] as? String ?: "Файл"}"
@@ -104,12 +115,12 @@ class MessageRepositoryImpl @Inject constructor(
             }
             chatRef.update(unreadUpdates).await()
             SendMessageResult.Success(messageId = newDocRef.id)
-        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отправить сообщение")) }
+        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не ��далось отправить сообщение")) }
     }
 
     override suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext?,
-        hasTtlOverride: Boolean, ttlOverrideSeconds: Long?
+        hasTtlOverride: Boolean, ttlOverrideSeconds: Long?, silent: Boolean
     ): SendMessageResult {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Сообщение не может быть пустым")
@@ -119,12 +130,89 @@ class MessageRepositoryImpl @Inject constructor(
             data["replyToSenderName"] = replyTo.senderName
             data["replyToText"] = replyTo.text
         }
-        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds)
+        // НОВОЕ (сквозное шифрование): для личных чатов шифруем текст под ключи участников.
+        tryEncryptTextData(chatId, data)
+        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent)
     }
 
-    override suspend fun sendImageMessage(chatId: String, imageBase64: String, caption: String): SendMessageResult {
+    /**
+     * НОВОЕ (сквозное шифрование, E2EE). Пытается зашифровать текст сообщения для личного
+     * (1-на-1) чата под публичные ключи ОБОИХ участников. При успехе кладёт encByUid
+     * (карту uid -> шифртекст base64), флаг encrypted=true и очищает открытый text, чтобы
+     * на сервере не оставалось читаемого текста. Если чат не личный, участников не двое или
+     * у кого-то нет опубликованного ключа — оставляет обычный текст (плавная деградация).
+     */
+    private suspend fun tryEncryptTextData(chatId: String, data: MutableMap<String, Any?>) {
+        try {
+            val text = data["text"] as? String
+            if (text.isNullOrEmpty()) return
+            val chatSnap = firestore.collection("chats").document(chatId).get().await()
+            val type = chatSnap.getString("type")
+            if (type != null && type != "private") return
+            val participantIds = (chatSnap.get("participantIds") as? List<*>)
+                ?.filterIsInstance<String>() ?: return
+            if (participantIds.size != 2) return
+            val encMap = cryptoManager.encryptForParticipants(participantIds, text) ?: return
+            data["encByUid"] = encMap
+            data["encrypted"] = true
+            data["text"] = ""
+        } catch (e: Exception) {
+            android.util.Log.w("MessageRepositoryImpl", "tryEncryptTextData failed; sending plaintext", e)
+        }
+    }
+
+    override suspend fun sendImageMessage(
+        chatId: String, imageBase64: String, caption: String, isViewOnce: Boolean
+    ): SendMessageResult {
         val data = mutableMapOf<String, Any?>("imageBase64" to imageBase64, "text" to caption.trim())
+        if (isViewOnce) {
+            data["isViewOnce"] = true
+            data["viewOnceOpened"] = false
+        }
         return sendRawMessage(chatId, data)
+    }
+
+    // НОВОЕ (несколько фото): все выбранные фото сохраняются одним массивом
+    // imagesBase64 в одном документе — так они отображаются как единое сообщение-альбом,
+    // а не несколько отдельных сообщений подряд.
+    override suspend fun sendImagesMessage(
+        chatId: String, imagesBase64: List<String>, caption: String
+    ): SendMessageResult {
+        val images = imagesBase64.filter { it.isNotBlank() }
+        if (images.isEmpty()) return SendMessageResult.Error("Нет фото для отправки")
+        // Одно фото — отправляем как обычное imageBase64 (совместимость со старыми клиентами).
+        if (images.size == 1) {
+            return sendRawMessage(chatId, mutableMapOf("imageBase64" to images.first(), "text" to caption.trim()))
+        }
+        val data = mutableMapOf<String, Any?>(
+            "imagesBase64" to images,
+            // Для старых клиентов без поддержки альбомов показываем хотя бы первое фото.
+            "imageBase64" to images.first(),
+            "text" to caption.trim()
+        )
+        return sendRawMessage(chatId, data)
+    }
+
+    // НОВОЕ (одноразовые медиа): удаляем imageBase64 из документа в Firestore, как только
+    // получатель открыл view-once фото полноэкранно — так фото реально стирается на сервере,
+    // а не просто прячется в UI (иначе оно осталось бы читаемым при повторном открытии чата
+    // или с другого устройства). senderId не трогаем, обновление разрешено правилами и для
+    // получателя (см. firestore.rules — отдельное условие для view-once полей).
+    override suspend fun markViewOnceImageOpened(chatId: String, messageId: String) {
+        try {
+            firestore.collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+                .update(
+                    mapOf(
+                        "imageBase64" to FieldValue.delete(),
+                        "viewOnceOpened" to true
+                    )
+                ).await()
+        } catch (_: Exception) {
+            // Если не получилось стереть на сервере (например, нет сети) — просто не открываем
+            // повторно локально; при следующем успешном подключении получатель может повторить
+            // попытку, открыв фото ещё раз (idempotent: повторный delete/true ничего не ломает).
+        }
     }
 
     override suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long): SendMessageResult {
@@ -167,13 +255,19 @@ class MessageRepositoryImpl @Inject constructor(
         options: List<String>,
         isAnonymous: Boolean,
         allowMultipleAnswers: Boolean,
-        closesAtMillis: Long?
+        closesAtMillis: Long?,
+        isQuiz: Boolean,
+        correctOptionIndex: Int?,
+        explanation: String?
     ): SendMessageResult {
         val trimmedQuestion = question.trim()
         val cleanOptions = options.map { it.trim() }.filter { it.isNotEmpty() }
         if (trimmedQuestion.isEmpty()) return SendMessageResult.Error("Введите вопрос опроса")
         if (cleanOptions.size < 2) return SendMessageResult.Error("Добавьте минимум 2 варианта ответа")
         if (cleanOptions.size > 10) return SendMessageResult.Error("Максимум 10 вариантов ответа")
+        if (isQuiz && (correctOptionIndex == null || correctOptionIndex !in cleanOptions.indices)) {
+            return SendMessageResult.Error("Укажите правильный вариант ответа для викторины")
+        }
 
         val pollMap = mutableMapOf<String, Any?>(
             "question" to trimmedQuestion,
@@ -181,9 +275,14 @@ class MessageRepositoryImpl @Inject constructor(
             "votesByOption" to emptyMap<String, List<String>>(),
             "isAnonymous" to isAnonymous,
             "allowMultipleAnswers" to allowMultipleAnswers,
-            "isClosed" to false
+            "isClosed" to false,
+            "isQuiz" to isQuiz
         )
         closesAtMillis?.let { pollMap["closesAt"] = it }
+        if (isQuiz) {
+            correctOptionIndex?.let { pollMap["correctOptionIndex"] = it }
+            explanation?.trim()?.takeIf { it.isNotEmpty() }?.let { pollMap["explanation"] = it }
+        }
 
         val data = mutableMapOf<String, Any?>(
             "text" to "",
@@ -194,7 +293,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     // НОВОЕ (расширенные опросы): голосование хранится по индексам вариантов, чтобы
     // избежать проблем с одинаковыми/изменёнными текстами вариантов (как votesByOption
-    // в модели Poll). Транзакция гарантирует атомарность при одновременном голосовании.
+    // в модели Poll). Транзакция гарантирует атомарность при од��овременном голосовании.
     override suspend fun voteOnPoll(chatId: String, messageId: String, optionIndex: Int): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
         val messageRef = firestore.collection("chats").document(chatId)
@@ -368,11 +467,20 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun forwardMessage(targetChatId: String, originalMessage: Message, fromSenderName: String, fromSenderId: String): SendMessageResult {
+        // НОВОЕ (одноразовые медиа): view-once фото пересылать нельзя — иначе пересланная
+        // копия превратилась бы в обычное, сколько угодно раз открываемое изображение,
+        // что противоречит смыслу "один просмотр".
+        if (originalMessage.isViewOnce) {
+            return SendMessageResult.Error("Фото «на один просмотр» нельзя переслать")
+        }
         val data = mutableMapOf<String, Any?>(
             "text" to originalMessage.text,
             "forwardedFromSenderName" to fromSenderName,
             "forwardedFromSenderId" to fromSenderId
         )
+        if (originalMessage.imagesBase64.isNotEmpty()) {
+            data["imagesBase64"] = originalMessage.imagesBase64
+        }
         originalMessage.imageBase64?.let { data["imageBase64"] = it }
         originalMessage.fileBase64?.let {
             data["fileBase64"] = it
@@ -444,6 +552,31 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
+    // НОВОЕ (F3 статистика постов канала): регистрируем уникальный просмотр поста.
+    // viewedBy — множество uid просмотревших, viewCount — денормализованный счётчик.
+    // Разрешено любому авторизованному пользователю (правила ограничивают набор полей).
+    override suspend fun registerPostView(chatId: String, messageId: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        val messageRef = firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+        try {
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(messageRef)
+                val viewedBy = (snapshot.get("viewedBy") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                if (uid !in viewedBy) {
+                    transaction.update(
+                        messageRef,
+                        mapOf(
+                            "viewedBy" to FieldValue.arrayUnion(uid),
+                            "viewCount" to FieldValue.increment(1)
+                        )
+                    )
+                }
+                null
+            }.await()
+        } catch (e: Exception) { }
+    }
+
     override suspend fun toggleReaction(chatId: String, messageId: String, emoji: String) {
         val uid = firebaseAuth.currentUser?.uid ?: return
         val messageRef = firestore.collection("chats").document(chatId)
@@ -503,12 +636,16 @@ class MessageRepositoryImpl @Inject constructor(
             } else {
                 val msgDoc = firestore.collection("chats").document(chatId)
                     .collection("messages").document(messageId).get().await()
+                // НОВОЕ (одноразовые медиа): не сохраняем imageBase64 view-once сообщения в
+                // избранное — это была бы постоянная копия того, что должно исчезнуть после
+                // одного просмотра.
+                val isViewOnceMsg = msgDoc.getBoolean("isViewOnce") ?: false
                 bookmarkRef.set(mapOf(
                     "messageId" to messageId, "chatId" to chatId,
                     "senderId" to (msgDoc.getString("senderId") ?: ""),
                     "text" to (msgDoc.getString("text") ?: ""),
                     "timestamp" to (msgDoc.getLong("timestamp") ?: 0L),
-                    "imageBase64" to msgDoc.getString("imageBase64"),
+                    "imageBase64" to if (isViewOnceMsg) null else msgDoc.getString("imageBase64"),
                     "savedAt" to System.currentTimeMillis()
                 )).await()
             }
@@ -671,6 +808,20 @@ class MessageRepositoryImpl @Inject constructor(
 
     /** НОВОЕ: общий маппинг документа в Message — используется в observeMessages,
      *  observeMessage и getRecentMessages, чтобы не дублировать разбор полей. */
+    /**
+     * НОВОЕ (сквозное шифрование, E2EE). Возвращает отображаемый текст сообщения. Если оно
+     * зашифровано (encrypted=true), достаёт наш шифртекст из encByUid по нашему uid и
+     * расшифровывает локальным приватным ключом. Плейсхолдеры — если ключа/данных нет.
+     */
+    private fun decryptMessageText(doc: DocumentSnapshot): String {
+        val encrypted = doc.getBoolean("encrypted") ?: false
+        if (!encrypted) return doc.getString("text") ?: ""
+        val myUid = firebaseAuth.currentUser?.uid
+        val encMap = doc.get("encByUid") as? Map<*, *>
+        val cipher = encMap?.get(myUid) as? String ?: return "🔒 Зашифрованное сообщение"
+        return cryptoManager.decrypt(cipher) ?: "🔒 Не удалось расшифровать"
+    }
+
     private fun mapDocToMessage(doc: DocumentSnapshot, chatId: String): Message? {
         return try {
             val reactionsRaw = doc.get("reactions") as? Map<*, *>
@@ -682,7 +833,7 @@ class MessageRepositoryImpl @Inject constructor(
             Message(
                 id = doc.id, chatId = chatId,
                 senderId = doc.getString("senderId") ?: return null,
-                text = doc.getString("text") ?: "",
+                text = decryptMessageText(doc),
                 timestamp = doc.getLong("timestamp") ?: 0L,
                 status = doc.getString("status")?.let { raw ->
                     runCatching { MessageStatus.valueOf(raw) }.getOrDefault(MessageStatus.SENT)
@@ -692,6 +843,7 @@ class MessageRepositoryImpl @Inject constructor(
                 replyToText = doc.getString("replyToText"),
                 reactions = reactions,
                 imageBase64 = doc.getString("imageBase64"),
+                imagesBase64 = (doc.get("imagesBase64") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 isEdited = doc.getBoolean("isEdited") ?: false,
                 isDeleted = doc.getBoolean("isDeleted") ?: false,
                 forwardedFromSenderName = doc.getString("forwardedFromSenderName"),
@@ -707,7 +859,10 @@ class MessageRepositoryImpl @Inject constructor(
                 locationLat = doc.getDouble("locationLat"),
                 locationLng = doc.getDouble("locationLng"),
                 commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt(),
-                poll = mapDocToPoll(doc)
+                poll = mapDocToPoll(doc),
+                isViewOnce = doc.getBoolean("isViewOnce") ?: false,
+                viewOnceOpened = doc.getBoolean("viewOnceOpened") ?: false,
+                viewCount = (doc.getLong("viewCount") ?: 0L).toInt()
             )
         } catch (e: Exception) { null }
     }

@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,12 +61,22 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Call
 import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.features.security.SecurityViewModel
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.YodoError
 import app.yodo.messenger.util.BirthDateValidator
+import app.yodo.messenger.util.EmojiOnlyValidator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -78,10 +90,17 @@ fun ProfileScreen(
     onOpenRecentCalls: () -> Unit = {},
     onOpenDevices: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
-    viewModel: ProfileViewModel = hiltViewModel()
+    viewModel: ProfileViewModel = hiltViewModel(),
+    securityViewModel: SecurityViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val colorTheme = LocalColorTheme.current
+
+    // НОВОЕ: эмодзи-статус и текстовый статус теперь настраиваются прямо в профиле, рядом с аватаркой.
+    val emojiStatus by securityViewModel.emojiStatus.collectAsState(initial = "")
+    val customStatus by securityViewModel.customStatus.collectAsState(initial = "")
+    var showEmojiPicker by remember { mutableStateOf(false) }
+    var showStatusEditor by remember { mutableStateOf(false) }
 
     var name by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -93,6 +112,8 @@ fun ProfileScreen(
     var initialized by remember { mutableStateOf(false) }
     var showBirthDatePicker by remember { mutableStateOf(false) }
     var birthDateError by remember { mutableStateOf<String?>(null) }
+    // НОВОЕ (кнопка «Ещё»): меню быстрых действий профиля.
+    var showMoreMenu by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     val updateJobs = remember { mutableMapOf<String, Job>() }
@@ -164,9 +185,13 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Box(
-                modifier = Modifier.size(112.dp).clickable { imagePicker.launch("image/*") },
+                modifier = Modifier.size(112.dp),
                 contentAlignment = Alignment.Center
             ) {
+                Box(
+                    modifier = Modifier.fillMaxSize().clickable { imagePicker.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
                 UserAvatar(
                     displayName = uiState.user?.displayName.orEmpty(),
                     photoUrl = uiState.user?.photoUrl,
@@ -188,6 +213,29 @@ fun ProfileScreen(
                         }
                     }
                 }
+                }
+
+                // НОВОЕ: эмодзи-статус — бейдж поверх аватарки, нажатие открывает выбор смайлика.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .clickable { showEmojiPicker = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (emojiStatus.isNotBlank()) {
+                        Text(emojiStatus, style = MaterialTheme.typography.titleMedium)
+                    } else {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Добавить эмодзи-статус",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -200,7 +248,29 @@ fun ProfileScreen(
             uiState.user?.username?.takeIf { it.isNotBlank() }?.let {
                 Text("@$it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // НОВОЕ (AE): публичный ID — можно нажать, чтобы скопировать.
+            uiState.user?.publicId?.takeIf { it.isNotBlank() }?.let { pid ->
+                val clipboard = LocalClipboardManager.current
+                Text(
+                    "ID: $pid",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .clickable { clipboard.setText(AnnotatedString(pid)) }
+                )
+            }
             Text(stringResource(R.string.profile_online), style = MaterialTheme.typography.bodyMedium, color = colorTheme.primary)
+
+            // НОВОЕ: текстовый статус — тоже рядом с аватаркой/именем, нажатие открывает редактор.
+            Text(
+                text = customStatus.takeIf { it.isNotBlank() } ?: "Добавить статус",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (customStatus.isNotBlank()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clickable { showStatusEditor = true }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -209,7 +279,36 @@ fun ProfileScreen(
                 ProfileQuickAction(Icons.Filled.Edit, stringResource(R.string.profile_edit_cd)) { imagePicker.launch("image/*") }
                 ProfileQuickAction(Icons.Filled.History, stringResource(R.string.profile_history_cd), onOpenHistory)
                 ProfileQuickAction(Icons.Filled.QrCode, stringResource(R.string.profile_qr_code), onOpenQrCode)
-                ProfileQuickAction(Icons.Filled.MoreHoriz, stringResource(R.string.profile_more_cd)) {}
+                Box {
+                    ProfileQuickAction(Icons.Filled.MoreHoriz, stringResource(R.string.profile_more_cd)) { showMoreMenu = true }
+                    DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.profile_favorites)) },
+                            leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null, tint = colorTheme.primary) },
+                            onClick = { showMoreMenu = false; viewModel.openSavedMessages() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.profile_history_cd)) },
+                            leadingIcon = { Icon(Icons.Filled.History, contentDescription = null) },
+                            onClick = { showMoreMenu = false; onOpenHistory() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.profile_qr_code)) },
+                            leadingIcon = { Icon(Icons.Filled.QrCode, contentDescription = null) },
+                            onClick = { showMoreMenu = false; onOpenQrCode() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.profile_devices)) },
+                            leadingIcon = { Icon(Icons.Filled.Devices, contentDescription = null) },
+                            onClick = { showMoreMenu = false; onOpenDevices() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.profile_recent_calls)) },
+                            leadingIcon = { Icon(Icons.Filled.Call, contentDescription = null) },
+                            onClick = { showMoreMenu = false; onOpenRecentCalls() }
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -370,6 +469,125 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+
+    if (showEmojiPicker) {
+        EmojiStatusPickerDialog(
+            current = emojiStatus,
+            onPick = { picked -> securityViewModel.setEmojiStatus(picked) },
+            onDismiss = { showEmojiPicker = false }
+        )
+    }
+
+    if (showStatusEditor) {
+        TextStatusEditorDialog(
+            current = customStatus,
+            onSave = { text -> securityViewModel.setCustomStatus(text) },
+            onDismiss = { showStatusEditor = false }
+        )
+    }
+}
+
+// НОВОЕ: выбор эмодзи-статуса — только один смайлик, текст вводить нельзя.
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun EmojiStatusPickerDialog(
+    current: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var draft by remember { mutableStateOf(current) }
+    val presets = listOf("🔥", "🚀", "💼", "🌴", "❤️", "😴", "🎯", "☕", "📚", "🎮")
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Эмодзи-статус") },
+        text = {
+            Column {
+                Text(
+                    "Один смайлик рядом с вашей аватаркой.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presets.forEach { e ->
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (draft == e) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .clickable { draft = e },
+                            contentAlignment = Alignment.Center
+                        ) { Text(e, style = MaterialTheme.typography.titleLarge) }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                // Своё эмодзи: поле принимает только один смайлик, остальной ввод (текст) обрезается.
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { input -> draft = EmojiOnlyValidator.sanitize(input) },
+                    label = { Text("Свой эмодзи") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onPick(draft.trim()); onDismiss() }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onPick(""); onDismiss() }) { Text("Убрать") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            }
+        }
+    )
+}
+
+// НОВОЕ: редактор текстового статуса ("На встрече", "В отпуске" и т.п.).
+@Composable
+private fun TextStatusEditorDialog(
+    current: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var draft by remember { mutableStateOf(current) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Текстовый статус") },
+        text = {
+            Column {
+                Text(
+                    "Например: «На встрече», «В отпуске», «Не беспокоить».",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    label = { Text("Статус") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(draft.trim()); onDismiss() }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave(""); onDismiss() }) { Text("Убрать") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            }
+        }
+    )
 }
 
 @Composable

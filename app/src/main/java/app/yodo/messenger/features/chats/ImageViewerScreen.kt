@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
@@ -95,13 +96,21 @@ fun ImageViewerScreen(
     var imageAlpha by remember { mutableFloatStateOf(0f) }
     
     // Данные изображения
-    val imageBase64 = ImageViewerHolder.imageBase64
+    // НОВОЕ (V): поддержка альбома — несколько фото можно листать.
+    val images = remember { ImageViewerHolder.effectiveImages() }
+    var pageIndex by remember { mutableStateOf(ImageViewerHolder.initialIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))) }
+    val imageBase64 = images.getOrNull(pageIndex)
     val senderName = ImageViewerHolder.senderName ?: "Фото"
     val timestamp = ImageViewerHolder.timestamp
     
     // Очистка при выходе
     DisposableEffect(Unit) {
         onDispose { ImageViewerHolder.clear() }
+    }
+
+    // При смене фото сбрасываем зум/смещение.
+    LaunchedEffect(pageIndex) {
+        scale = 1f; offsetXValue = 0f; offsetYValue = 0f
     }
     
     // Декодирование изображения
@@ -161,7 +170,7 @@ fun ImageViewerScreen(
                             }
                         }) {
                             if (isSaving) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
-                            else Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = Color.White)
+                            else Icon(Icons.Filled.Download, contentDescription = "��качать", tint = Color.White)
                         }
                         IconButton(onClick = { scope.launch { shareImage(context, bitmap) } }) {
                             Icon(Icons.Filled.Share, contentDescription = "Поделиться", tint = Color.White)
@@ -198,7 +207,13 @@ fun ImageViewerScreen(
                             detectTapGestures(
                                 onDoubleTap = { tapOffset ->
                                     scope.launch {
-                                        if (scale > 1f) {
+                                        // ИСПРАВЛЕНО (двойной тап): ступенчатый зум 1.5х → 3х → обратно 1х.
+                                        val next = when {
+                                            scale < 1.4f -> 1.5f
+                                            scale < 2.9f -> 3f
+                                            else -> 1f
+                                        }
+                                        if (next == 1f) {
                                             scale = 1f
                                             animateOffsetTo(settleAnim, 0f, 0f,
                                                 onXY = { x, y -> offsetXValue = x; offsetYValue = y },
@@ -206,8 +221,13 @@ fun ImageViewerScreen(
                                         } else {
                                             val centerX = size.width / 2f
                                             val centerY = size.height / 2f
-                                            scale = 2.5f
-                                            animateOffsetTo(settleAnim, centerX - tapOffset.x, centerY - tapOffset.y,
+                                            scale = next
+                                            // Смещаем к точке тапа пропорционально масштабу, но в пределах картинки.
+                                            val maxOffsetX = (size.width * (next - 1f)) / 2f
+                                            val maxOffsetY = (size.height * (next - 1f)) / 2f
+                                            val targetX = ((centerX - tapOffset.x) * (next - 1f)).coerceIn(-maxOffsetX, maxOffsetX)
+                                            val targetY = ((centerY - tapOffset.y) * (next - 1f)).coerceIn(-maxOffsetY, maxOffsetY)
+                                            animateOffsetTo(settleAnim, targetX, targetY,
                                                 onXY = { x, y -> offsetXValue = x; offsetYValue = y },
                                                 fromX = offsetXValue, fromY = offsetYValue)
                                         }
@@ -311,6 +331,38 @@ fun ImageViewerScreen(
                 )
             }
             
+            // НОВОЕ (V): листание нескольких фото — стрелки + индикатор "n / всего".
+            if (images.size > 1 && scale <= 1.1f) {
+                if (pageIndex > 0) {
+                    IconButton(
+                        onClick = { pageIndex-- },
+                        modifier = Modifier.align(Alignment.CenterStart).padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.4f), shape = androidx.compose.foundation.shape.CircleShape)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Предыдущее", tint = Color.White)
+                    }
+                }
+                if (pageIndex < images.size - 1) {
+                    IconButton(
+                        onClick = { pageIndex++ },
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.4f), shape = androidx.compose.foundation.shape.CircleShape)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Следующее", tint = Color.White)
+                    }
+                }
+                Text(
+                    "${pageIndex + 1} / ${images.size}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+
             // Индикатор масштаба
             if (scale > 1.1f) {
                 Text(

@@ -7,18 +7,26 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import app.yodo.messenger.features.auth.ForgotPasswordScreen
 import app.yodo.messenger.features.auth.LoginScreen
 import app.yodo.messenger.features.auth.PhoneLoginScreen
 import app.yodo.messenger.features.auth.RegisterScreen
 import app.yodo.messenger.features.auth.WelcomeScreen
+import app.yodo.messenger.features.auth.GlobalBlockGateScreen
+import app.yodo.messenger.features.auth.GlobalBlockViewModel
 import app.yodo.messenger.features.chats.ChatScreen
 import app.yodo.messenger.features.chats.ChatStatsScreen
 // НОВОЕ (переработка каналов): три новых экрана
@@ -33,7 +41,6 @@ import app.yodo.messenger.features.chats.ImageViewerScreen
 import app.yodo.messenger.features.contacts.ContactsScreen
 import app.yodo.messenger.features.main.MainScreen
 import app.yodo.messenger.features.nearby.NearbyPeopleScreen
-import app.yodo.messenger.features.onboarding.OnboardingScreen
 import app.yodo.messenger.features.profile.ProfileScreen
 import app.yodo.messenger.features.profile.UserProfileScreen
 import app.yodo.messenger.features.search.SearchScreen
@@ -46,6 +53,10 @@ fun YodoNavGraph(
     navController: NavHostController = rememberNavController(),
     startDestination: String = Routes.Welcome.route
 ) {
+    // НОВОЕ (AD): вьюмодель глобальной блокировки на уровне всего навиграфа.
+    val globalBlockViewModel: GlobalBlockViewModel = hiltViewModel()
+    val globalBlock by globalBlockViewModel.globalBlock.collectAsState()
+    Box(modifier = Modifier.fillMaxSize()) {
     NavHost(
         navController = navController,
         startDestination = startDestination,
@@ -66,32 +77,44 @@ fun YodoNavGraph(
                     }
                 },
                 onNavigateToRegister = { navController.navigate(Routes.Register.route) },
-                onNavigateToPhoneLogin = { navController.navigate(Routes.PhoneLogin.route) }
+                onNavigateToPhoneLogin = { navController.navigate(Routes.PhoneLogin.route) },
+                onNavigateToForgotPassword = { navController.navigate(Routes.ForgotPassword.route) }
+            )
+        }
+        composable(Routes.ForgotPassword.route) {
+            ForgotPasswordScreen(
+                onBack = { navController.popBackStack() }
             )
         }
         composable(Routes.Register.route) {
             RegisterScreen(
                 onRegisterSuccess = {
-                    // После регистрации показываем обучение (онбординг),
-                    // убирая экраны Welcome/Register из стека.
-                    navController.navigate(Routes.Onboarding.route) {
+                    navController.navigate(Routes.ChatList.route) {
                         popUpTo(Routes.Welcome.route) { inclusive = true }
                     }
                 },
                 onNavigateToLogin = { navController.navigate(Routes.Login.route) }
             )
         }
-        // НОВОЕ: обучение после регистрации — обзор разделов; можно пропустить.
-        composable(Routes.Onboarding.route) {
-            OnboardingScreen(
-                onFinish = {
+        // НОВОЕ (Y): экран смены аккаунта.
+        composable(Routes.SwitchAccount.route) {
+            app.yodo.messenger.features.auth.SwitchAccountScreen(
+                onBack = { navController.popBackStack() },
+                onAddAccount = { navController.navigate(Routes.AddAccount.route) },
+                onSwitched = {
                     navController.navigate(Routes.ChatList.route) {
-                        popUpTo(Routes.Onboarding.route) { inclusive = true }
+                        popUpTo(navController.graph.id) { inclusive = true }
                     }
-                },
-                onSkip = {
+                }
+            )
+        }
+        // НОВОЕ (Y): отдельное окно добавления аккаунта.
+        composable(Routes.AddAccount.route) {
+            app.yodo.messenger.features.auth.AddAccountScreen(
+                onBack = { navController.popBackStack() },
+                onAdded = {
                     navController.navigate(Routes.ChatList.route) {
-                        popUpTo(Routes.Onboarding.route) { inclusive = true }
+                        popUpTo(navController.graph.id) { inclusive = true }
                     }
                 }
             )
@@ -139,6 +162,19 @@ fun YodoNavGraph(
                 // НОВОЕ (архивация чатов)
                 onOpenArchive = {
                     navController.navigate(Routes.ArchivedChats.route)
+                },
+                // НОВОЕ (чат поддержки): открытие админ-панели поддержки (только для админов).
+                onOpenAdminPanel = {
+                    navController.navigate(Routes.AdminPanel.route)
+                }
+            )
+        }
+        // НОВОЕ (чат поддержки): админ-панель со списком обращений в поддержку.
+        composable(Routes.AdminPanel.route) {
+            app.yodo.messenger.features.chats.AdminPanelScreen(
+                onBack = { navController.popBackStack() },
+                onOpenConversation = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId))
                 }
             )
         }
@@ -168,17 +204,27 @@ fun YodoNavGraph(
             )
         }
         // НОВОЕ: экраны-заглушки для блока профиля (История/QR-код/Звонки/Устройства)
+        // НОВОЕ (История изменений профиля): реальный экран вместо заглушки.
         composable(Routes.ProfileHistory.route) {
-            app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
-                title = "История",
-                icon = androidx.compose.material.icons.Icons.Filled.History,
-                description = "История изменений профиля появится здесь позже.",
+            app.yodo.messenger.features.profile.ProfileHistoryScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }
         composable(Routes.QrCode.route) {
             app.yodo.messenger.features.profile.QrCodeScreen(
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                onScanClick = { navController.navigate(Routes.ScanContact.route) }
+            )
+        }
+        // НОВОЕ (офлайн обмен контактами по QR): экран сканирования QR-кода контакта.
+        composable(Routes.ScanContact.route) {
+            app.yodo.messenger.features.contacts.ScanContactScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenChat = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId)) {
+                        popUpTo(Routes.ScanContact.route) { inclusive = true }
+                    }
+                }
             )
         }
         composable(Routes.RecentCalls.route) {
@@ -191,6 +237,17 @@ fun YodoNavGraph(
         }
         composable(Routes.Devices.route) {
             app.yodo.messenger.features.profile.DevicesScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (батч 7): экран «Фишки и инструменты».
+        composable(Routes.Tools.route) {
+            app.yodo.messenger.features.tools.ToolsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.SecurityCenter.route) {
+            app.yodo.messenger.features.security.SecurityCenterScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }
@@ -231,7 +288,20 @@ fun YodoNavGraph(
                 // НОВОЕ: "Пригласить в канал" из меню чата → экран выбора контактов.
                 onInviteToChannel = { cId ->
                     navController.navigate(Routes.InviteToChannel.createRoute(cId))
+                },
+                // НОВОЕ (поделиться контактом абонента): "Поделиться контактом" → QR-код контакта собеседника.
+                onShareContactQr = { otherUserId ->
+                    navController.navigate(Routes.ContactQr.createRoute(otherUserId))
                 }
+            )
+        }
+        // НОВОЕ (поделиться контактом абонента): QR-карточка контакта собеседника.
+        composable(
+            route = Routes.ContactQr.route,
+            arguments = listOf(navArgument(Routes.ContactQr.ARG_USER_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.contacts.ContactQrScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
         composable(Routes.ImageViewer.route) {
@@ -254,6 +324,9 @@ fun YodoNavGraph(
                 },
                 onOpenUserProfile = { userId ->
                     navController.navigate(Routes.UserProfile.createRoute(userId))
+                },
+                onManageRoles = { chatId ->
+                    navController.navigate(Routes.ManageRoles.createRoute(chatId))
                 },
                 // НОВОЕ: после удаления канала владельцем — назад в список чатов.
                 onChannelDeleted = {
@@ -304,6 +377,9 @@ fun YodoNavGraph(
                     navController.navigate(Routes.ChatList.route) {
                         popUpTo(Routes.ChatList.route) { inclusive = true }
                     }
+                },
+                onOpenManageRoles = { chatId ->
+                    navController.navigate(Routes.ManageRoles.createRoute(chatId))
                 }
             )
         }
@@ -313,6 +389,60 @@ fun YodoNavGraph(
         ) {
             ChatStatsScreen(
                 onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (система ролей с гранулярными правами): управление ролями участников.
+        composable(
+            route = Routes.ManageRoles.route,
+            arguments = listOf(navArgument(Routes.ManageRoles.ARG_CHAT_ID) { type = NavType.StringType })
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString(Routes.ManageRoles.ARG_CHAT_ID).orEmpty()
+            app.yodo.messenger.features.chats.ManageRolesScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenAdminLog = { navController.navigate(Routes.AdminLog.createRoute(chatId)) },
+                onOpenReportQueue = { navController.navigate(Routes.ReportQueue.createRoute(chatId)) }
+            )
+        }
+        // НОВОЕ (журнал действий администраторов): просмотр и фильтрация лога.
+        composable(
+            route = Routes.AdminLog.route,
+            arguments = listOf(navArgument(Routes.AdminLog.ARG_CHAT_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.chats.AdminLogScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (система жалоб с очередью, п.5 ТЗ): очередь жалоб и детальный просмотр.
+        composable(
+            route = Routes.ReportQueue.route,
+            arguments = listOf(navArgument(Routes.ReportQueue.ARG_CHAT_ID) { type = NavType.StringType })
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString(Routes.ReportQueue.ARG_CHAT_ID).orEmpty()
+            app.yodo.messenger.features.chats.ReportQueueScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenReport = { reportId ->
+                    navController.navigate(Routes.ReportDetail.createRoute(chatId, reportId))
+                }
+            )
+        }
+        composable(
+            route = Routes.ReportDetail.route,
+            arguments = listOf(
+                navArgument(Routes.ReportDetail.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument(Routes.ReportDetail.ARG_REPORT_ID) { type = NavType.StringType }
+            )
+        ) {
+            app.yodo.messenger.features.chats.ReportDetailScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (AC): глобальный раздел «Жалобы» для главных админов.
+        composable(Routes.ReportInbox.route) {
+            app.yodo.messenger.features.chats.ReportInboxScreen(
+                onBack = { navController.popBackStack() },
+                onOpenReport = { chatId, reportId ->
+                    navController.navigate(Routes.ReportDetail.createRoute(chatId, reportId))
+                }
             )
         }
         composable(Routes.CreateGroup.route) {
@@ -378,6 +508,15 @@ fun YodoNavGraph(
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 onProfileClick = { navController.navigate(Routes.Profile.route) },
+                // ИСПРАВЛЕНО (AB): кнопка «Заблокированные пользователи» теперь открывает экран.
+                onOpenBlockedUsers = { navController.navigate(Routes.BlockedUsers.route) },
+                // НОВОЕ (Y): открыть экран смены аккаунта.
+                onSwitchAccount = { navController.navigate(Routes.SwitchAccount.route) },
+                // НОВОЕ (батч 7): открыть «Фишки и инструменты».
+                onOpenTools = { navController.navigate(Routes.Tools.route) },
+                onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
+                // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
+                onOpenReports = { navController.navigate(Routes.ReportInbox.route) },
                 onLoggedOut = {
                     navController.navigate(Routes.Welcome.route) {
                         popUpTo(navController.graph.id) { inclusive = true }
@@ -407,16 +546,16 @@ fun YodoNavGraph(
                 }
             )
         }
-        // Заглушка: экран "Заблокированные пользователи" (упоминается в Settings).
+        // НОВОЕ (блокировка): реальный экран со списком заблокированных и разблокировкой.
         composable(Routes.BlockedUsers.route) {
-            app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
-                title = "Заблокированные",
-                icon = androidx.compose.material.icons.Icons.Filled.Block,
-                description = "Список заблокированных пользователей появится здесь.",
-                onBackClick = { navController.popBackStack() }
+            app.yodo.messenger.features.profile.BlockedUsersScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenProfile = { userId ->
+                    navController.navigate(Routes.UserProfile.createRoute(userId))
+                }
             )
         }
-        // Заглушка: "Избранное" как отдельный экран (альтернатива переходу через chatId).
+        // Заглушка: "Избранное" как от��ельный экран (альтернатива переходу через chatId).
         composable(Routes.SavedMessages.route) {
             app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
                 title = "Избранное",
@@ -433,9 +572,14 @@ fun YodoNavGraph(
             app.yodo.messenger.features.profile.ProfilePlaceholderScreen(
                 title = "Звонок",
                 icon = androidx.compose.material.icons.Icons.Filled.Call,
-                description = "Функция звонков находится в разработке.",
+                description = "Функция звонков находится �� разработке.",
                 onBackClick = { navController.popBackStack() }
             )
+        }
+    }
+        // НОВОЕ (AD): оверлей блокировки — перекрывает весь интерфейс, когда аккаунт заблокирован.
+        if (globalBlock != null) {
+            GlobalBlockGateScreen(viewModel = globalBlockViewModel)
         }
     }
 }

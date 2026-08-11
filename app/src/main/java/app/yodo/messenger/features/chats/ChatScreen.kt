@@ -1,9 +1,13 @@
 package app.yodo.messenger.features.chats
 
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Bolt
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,6 +54,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -67,11 +72,13 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.LocationOn
@@ -80,14 +87,17 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Photo
+import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
@@ -105,6 +115,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -134,6 +145,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -191,6 +203,7 @@ fun ChatScreen(
     onOpenComments: (chatId: String, messageId: String) -> Unit,
     onInviteToChannel: (String) -> Unit = {},
     onOpenChannelStats: (String) -> Unit = {},
+    onShareContactQr: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -202,6 +215,8 @@ fun ChatScreen(
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
     var inputText by remember { mutableStateOf("") }
+    // НОВОЕ (система жало��): сообщени��, на которое сейчас ��ткрыт диалог "Пожаловаться".
+    var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -210,6 +225,9 @@ fun ChatScreen(
     val focusManager = LocalFocusManager.current
 
     var showScheduledList by remember { mutableStateOf(false) }
+    // НОВОЕ: диалог «Быстрые ответы» (шаблоны из «Фишки и инструменты»).
+    var showQuickReplies by remember { mutableStateOf(false) }
+    val toolsPrefs = remember { context.getSharedPreferences("yodo_tools", Context.MODE_PRIVATE) }
 
     LaunchedEffect(uiState.initialDraft) {
         uiState.initialDraft?.let { if (inputText.isBlank()) inputText = it }
@@ -236,16 +254,44 @@ fun ChatScreen(
         }
     }
 
+    // НОВОЕ (одноразовые медиа): true, если следующее выбранное фото нужно отправить как
+    // "на один просмотр" — флаг выставляется перед запуском imagePicker в AttachMenuDialog
+    // и сбрасывается сразу после отправки.
+    var pendingImageIsViewOnce by remember { mutableStateOf(false) }
+    // НОВОЕ (одноразовые медиа): id сообщения, чьё view-once фото сейчас показано на весь
+    // экран поверх чата. Null — оверлей закрыт.
+    var viewOnceOverlayMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
+
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
+            val asViewOnce = pendingImageIsViewOnce
+            pendingImageIsViewOnce = false
             coroutineScope.launch {
                 val base64 = withContext(Dispatchers.Default) {
                     ImageUtils.compressChatImageToBase64(context, it)
                 }
-                if (base64 != null) viewModel.sendImage(base64)
+                if (base64 != null) viewModel.sendImage(base64, isViewOnce = asViewOnce)
                 else snackbarHostState.showSnackbar("Не удалось обработать фото")
+            }
+        }
+    }
+
+    // НОВОЕ (несколько фото): множественный выбор фото. Все выбранные фото
+    // сжимаются и отправляются ОДНИМ сообщением-альбомом (не подряд отдельными).
+    val multiImagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            val encoded = withContext(Dispatchers.Default) {
+                uris.mapNotNull { ImageUtils.compressChatImageToBase64(context, it) }
+            }
+            when {
+                encoded.isEmpty() -> snackbarHostState.showSnackbar("Не удалось обработать фото")
+                encoded.size == 1 -> viewModel.sendImage(encoded.first())
+                else -> viewModel.sendImages(encoded)
             }
         }
     }
@@ -274,6 +320,28 @@ fun ChatScreen(
     }
 
     var showAttachMenu by remember { mutableStateOf(false) }
+    // НОВОЕ (кар��и��ки и�� буфера + подпись): base64 картинки, ожидаю��ей подписью
+    // и подтверждения отправки (не моментальная отправка).
+    var pendingCaptionImageBase64 by remember { mutableStateOf<String?>(null) }
+
+    // НОВОЕ (картинки из буф����ра): читаем изображение из системного буфера обмена.
+    fun pasteImageFromClipboard() {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        val clip = cm?.primaryClip
+        val uri: Uri? = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).uri else null
+        if (uri == null) {
+            coroutineScope.launch { snackbarHostState.showSnackbar("В буфере обмена нет изображения") }
+            return
+        }
+        coroutineScope.launch {
+            val base64 = withContext(Dispatchers.Default) {
+                ImageUtils.compressChatImageToBase64(context, uri)
+            }
+            if (base64 != null) pendingCaptionImageBase64 = base64
+            else snackbarHostState.showSnackbar("Не удалось обработать изображение из буфера")
+        }
+    }
+
     var showLocationPicker by remember { mutableStateOf(false) }
     var showPollCreation by remember { mutableStateOf(false) }
 
@@ -294,14 +362,25 @@ fun ChatScreen(
     var showPerMessageTtlDialog by remember { mutableStateOf(false) }
     var messagesAreaWindowBounds by remember { mutableStateOf<android.graphics.Rect?>(null) }
 
+    // НОВОЕ (секретная фича «тихие публикации»): режим тихой публикации для каналов.
+    var channelSilentMode by remember { mutableStateOf(false) }
+    // НОВОЕ (лента новостей): выбранная тема новости для следующего поста официального канала.
+    var selectedNewsTopic by remember { mutableStateOf<String?>(null) }
+
     fun trySend() {
         if (inputText.isNotBlank()) {
+            // НОВОЕ (лента новостей): в официальном канале админ может указать тему новости (плитку).
+            val outgoing = if (uiState.isOfficialChannel && uiState.isAdmin)
+                app.yodo.messenger.domain.model.NewsTopic.encode(selectedNewsTopic, inputText)
+            else inputText
             viewModel.sendMessage(
-                inputText,
+                outgoing,
                 explicitTtlSeconds = pendingMessageTtlSeconds,
-                hasExplicitTtl = pendingMessageTtlExplicitlySet
+                hasExplicitTtl = pendingMessageTtlExplicitlySet,
+                silent = (uiState.chatType == "CHANNEL") && channelSilentMode
             )
             inputText = ""
+            selectedNewsTopic = null
             pendingMessageTtlSeconds = null
             pendingMessageTtlExplicitlySet = false
             if (hideKeyboardOnSend) {
@@ -502,6 +581,14 @@ fun ChatScreen(
                                             onClick = { showChatMenu = false; showDisappearingDialog = true }
                                         )
                                     }
+                                    // НОВОЕ (поделиться контактом аб��нента): делимся QR-кодом контакта ��обеседника, а не своего.
+                                    if (uiState.chatType == "PRIVATE" && uiState.otherUserId != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("Поделиться контактом абонента (QR)") },
+                                            leadingIcon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
+                                            onClick = { showChatMenu = false; onShareContactQr(uiState.otherUserId!!) }
+                                        )
+                                    }
                                     DropdownMenuItem(text = { Text("Очистить историю") }, onClick = { showChatMenu = false; viewModel.clearChatHistory() })
                                     DropdownMenuItem(text = { Text("Статистика чата") }, onClick = { showChatMenu = false; onOpenChatStats(chatId) })
                                     DropdownMenuItem(text = { Text("Экспорт чата") }, onClick = { showChatMenu = false; viewModel.exportChat(context) })
@@ -518,7 +605,7 @@ fun ChatScreen(
                                                 coroutineScope.launch {
                                                     val success = ChatScreenshotUtils.captureAndSaveChatScreenshot(context, window, bounds)
                                                     snackbarHostState.showSnackbar(
-                                                        if (success) "Скриншот сохранён в галерею" else "Не удалось сделать скриншот"
+                                                        if (success) "Скриншот сохр��нён в галерею" else "Не удалось сделать скриншот"
                                                     )
                                                 }
                                             }
@@ -562,8 +649,11 @@ fun ChatScreen(
                     }
                 )
                 if (uiState.disappearingTtlSeconds != null) {
+                    // ИСПРАВЛЕНО (AH): индикатор таймера в прямоугольнике со скруглёнными углами.
                     Row(
                         modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(horizontal = 16.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -594,7 +684,7 @@ fun ChatScreen(
                         Icon(Icons.Filled.PushPin, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(16.dp))
                         Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                             Text("Закреплённое сообщение", style = MaterialTheme.typography.labelSmall, color = colorTheme.primary, fontWeight = FontWeight.Bold)
-                            Text(pinned.text.ifBlank { "📷 Фото" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(pinned.text.ifBlank { "📷 Фо��о" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Icon(
                             Icons.Filled.Close,
@@ -613,7 +703,7 @@ fun ChatScreen(
                     if (showUnpinConfirm) {
                         AlertDialog(
                             onDismissRequest = { showUnpinConfirm = false },
-                            title = { Text("Открепить сообщение?") },
+                            title = { Text("От��репить сообщение?") },
                             text = { Text("Сообщение будет откреплено из этого чата.") },
                             confirmButton = {
                                 TextButton(onClick = {
@@ -632,8 +722,11 @@ fun ChatScreen(
         bottomBar = {
             Column {
                 if (uiState.scheduledMessages.isNotEmpty()) {
+                    // ИСПРАВЛЕНО (AH): индикатор отложенных сообщений в прямоугольнике со скруглёнными углами.
                     Row(
                         modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable { showScheduledList = true }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -829,6 +922,38 @@ fun ChatScreen(
                             }
                         }
                     }
+                    // ПЕРЕНЕСЕНО (X): тумблер обычная/тихая публикация теперь в долгом нажатии кнопки отправки (см. MessageInputBar).
+                    // НОВОЕ (лента новостей): выбор темы новости (плитки) — только админу официального канала.
+                    if (isChannel && uiState.isAdmin && uiState.isOfficialChannel) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Тема:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            app.yodo.messenger.domain.model.NewsTopic.TOPICS.forEach { topic ->
+                                val selected = selectedNewsTopic == topic
+                                Text(
+                                    topic,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (selected) Color.White else colorTheme.primary,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (selected) colorTheme.primary else colorTheme.primary.copy(alpha = 0.12f))
+                                        .clickable { selectedNewsTopic = if (selected) null else topic }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
                     when {
                         isRecording -> {
                             VoiceRecordingBar(
@@ -847,6 +972,15 @@ fun ChatScreen(
                                 onSend = { sendRecordedVoice() }
                             )
                         }
+                        // НОВОЕ (реальная блокировка): вместо поля ввода показываем плашку,
+                        // если собеседник заблокировал меня или я заблокировал его.
+                        uiState.otherBlockedMe || uiState.iBlockedOther -> {
+                            BlockedInputBanner(
+                                theyBlockedMe = uiState.otherBlockedMe,
+                                colorTheme = colorTheme,
+                                onUnblock = { viewModel.setBlocked(false) }
+                            )
+                        }
                         else -> {
                             MessageInputBar(
                                 text = inputText,
@@ -863,7 +997,12 @@ fun ChatScreen(
                                 placeholder = if (isChannel && uiState.isAdmin) "Вы админ, вам можно писать" else "Сообщение...",
                                 pendingTtlSeconds = pendingMessageTtlSeconds,
                                 isTtlExplicitlySet = pendingMessageTtlExplicitlySet,
-                                onTtlIconClick = { showPerMessageTtlDialog = true }
+                                onTtlIconClick = { showPerMessageTtlDialog = true },
+                                onScheduleClick = { if (inputText.isNotBlank()) showScheduleDialog = true },
+                                onQuickReplyClick = { showQuickReplies = true },
+                                isChannel = isChannel,
+                                silentMode = channelSilentMode,
+                                onToggleSilent = { channelSilentMode = !channelSilentMode }
                             )
                         }
                     }
@@ -889,11 +1028,29 @@ fun ChatScreen(
                             onDismiss = { showScheduleDialog = false }
                         )
                     }
+                    if (showQuickReplies) {
+                        QuickRepliesDialog(
+                            templates = app.yodo.messenger.util.loadPrefsList(toolsPrefs, "templates"),
+                            onSelect = { template ->
+                                inputText = template
+                                viewModel.onInputTextChanged(template)
+                                showQuickReplies = false
+                            },
+                            onDismiss = { showQuickReplies = false }
+                        )
+                    }
                     if (showAttachMenu) {
                         AttachMenuDialog(
                             onDismiss = { showAttachMenu = false },
                             onPickPhoto = {
                                 showAttachMenu = false
+                                pendingImageIsViewOnce = false
+                                // Можно выбрать сразу несколько фото — они уйдут одним альбомом.
+                                multiImagePicker.launch("image/*")
+                            },
+                            onPickViewOncePhoto = {
+                                showAttachMenu = false
+                                pendingImageIsViewOnce = true
                                 imagePicker.launch("image/*")
                             },
                             onPickFile = {
@@ -913,6 +1070,21 @@ fun ChatScreen(
                             onPickPoll = {
                                 showAttachMenu = false
                                 showPollCreation = true
+                            },
+                            onPasteImage = {
+                                showAttachMenu = false
+                                pasteImageFromClipboard()
+                            }
+                        )
+                    }
+                    // НОВОЕ (картинки из буфера + подпись): превью + поле подписи перед отправкой.
+                    pendingCaptionImageBase64?.let { imgBase64 ->
+                        ImageCaptionDialog(
+                            imageBase64 = imgBase64,
+                            onDismiss = { pendingCaptionImageBase64 = null },
+                            onSend = { caption ->
+                                viewModel.sendImage(imgBase64, caption = caption)
+                                pendingCaptionImageBase64 = null
                             }
                         )
                     }
@@ -930,8 +1102,8 @@ fun ChatScreen(
                             advancedPollsEnabled = advancedPollsEnabled,
                             colorTheme = colorTheme,
                             onDismiss = { showPollCreation = false },
-                            onConfirm = { question, options, isAnonymous, allowMultiple, closesAtMillis ->
-                                viewModel.sendPoll(question, options, isAnonymous, allowMultiple, closesAtMillis)
+                            onConfirm = { question, options, isAnonymous, allowMultiple, closesAtMillis, isQuiz, correctOptionIndex, explanation ->
+                                viewModel.sendPoll(question, options, isAnonymous, allowMultiple, closesAtMillis, isQuiz, correctOptionIndex, explanation)
                                 showPollCreation = false
                             }
                         )
@@ -1001,6 +1173,10 @@ fun ChatScreen(
                             previousDateLabel = dateLabel
                         }
                         item(key = message.id) {
+                            // НОВОЕ (F3): отмечаем просмотр поста канала при появлени�� на экране.
+                            if (isChannel && !uiState.isOfficialChannel) {
+                                LaunchedEffect(message.id) { viewModel.registerPostView(message.id) }
+                            }
                             SwipeableMessageBubble(
                                 message = message,
                                 isOwnMessage = message.senderId == viewModel.currentUserId,
@@ -1008,11 +1184,13 @@ fun ChatScreen(
                                 autoDownloadImages = autoDownloadImages,
                                 colorTheme = colorTheme,
                                 isChannel = isChannel,
+                                isOfficialChannel = uiState.isOfficialChannel,
                                 onCommentsClick = { onOpenComments(chatId, message.id) },
                                 onReply = { viewModel.setReplyingTo(message) },
                                 onEdit = { viewModel.setEditingMessage(message) },
                                 onDelete = { viewModel.deleteMessage(message) },
                                 onForward = { viewModel.prepareForward(message); onForwardMessage() },
+                                onReport = { reportTargetMessage = message },
                                 onReact = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                                 onPin = { viewModel.togglePinMessage(message.id) },
                                 onSaveToFavorite = { viewModel.saveToFavorite(message) },
@@ -1020,6 +1198,14 @@ fun ChatScreen(
                                 onClosePoll = { viewModel.closePoll(message.id) },
                                 onImageClick = { base64 ->
                                     onOpenImageViewer(base64, uiState.chatTitle, message.timestamp)
+                                },
+                                // НОВОЕ (одноразовые медиа): открываем фото в оверлее ПОВЕРХ
+                                // чата (не через onOpenImageViewer/н��������вигацию — там есть общий
+                                // держатель картинки и повторные открытия), и только для чужих
+                                // сообщений своей же отправки не помечаем "открыто", т.к. это
+                                // сделает получатель на своём устройстве.
+                                onViewOnceClick = { msg ->
+                                    if (msg.imageBase64 != null) viewOnceOverlayMessage = msg
                                 },
                                 onReplyQuoteClick = { targetMessageId ->
                                     val targetIndex = displayedMessages.indexOfFirst { it.id == targetMessageId }
@@ -1034,6 +1220,125 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+    }
+
+    // НОВОЕ (систе��а жалоб, п.5 ТЗ): диалог подачи жалобы на сообщение.
+    reportTargetMessage?.let { message ->
+        ReportDialog(
+            chatId = chatId,
+            targetUserId = message.senderId,
+            targetUserName = "",
+            messageId = message.id,
+            messagePreview = message.previewText(),
+            onDismiss = { reportTargetMessage = null },
+            onSubmitted = {
+                reportTargetMessage = null
+                coroutineScope.launch { snackbarHostState.showSnackbar("Жалоба отправлена") }
+            }
+        )
+    }
+
+    // НОВОЕ (одноразовые медиа): полноэкранный показ view-once фото поверх чата.
+    // Не переиспользует ImageViewerHolder/ImageViewerScreen намеренно — там доступны
+    // сохранение/шеринг и повторный показ, а у view-once фото не должно быть ни того,
+    // ни другого. Как только пользователь открыл экран, сразу п��мечаем сообщение как
+    // просмотренное и стираем imageBase64 на сервере — повторно открыть уже нельзя,
+    // в т.ч. если сообщение отправил сам пользователь себе на другое устройство.
+    // НОВОЕ (детектор скриншотов): защита от повторной отправки уведомле��ия, если
+    // ContentObserver.onChange сработает несколько раз на один и тот же файл скриншота
+    // (типично для MediaStore — сначала PENDING-запись, потом финализация).
+    var screenshotNoticeSent by remember(viewOnceOverlayMessage?.id) { mutableStateOf(false) }
+    viewOnceOverlayMessage?.let { msg ->
+        ViewOnceImageOverlay(
+            imageBase64 = msg.imageBase64,
+            onOpened = {
+                if (!msg.viewOnceOpened) viewModel.markViewOnceImageOpened(msg.id)
+            },
+            onDismiss = { viewOnceOverlayMessage = null },
+            onScreenshotDetected = {
+                if (!screenshotNoticeSent) {
+                    screenshotNoticeSent = true
+                    viewModel.notifyScreenshotTaken()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ViewOnceImageOverlay(
+    imageBase64: String?,
+    onOpened: () -> Unit,
+    onDismiss: () -> Unit,
+    onScreenshotDetected: () -> Unit
+) {
+    // Помечаем как открытое ровно один раз, сразу при показе оверлея (не при закрытии) —
+    // так фото стирается на сервере, даже если пользователь свернёт приложение до того,
+    // как явно закроет полноэкранный просмотр.
+    LaunchedEffect(imageBase64) { onOpened() }
+
+    val context = LocalContext.current
+    // НОВОЕ (защита от скриншотов, слой 1): FLAG_SECURE на окне Activity — стандартный
+    // системный способ заблокировать скриншот/запись экрана для текущего окна (система
+    // просто отдаёт чёрный кадр). Ставим при входе в оверлей и снимаем при выходе, а не
+    // на всё время работы приложения — иначе пользователь не смог бы делать скриншоты
+    // обычных сообщений, что не входит в задачу.
+    DisposableEffect(Unit) {
+        val activity = app.yodo.messenger.util.ChatScreenshotUtils.findActivity(context)
+        activity?.window?.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            android.view.WindowManager.LayoutParams.FLAG_SECURE
+        )
+        onDispose {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+    // НОВОЕ (защита от скриншотов, слой 2): детектор на случай, если FLAG_SECURE всё же
+    // обойдён (см. комментарий в ScreenshotDetector.kt).
+    app.yodo.messenger.util.DetectScreenshots(onScreenshotDetected = onScreenshotDetected)
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        // Диалог Compose открывает СВОЁ окно поверх ок��а Activity — FLAG_SECURE, выставленный
+        // только на activity.window, не наследуется на него автоматически, поэтому дублируем
+        // флаг на окно самого диалога через DialogWindowProvider.
+        val dialogWindowProvider = LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider
+        DisposableEffect(Unit) {
+            dialogWindowProvider?.window?.setFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                android.view.WindowManager.LayoutParams.FLAG_SECURE
+            )
+            onDispose { }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            val bitmap = remember(imageBase64) { imageBase64?.let { ImageUtils.decodeBase64ToBitmap(it) } }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Фото на один просмотр",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Закрыть", tint = Color.White)
+            }
+            Text(
+                "Это фото исчезнет после закрытия",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp)
+            )
         }
     }
 }
@@ -1056,6 +1361,95 @@ private fun DateSeparator(label: String) {
     }
 }
 
+// НОВОЕ (несколько фото): сетка-коллаж для нескольких фото в одном сообщении.
+// Фото показываются по 2 в ряд (при нечётном количестве последнее занимает всю ширин��).
+@Composable
+private fun ImageAlbumGrid(
+    images: List<String>,
+    onImageClick: (Int) -> Unit
+) {
+    // ПЕРЕРАБОТАНО (U): коллаж больше не всегда квадратный и учитывает размеры фото:
+    // • 1 фото — в натуральном соотношении сторон;
+    // • 2 фото — два столбца;
+    // • 3 фото — одно большое + два малых;
+    // • 4 и больше — сетка 2x2, на последней плитке показываем "+N".
+    val decoded = images.map { base64 ->
+        base64 to remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+    }
+    Column(
+        modifier = Modifier
+            .padding(4.dp)
+            .widthIn(min = 180.dp, max = 280.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        when (decoded.size) {
+            1 -> {
+                val (_, bmp) = decoded[0]
+                if (bmp != null) {
+                    val ar = (bmp.width.toFloat() / bmp.height.toFloat()).coerceIn(0.6f, 1.9f)
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "Фото",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(ar)
+                            .clip(RoundedCornerShape(12.dp)).clickable { onImageClick(0) }
+                    )
+                }
+            }
+            2 -> {
+                Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    decoded.forEachIndexed { i, (_, bmp) -> AlbumTile(bmp, Modifier.weight(1f).fillMaxHeight()) { onImageClick(i) } }
+                }
+            }
+            3 -> {
+                Row(Modifier.fillMaxWidth().height(180.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    AlbumTile(decoded[0].second, Modifier.weight(2f).fillMaxHeight()) { onImageClick(0) }
+                    Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        AlbumTile(decoded[1].second, Modifier.fillMaxWidth().weight(1f)) { onImageClick(1) }
+                        AlbumTile(decoded[2].second, Modifier.fillMaxWidth().weight(1f)) { onImageClick(2) }
+                    }
+                }
+            }
+            else -> {
+                // Показываем первые 4 плитки; на 4-й — "+N", если фото больше.
+                val extra = decoded.size - 4
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(0 to 1, 2 to 3).forEach { (a, b) ->
+                        Row(Modifier.fillMaxWidth().height(120.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            AlbumTile(decoded[a].second, Modifier.weight(1f).fillMaxHeight()) { onImageClick(a) }
+                            Box(Modifier.weight(1f).fillMaxHeight()) {
+                                AlbumTile(decoded[b].second, Modifier.fillMaxSize()) { onImageClick(b) }
+                                if (b == 3 && extra > 0) {
+                                    Box(
+                                        Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                                            .background(Color.Black.copy(alpha = 0.5f))
+                                            .clickable { onImageClick(b) },
+                                        contentAlignment = Alignment.Center
+                                    ) { Text("+$extra", color = Color.White, style = MaterialTheme.typography.titleLarge) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumTile(bmp: android.graphics.Bitmap?, modifier: Modifier, onClick: () -> Unit) {
+    if (bmp != null) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = "Фото",
+            contentScale = ContentScale.Crop,
+            modifier = modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+        )
+    } else {
+        Spacer(modifier = modifier)
+    }
+}
+
 @Composable
 private fun SwipeableMessageBubble(
     message: Message,
@@ -1064,17 +1458,20 @@ private fun SwipeableMessageBubble(
     autoDownloadImages: Boolean,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
+    isOfficialChannel: Boolean = false,
     onCommentsClick: () -> Unit,
     onReply: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onForward: () -> Unit,
+    onReport: () -> Unit,
     onReact: (String) -> Unit,
     onPin: () -> Unit,
     onSaveToFavorite: () -> Unit,
     onVotePoll: (Int) -> Unit,
     onClosePoll: () -> Unit,
     onImageClick: (String) -> Unit,
+    onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit,
     onSwipeBack: () -> Unit
@@ -1096,8 +1493,11 @@ private fun SwipeableMessageBubble(
                     onDragEnd = {
                         when {
                             offsetX > replyThresholdPx -> onReply()
-                            offsetX < -forwardZoneEndPx -> onSwipeBack()
-                            offsetX < 0f -> onForward()
+                            // Свайп влево — переслать любое сообщение (в т.ч. чуж��е в личном
+                            // чате). Раньше длинный свайп влево срабатывал как "назад" и мешал
+                            // пересылке; теперь за "назад" отвечает только краевой свайп (swipeToGoBack).
+                            // view-once сообщения пересылать нельзя.
+                            offsetX < -replyThresholdPx && !message.isViewOnce -> onForward()
                         }
                         offsetX = 0f
                     },
@@ -1128,13 +1528,16 @@ private fun SwipeableMessageBubble(
                 message = message, isOwnMessage = isOwnMessage,
                 currentUserId = currentUserId, autoDownloadImages = autoDownloadImages,
                 colorTheme = colorTheme,
-                isChannel = isChannel, onCommentsClick = onCommentsClick,
+                isChannel = isChannel, isOfficialChannel = isOfficialChannel,
+                onCommentsClick = onCommentsClick,
                 onReply = onReply, onEdit = onEdit, onDelete = onDelete,
                 onForward = onForward, onReact = onReact, onPin = onPin,
+                onReport = onReport,
                 onSaveToFavorite = onSaveToFavorite,
                 onVotePoll = onVotePoll,
                 onClosePoll = onClosePoll,
-                onImageClick = onImageClick, onReplyQuoteClick = onReplyQuoteClick,
+                onImageClick = onImageClick, onViewOnceClick = onViewOnceClick,
+                onReplyQuoteClick = onReplyQuoteClick,
                 onForwardedSenderClick = onForwardedSenderClick
             )
         }
@@ -1149,17 +1552,20 @@ private fun MessageBubble(
     autoDownloadImages: Boolean,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
+    isOfficialChannel: Boolean = false,
     onCommentsClick: () -> Unit,
     onReply: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onForward: () -> Unit,
+    onReport: () -> Unit,
     onReact: (String) -> Unit,
     onPin: () -> Unit,
     onSaveToFavorite: () -> Unit,
     onVotePoll: (Int) -> Unit,
     onClosePoll: () -> Unit,
     onImageClick: (String) -> Unit,
+    onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit
 ) {
@@ -1240,24 +1646,49 @@ private fun MessageBubble(
                             Text(replyText.ifBlank { "Картинка" }, style = MaterialTheme.typography.labelMedium, color = textColor.copy(alpha = 0.85f), maxLines = 1)
                         }
                     }
-                    message.imageBase64?.let { base64 ->
-                        if (revealImage) {
-                            val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
-                            bitmap?.let { bmp ->
-                                val aspectRatio = bmp.width.toFloat() / bmp.height.toFloat()
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = "Фото",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .padding(4.dp)
-                                        .widthIn(min = 140.dp, max = 260.dp)
-                                        .heightIn(max = 320.dp)
-                                        .aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 1f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { onImageClick(base64) }
-                                )
+                    if (message.isViewOnce) {
+                        // НОВОЕ (одноразовые медиа): у view-once сообщений своя отрисовка —
+                        // никогда не показываем imageBase64 инлайн в пузыре (только полноэкранно
+                        // через onViewOnceClick), а после открытия показываем серую заглушку.
+                        if (message.viewOnceOpened) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(72.dp)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(textColor.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.RemoveRedEye, contentDescription = null, tint = textColor.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Фото открыто", color = textColor.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(120.dp)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(textColor.copy(alpha = 0.12f))
+                                    .clickable(enabled = message.imageBase64 != null) { onViewOnceClick(message) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.RemoveRedEye, contentDescription = null, tint = textColor)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Тап, чтобы посмотреть (один раз)", color = textColor)
+                                }
+                            }
+                        }
+                    } else if (message.imagesBase64.isNotEmpty()) {
+                        // НОВОЕ (несколько фото): альбом — несколько фото сеткой в одном пузыре.
+                        if (revealImage) {
+                            // НОВОЕ (V): открываем альбом с возможностью листать, начиная с выбранного фото.
+                            ImageAlbumGrid(images = message.imagesBase64, onImageClick = { idx ->
+                                ImageViewerHolder.images = message.imagesBase64
+                                ImageViewerHolder.initialIndex = idx
+                                onImageClick(message.imagesBase64[idx])
+                            })
                         } else {
                             Box(
                                 modifier = Modifier.fillMaxWidth().height(120.dp)
@@ -1266,7 +1697,37 @@ private fun MessageBubble(
                                     .background(textColor.copy(alpha = 0.12f))
                                     .clickable { revealImage = true },
                                 contentAlignment = Alignment.Center
-                            ) { Text("Тап, чтобы загрузить фото", color = textColor) }
+                            ) { Text("Тап, чтобы загрузить фото (${message.imagesBase64.size})", color = textColor) }
+                        }
+                    } else {
+                        message.imageBase64?.let { base64 ->
+                            if (revealImage) {
+                                val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+                                bitmap?.let { bmp ->
+                                    val aspectRatio = bmp.width.toFloat() / bmp.height.toFloat()
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Фото",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .padding(4.dp)
+                                            .widthIn(min = 140.dp, max = 260.dp)
+                                            .heightIn(max = 320.dp)
+                                            .aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 1f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { onImageClick(base64) }
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(120.dp)
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(textColor.copy(alpha = 0.12f))
+                                        .clickable { revealImage = true },
+                                    contentAlignment = Alignment.Center
+                                ) { Text("Тап, чтобы загру��ить фото", color = textColor) }
+                            }
                         }
                     }
                     message.voiceBase64?.let { voiceBase64 ->
@@ -1307,16 +1768,79 @@ private fun MessageBubble(
                         )
                     }
                     if (message.text.isNotBlank()) {
-                        Text(
-                            text = message.text, color = textColor,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.padding(horizontal = 12.dp)
-                                .padding(top = if (message.replyToText != null || message.imageBase64 != null) 4.dp else 8.dp)
-                        )
-                        LinkPreviewSection(
-                            messageText = message.text,
-                            modifier = Modifier.padding(horizontal = 12.dp).padding(top = 6.dp)
-                        )
+                        // НОВОЕ (лента новостей): в оф.канале показываем плитку темы, тело новости и кнопку «на весь экран».
+                        val (newsTopic, newsBody) = if (isOfficialChannel)
+                            app.yodo.messenger.domain.model.NewsTopic.decode(message.text)
+                        else null to message.text
+                        var showNewsFullscreen by remember(message.id) { mutableStateOf(false) }
+                        if (isOfficialChannel && newsTopic != null) {
+                            Text(
+                                newsTopic,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(colorTheme.primary)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                        // НОВОЕ (усечение длинных постов): критерий длины общий для всех чатов —
+                        // 220 симв. ИЛИ 4+ переноса строки. Работает в личных чатах, группах и каналах.
+                        val isLongPost = newsBody.length >= 220 || newsBody.count { it == '\n' } >= 4
+                        val displayBody = if (isLongPost) truncatePostPreview(newsBody) else newsBody
+                        SelectionContainer {
+                            Text(
+                                text = displayBody, color = textColor,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                                    .padding(top = if (message.replyToText != null || message.imageBase64 != null) 4.dp else 8.dp)
+                            )
+                        }
+                        if (!isLongPost) {
+                            LinkPreviewSection(
+                                messageText = newsBody,
+                                modifier = Modifier.padding(horizontal = 12.dp).padding(top = 6.dp)
+                            )
+                        }
+                        // ИСПРАВЛЕНО (AL): кнопка «Открыть на весь экран» показывается только у длинных
+                        // постов. У короткого сообщения она была бессмысленной и только мешала.
+                        if (isLongPost) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { showNewsFullscreen = true }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Filled.Fullscreen, contentDescription = "На весь экран", tint = colorTheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Открыть полностью", style = MaterialTheme.typography.labelMedium, color = colorTheme.primary)
+                            }
+                        }
+                        if (showNewsFullscreen) {
+                            // Для официального канала YodoMessenger оставляем прежний диалог новостей,
+                            // для всех остальных чатов — новый универсальный PostFullscreenDialog.
+                            if (isOfficialChannel) {
+                                NewsFullscreenDialog(
+                                    topic = newsTopic,
+                                    body = newsBody,
+                                    timestamp = message.timestamp,
+                                    colorTheme = colorTheme,
+                                    onDismiss = { showNewsFullscreen = false }
+                                )
+                            } else {
+                                PostFullscreenDialog(
+                                    body = newsBody,
+                                    timestamp = message.timestamp,
+                                    colorTheme = colorTheme,
+                                    clipboardManager = clipboardManager,
+                                    onDismiss = { showNewsFullscreen = false }
+                                )
+                            }
+                        }
                     }
                     Row(
                         modifier = Modifier.align(Alignment.End)
@@ -1335,6 +1859,16 @@ private fun MessageBubble(
                             )
                         }
                         Text(formatMessageTime(message.timestamp), color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                        // НОВОЕ: число просмотров канала теперь рядом со временем.
+                        if (isChannel && !isOfficialChannel) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Filled.Visibility, contentDescription = "Просмотры",
+                                tint = textColor.copy(alpha = 0.7f),
+                                modifier = Modifier.size(13.dp).padding(end = 3.dp)
+                            )
+                            Text("${message.viewCount}", color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                        }
                         if (isOwnMessage) {
                             val statusIcon = if (message.status == MessageStatus.READ) Icons.Filled.DoneAll else Icons.Filled.Done
                             Icon(
@@ -1347,15 +1881,18 @@ private fun MessageBubble(
                     }
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        QUICK_REACTIONS.forEach { emoji ->
-                            Text(emoji, fontSize = MaterialTheme.typography.headlineSmall.fontSize,
-                                modifier = Modifier.clickable { onReact(emoji); showMenu = false }.padding(6.dp))
+                    // НОВОЕ (лента новостей): в оф.канале нет реакций.
+                    if (!isOfficialChannel) {
+                        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            QUICK_REACTIONS.forEach { emoji ->
+                                Text(emoji, fontSize = MaterialTheme.typography.headlineSmall.fontSize,
+                                    modifier = Modifier.clickable { onReact(emoji); showMenu = false }.padding(6.dp))
+                            }
                         }
+                        HorizontalDivider()
                     }
-                    HorizontalDivider()
                     DropdownMenuItem(text = { Text("Ответить") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null) }, onClick = { showMenu = false; onReply() })
-                    if (isChannel) {
+                    if (isChannel && !isOfficialChannel) {
                         DropdownMenuItem(
                             text = { Text("Комментарии") },
                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null) },
@@ -1363,20 +1900,33 @@ private fun MessageBubble(
                         )
                     }
                     DropdownMenuItem(text = { Text(if (message.isPinned) "Открепить" else "Закрепить") }, leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) }, onClick = { showMenu = false; onPin() })
-                    DropdownMenuItem(text = { Text("В избранное") }, leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null) }, onClick = { showMenu = false; onSaveToFavorite() })
+                    // НОВОЕ (одноразовые медиа): не даём сохранять view-once фото в избранное.
+                    if (!message.isViewOnce) {
+                        DropdownMenuItem(text = { Text("В избранное") }, leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null) }, onClick = { showMenu = false; onSaveToFavorite() })
+                    }
                     if (message.text.isNotBlank()) {
                         DropdownMenuItem(text = { Text("Копировать") }, leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }, onClick = { showMenu = false; clipboardManager.setText(AnnotatedString(message.text)) })
                     }
-                    DropdownMenuItem(text = { Text("Переслать") }, leadingIcon = { Icon(Icons.Filled.Forward, contentDescription = null) }, onClick = { showMenu = false; onForward() })
+                    // НОВОЕ (одноразовые медиа): фото "на один просмотр" нельзя пересылать.
+                    if (!message.isViewOnce) {
+                        DropdownMenuItem(text = { Text("Переслать") }, leadingIcon = { Icon(Icons.Filled.Forward, contentDescription = null) }, onClick = { showMenu = false; onForward() })
+                    }
                     if (isOwnMessage) {
                         DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
-                        DropdownMenuItem(text = { Text("Удалить") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
+                        DropdownMenuItem(text = { Text("Удалит��") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
+                    } else {
+                        // НОВОЕ (система жалоб, п.5 ТЗ): жалоба на чужое сообщение.
+                        DropdownMenuItem(
+                            text = { Text("Пожаловаться") },
+                            leadingIcon = { Icon(Icons.Filled.Flag, contentDescription = null) },
+                            onClick = { showMenu = false; onReport() }
+                        )
                     }
                 }
             }
 
             // ═══════════════ ЭТАП 14: АНИМИРОВАННЫЕ РЕАКЦИИ ═══════════════
-            if (message.reactions.isNotEmpty()) {
+            if (message.reactions.isNotEmpty() && !isOfficialChannel) {
                 Row(
                     modifier = Modifier.padding(top = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1443,29 +1993,219 @@ private fun MessageBubble(
                 }
             }
 
-            if (isChannel) {
+            if (isChannel && !isOfficialChannel) {
+                // ИСПРАВЛЕНО (кнопка комментариев и текст одной ширины): раньше кнопка
+                // оборачивалась по содержимому и была узкой, текст переносился. Теперь кнопка
+                // занимает ту же максимальную ширину, что и пузырь сообщения (280dp),
+                // а текст не сжимает��я (в одну строку, по центру).
+                // ИСПРАВЛЕНО (AI): без fillMaxWidth — кнопка по ширине содержимого,
+                // чтобы не выпирать за короткое сообщение (верхний предел 280dp).
                 Row(
                     modifier = Modifier
                         .padding(top = 3.dp)
+                        .widthIn(max = 280.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .clickable(onClick = onCommentsClick)
-                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Comment, contentDescription = null,
-                        tint = colorTheme.primary, modifier = Modifier.size(14.dp)
+                        tint = colorTheme.primary, modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
+                    // Текст кнопки такого же размера, что и текст сообщения, без сжатия.
                     Text(
                         if (message.commentsCount > 0) "Комментарии · ${message.commentsCount}" else "Комментировать",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
-                        color = colorTheme.primary
+                        color = colorTheme.primary,
+                        maxLines = 1
+                    )
+                }
+                // НОВОЕ (бейдж «🔥 Популярное»): сами просмотры теперь показываются рядом со временем.
+                val totalReactions = message.reactions.values.sumOf { it.size }
+                val isPopular = message.viewCount >= 100 || totalReactions >= 10
+                if (isPopular) {
+                    Row(
+                        modifier = Modifier.padding(top = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "🔥 Популярное",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colorTheme.accent,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colorTheme.accent.copy(alpha = 0.15f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// НОВОЕ (усечение длинных постов): обрезка текста для превью в списке сообщений.
+// Отрезаем по тому же критерию (220 симв. / 4 переноса) и добавляем "…".
+private fun truncatePostPreview(text: String): String {
+    val byNewlines = text.lineSequence().take(4).joinToString("\n")
+    val byLength = if (byNewlines.length > 220) byNewlines.take(220) else byNewlines
+    val trimmed = byLength.trimEnd()
+    return if (trimmed.length < text.length) "$trimmed…" else trimmed
+}
+
+// НОВОЕ (усечение длинных постов): универсальный полноэкранный просмотр для личных чатов и
+// обычных (не официальных) каналов/групп. Поддерживает выделение текста и копирование целиком.
+@Composable
+private fun PostFullscreenDialog(
+    body: String,
+    timestamp: Long,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    clipboardManager: androidx.compose.ui.platform.ClipboardManager,
+    onDismiss: () -> Unit
+) {
+    var justCopied by remember { mutableStateOf(false) }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Icon(Icons.Filled.Fullscreen, contentDescription = null, tint = colorTheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Пост целиком",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                // НОВОЕ: кнопка «Скопировать» — копирует весь пост в буфер обмена.
+                TextButton(onClick = {
+                    clipboardManager.setText(AnnotatedString(body))
+                    justCopied = true
+                }) {
+                    Icon(
+                        if (justCopied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                        contentDescription = "Скопировать",
+                        tint = colorTheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (justCopied) "Скопировано" else "Скопировать", color = colorTheme.primary)
+                }
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Закрыть") }
+            }
+            HorizontalDivider()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                // НОВОЕ: выделение произвольной части текста для копирования отрывка.
+                SelectionContainer {
+                    Text(body, style = MaterialTheme.typography.bodyLarge)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        formatMessageTime(timestamp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    // НОВОЕ: счётчик символов/слов поста — удобно для длинных текстов.
+                    Text(
+                        "${body.length} симв. · ${body.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size} слов",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+        }
+    }
+}
+
+// НОВОЕ (лента новостей): полноэкранный просмотр новости официального канала.
+@Composable
+private fun NewsFullscreenDialog(
+    topic: String?,
+    body: String,
+    timestamp: Long,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onDismiss: () -> Unit
+) {
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    var justCopied by remember { mutableStateOf(false) }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Campaign, contentDescription = null, tint = colorTheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Новость YodoMessenger",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                // НОВОЕ: кнопка «Скопировать» — копирует весь пост в буфер обмена.
+                IconButton(onClick = {
+                    clipboardManager.setText(AnnotatedString(body))
+                    justCopied = true
+                }) {
+                    Icon(
+                        if (justCopied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                        contentDescription = "Скопировать",
+                        tint = colorTheme.primary
+                    )
+                }
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Закрыть") }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            if (topic != null) {
+                Text(
+                    topic,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colorTheme.primary)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            // НОВОЕ: выделение произвольной части текста для копирования отрывка.
+            SelectionContainer {
+                Text(body, style = MaterialTheme.typography.bodyLarge)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                formatMessageTime(timestamp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1501,7 +2241,7 @@ private fun ReplyPreviewBar(message: Message, isOwn: Boolean, onCancel: () -> Un
 }
 
 private val COMMON_EMOJIS = listOf(
-    "😀", "😂", "😍", "🥰", "😊", "😉", "😎", "🤔",
+    "😀", "😂", "����", "��", "😊", "😉", "😎", "🤔",
     "😢", "😭", "😡", "🥳", "👍", "👎", "❤️", "🔥",
     "🎉", "🙏", "👏", "😴", "🤗", "😅", "😱", "🤷",
     "✅", "❌", "⭐", "💯", "😇", "🤝", "👀", "💔"
@@ -1528,6 +2268,47 @@ private fun EmojiPickerPanel(onEmojiSelected: (String) -> Unit) {
     }
 }
 
+// НОВОЕ (реальная блокировка): плашка вместо поля ввода.
+// Если собеседник заблокировал меня �� пишем об этом и не даём писать.
+// Если я заблокировал собеседника — предлагаем разблокировать.
+@Composable
+private fun BlockedInputBanner(
+    theyBlockedMe: Boolean,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onUnblock: () -> Unit
+) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                Icons.Filled.Block,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            if (theyBlockedMe) {
+                Text(
+                    "Пользователь заблокировал вас",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "Вы заблокировали этого пользователя",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                TextButton(onClick = onUnblock) { Text("Разблокировать", color = colorTheme.primary) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MessageInputBar(
     text: String,
@@ -1544,7 +2325,14 @@ private fun MessageInputBar(
     placeholder: String = "Сообщение...",
     pendingTtlSeconds: Long? = null,
     isTtlExplicitlySet: Boolean = false,
-    onTtlIconClick: () -> Unit = {}
+    onTtlIconClick: () -> Unit = {},
+    onScheduleClick: () -> Unit = {},
+    // НОВОЕ: пункт «Быстрые ответы» в меню долгого нажатия на кнопку отправки.
+    onQuickReplyClick: () -> Unit = {},
+    // ПЕРЕНЕСЕНО (X): тумблер обычная/тихая публикация в долгом нажатии кнопки отправки.
+    isChannel: Boolean = false,
+    silentMode: Boolean = false,
+    onToggleSilent: () -> Unit = {}
 ) {
     val canSend = !isSending && text.isNotBlank()
     var showEmojiPicker by remember { mutableStateOf(false) }
@@ -1585,22 +2373,6 @@ private fun MessageInputBar(
                 ) {
                     Icon(Icons.Filled.AttachFile, contentDescription = "Прикрепить фото", tint = colorTheme.primary, modifier = Modifier.size(24.dp))
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = onTtlIconClick),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.Timer,
-                        contentDescription = if (isTtlExplicitlySet) "Таймер сообщения: ${disappearingTtlLabel(pendingTtlSeconds)}" else "Таймер исчезновения сообщения",
-                        tint = if (isTtlExplicitlySet) colorTheme.primary else Color.Gray,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(2.dp))
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(22.dp),
@@ -1640,28 +2412,68 @@ private fun MessageInputBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Mic, contentDescription = "Удерживайте для записи голосового сообщения", tint = Color.White, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Filled.Mic, contentDescription = "Удерживай��е для записи голосового сообщения", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(if (canSend) colorTheme.primary else colorTheme.primary.copy(alpha = 0.3f))
-                            .pointerInput(canSend) {
-                                detectTapGestures(
-                                    onTap = { if (canSend) onSendClick() },
-                                    onLongPress = { if (canSend) onSendLongPress() }
+                    // ИСПРАВЛЕНО (таймер и запланированные сообщения): убрали отдельные кнопки
+                    // рядом с отправкой. Теперь при ЗАЖАТИИ к��опки отправки ����ткрывается меню
+                    // с таймером (исчезающие) и запланированной отправкой.
+                    var showSendOptions by remember { mutableStateOf(false) }
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(if (canSend) colorTheme.primary else colorTheme.primary.copy(alpha = 0.3f))
+                                .combinedClickable(
+                                    enabled = canSend,
+                                    onClick = onSendClick,
+                                    onLongClick = { showSendOptions = true }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSending) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp
                                 )
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isSending) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp
+                            } else {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить (зажмите для таймера и планирования)", tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showSendOptions,
+                            onDismissRequest = { showSendOptions = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (isTtlExplicitlySet) "Таймер: ${disappearingTtlLabel(pendingTtlSeconds)}" else "Таймер (исчезающее)") },
+                                leadingIcon = { Icon(Icons.Filled.Timer, contentDescription = null, tint = if (isTtlExplicitlySet) colorTheme.primary else Color.Gray) },
+                                onClick = { showSendOptions = false; onTtlIconClick() }
                             )
-                        } else {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить (удержите — запланировать)", tint = Color.White, modifier = Modifier.size(18.dp))
+                            DropdownMenuItem(
+                                text = { Text("Запланировать отправку") },
+                                leadingIcon = { Icon(Icons.Filled.Schedule, contentDescription = null, tint = colorTheme.primary) },
+                                onClick = { showSendOptions = false; onScheduleClick() }
+                            )
+                            // НОВОЕ: быстрые шаблоны ответов (общий список с «Фишки и инструменты»).
+                            DropdownMenuItem(
+                                text = { Text("Быстрые ответы") },
+                                leadingIcon = { Icon(Icons.Filled.Bolt, contentDescription = null, tint = colorTheme.primary) },
+                                onClick = { showSendOptions = false; onQuickReplyClick() }
+                            )
+                            // ПЕРЕНЕ��ЕНО (X): выбор обычной/тихой публикации для каналов.
+                            if (isChannel) {
+                                DropdownMenuItem(
+                                    text = { Text(if (silentMode) "Тихая публикация: без уведомления" else "Обычная публикация") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (silentMode) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
+                                            contentDescription = null,
+                                            tint = if (silentMode) colorTheme.accent else colorTheme.primary
+                                        )
+                                    },
+                                    onClick = { showSendOptions = false; onToggleSilent() }
+                                )
+                            }
                         }
                     }
                 }
@@ -1730,10 +2542,10 @@ private fun ChannelBottomBar(
     }
 }
 
-// ══════════════════════════════════════════════════════════════════
+// ���═════════════════════════════════════════════════════════════════
 // VoiceRecordingBar (находится внутри этого файла, не является отдельным файлом)
 // ИСПРАВЛЕНО: используем Animatable вместо infiniteTransition.animateFloat 
-// для обхода бага компилятора Compose с выводом типов.
+// для ��бхода бага компилятора Compose с выводом типов.
 // ══════════════════════════════════════════════════════════════════
 @Composable
 private fun VoiceRecordingBar(
@@ -1759,7 +2571,7 @@ private fun VoiceRecordingBar(
             }
             Spacer(modifier = Modifier.width(10.dp))
             
-            // Пульсирующая точка-индикатор записи (исправлено через Animatable)
+            // Пульсирующая точка-индикатор записи (исправлено чер��з Animatable)
             val alphaAnim = remember { androidx.compose.animation.core.Animatable(1f) }
             LaunchedEffect(Unit) {
                 while (true) {
@@ -2011,7 +2823,7 @@ private fun ScheduledMessagesDialog(
                                 )
                             }
                             IconButton(onClick = { onCancel(item.id) }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Отменить отправку")
+                                Icon(Icons.Filled.Delete, contentDescription = "Отменить отправк��")
                             }
                         }
                         HorizontalDivider()
@@ -2027,6 +2839,73 @@ private fun ScheduledMessagesDialog(
 
 private fun formatScheduledTime(millis: Long): String {
     return SimpleDateFormat("d MMMM, HH:mm", Locale("ru")).format(Date(millis))
+}
+
+// НОВОЕ: диалог «Быстрые ответы» — список шаблонов из «Фишки и инструменты»
+// (SharedPreferences "yodo_tools", ключ "templates"), с поиском по подстроке.
+// Выбор шаблона подставляет текст в поле ввода (без немедленной отправки).
+@Composable
+private fun QuickRepliesDialog(
+    templates: List<String>,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(query, templates) {
+        if (query.isBlank()) templates
+        else templates.filter { it.contains(query, ignoreCase = true) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Быстрые ответы") },
+        text = {
+            if (templates.isEmpty()) {
+                Text(
+                    "У вас пока нет шаблонов.\nДобавьте их: Фишки и инструменты → Быстрые шаблоны ответов.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                Column {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Поиск по шаблонам") },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (filtered.isEmpty()) {
+                        Text(
+                            "Ничего не найдено",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                            filtered.forEach { template ->
+                                Text(
+                                    template,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSelect(template) }
+                                        .padding(vertical = 10.dp),
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
 }
 
 private val DISAPPEARING_TTL_OPTIONS: List<Pair<String, Long?>> = listOf(
@@ -2053,7 +2932,7 @@ private fun formatCustomTtlLabel(ttlSeconds: Long): String {
         ttlSeconds % (24 * 60 * 60L) == 0L && days > 0 -> pluralizeRu(days, "день", "дня", "дней")
         ttlSeconds % (60 * 60L) == 0L && hours > 0 -> pluralizeRu(hours, "час", "часа", "часов")
         ttlSeconds % 60L == 0L && minutes > 0 -> pluralizeRu(minutes, "минута", "минуты", "минут")
-        else -> pluralizeRu(ttlSeconds, "секунда", "секунды", "секунд")
+        else -> pluralizeRu(ttlSeconds, "��екунда", "секунды", "секунд")
     }
 }
 
@@ -2073,7 +2952,7 @@ private fun subscriberCountLabel(count: Int): String {
     val mod100 = count % 100
     val mod10 = count % 10
     return when {
-        mod100 in 11..14 -> "подписчиков"
+        mod100 in 11..14 -> "подписчик��в"
         mod10 == 1 -> "подписчик"
         mod10 in 2..4 -> "подписчика"
         else -> "подписчиков"
@@ -2091,14 +2970,14 @@ private fun DisappearingMessagesDialog(
     val isCustomSelected = currentTtlSeconds != null && DISAPPEARING_TTL_OPTIONS.none { it.second == currentTtlSeconds }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (perMessage) "Таймер для этого сообщения" else "Исчезающие сообщения") },
+        title = { Text(if (perMessage) "Т��ймер для этого сообщения" else "Исчезающие сообщения") },
         text = {
             Column {
                 Text(
                     if (perMessage)
-                        "Сообщение будет автоматически удалено у всех участников чата через выбранное время после отправки."
+                        "Сообщение будет автоматически удалено �� всех участников чата через выбранное время после отправки."
                     else
-                        "Новые сообщения в этом чате будут по умолчанию автоматически удаляться через выбранное время после отправки. Таймер для отдельного сообщения можно изменить перед его отправкой (иконка часов рядом с полем ввода).",
+                        "Новые сообщения в этом чате будут по умолчанию автоматически удаляться через вы��ранное время после отправки. Таймер для ��тдельного сообщения можно изменить перед его отправкой (иконка часов рядом с полем ввода).",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
@@ -2129,7 +3008,7 @@ private fun DisappearingMessagesDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
+            TextButton(onClick = onDismiss) { Text("За��рыть") }
         }
     )
     if (showCustomDialog) {
@@ -2360,9 +3239,11 @@ private fun formatLastSeen(millis: Long): String {
 private fun AttachMenuDialog(
     onDismiss: () -> Unit,
     onPickPhoto: () -> Unit,
+    onPickViewOncePhoto: () -> Unit,
     onPickFile: () -> Unit,
     onPickLocation: () -> Unit,
-    onPickPoll: () -> Unit
+    onPickPoll: () -> Unit,
+    onPasteImage: () -> Unit
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -2376,11 +3257,74 @@ private fun AttachMenuDialog(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
-                AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото", onClick = onPickPhoto)
+                AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото (можно несколько)", onClick = onPickPhoto)
+                // НОВОЕ (картинки ��з буфера): вставить изображение из буфера обмена (с подписью).
+                AttachMenuRow(icon = Icons.Filled.ContentPaste, label = "Вставить из буфера", onClick = onPasteImage)
+                // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть
+                // полноэкранно только один раз — после этого оно стирается на сервере.
+                AttachMenuRow(icon = Icons.Filled.RemoveRedEye, label = "Фото на один просмотр", onClick = onPickViewOncePhoto)
                 AttachMenuRow(icon = Icons.Filled.InsertDriveFile, label = "Файл", onClick = onPickFile)
-                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопозиция", onClick = onPickLocation)
+                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопо��иция", onClick = onPickLocation)
                 AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)
                 Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+/**
+ * НОВОЕ (картинки из буфера + подпись): превью изображения с полем подписи;
+ * отправка происходит только по кнопке «Отправить» (не моментально).
+ */
+@Composable
+private fun ImageCaptionDialog(
+    imageBase64: String,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var caption by remember { mutableStateOf("") }
+    val bitmap = remember(imageBase64) { ImageUtils.decodeBase64ToBitmap(imageBase64) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "Отправить изображение",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                bitmap?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = "Превью",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = caption,
+                    onValueChange = { caption = it },
+                    placeholder = { Text("Подпись (необязательно)…") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 4
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Отмена") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onSend(caption.trim()) }) { Text("Отправить") }
+                }
             }
         }
     }
@@ -2476,7 +3420,7 @@ private fun LocationPickerDialog(
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
                         ) {
                             Text(
-                                "Определяем ваше местоположение…",
+                                "Определяем ваш�� местоположение…",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelMedium
                             )
@@ -2484,7 +3428,7 @@ private fun LocationPickerDialog(
                     }
                 }
                 Text(
-                    "Переместите карту, чтобы выбрать точку — она отправится как отметка в центре экрана",
+                    "��ереместите карту, чтобы выбрать точку — она отправится как отметка в центре экран��",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.Gray,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -2597,7 +3541,12 @@ private fun PollMessageBubble(
             Icon(Icons.Filled.Poll, contentDescription = null, tint = textColor.copy(alpha = 0.85f), modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                if (isClosed) "Опрос завершён" else "Опрос",
+                when {
+                    poll.isQuiz && isClosed -> "Викторина завершена"
+                    poll.isQuiz -> "Викторина"
+                    isClosed -> "Опрос завершён"
+                    else -> "Опрос"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = textColor.copy(alpha = 0.7f)
             )
@@ -2614,6 +3563,17 @@ private fun PollMessageBubble(
             val votesForOption = poll.votesFor(index)
             val fraction = if (totalVotes > 0) votesForOption.toFloat() / totalVotes.toFloat() else 0f
             val isSelected = index in votedOptions
+            // НОВОЕ (викторина): после показа результатов подсвечиваем правильный вариант
+            // зелёным, а ошибочно выбранный пользователем — красным.
+            val isCorrect = poll.isCorrectOption(index)
+            val quizReveal = poll.isQuiz && showResults
+            val correctColor = Color(0xFF2E7D32)
+            val wrongColor = Color(0xFFC62828)
+            val barColor = when {
+                quizReveal && isCorrect -> correctColor
+                quizReveal && isSelected && !isCorrect -> wrongColor
+                else -> accentColor
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2627,7 +3587,7 @@ private fun PollMessageBubble(
                         modifier = Modifier
                             .fillMaxWidth(fraction.coerceIn(0f, 1f))
                             .fillMaxHeight()
-                            .background(accentColor.copy(alpha = if (isSelected) 0.35f else 0.18f))
+                            .background(barColor.copy(alpha = if (isSelected || isCorrect) 0.35f else 0.18f))
                     )
                 }
                 Row(
@@ -2636,7 +3596,23 @@ private fun PollMessageBubble(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (isSelected) {
+                    if (quizReveal && isCorrect) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = "Правильный ответ",
+                            tint = correctColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else if (quizReveal && isSelected && !isCorrect) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Неверный ответ",
+                            tint = wrongColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else if (isSelected) {
                         Icon(
                             Icons.Filled.CheckCircle,
                             contentDescription = "Ваш выбор",
@@ -2660,6 +3636,27 @@ private fun PollMessageBubble(
                         )
                     }
                 }
+            }
+        }
+        // НОВОЕ (викторина): итог для проголосовавшего �� пояснение после голосования.
+        if (poll.isQuiz && showResults) {
+            Spacer(modifier = Modifier.height(6.dp))
+            val answeredRight = currentUserId?.let { poll.answeredCorrectly(it) } ?: false
+            if (hasVoted) {
+                Text(
+                    if (answeredRight) "✓ Правильно!" else "✗ Неверно",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (answeredRight) Color(0xFF2E7D32) else Color(0xFFC62828)
+                )
+            }
+            poll.explanation?.takeIf { it.isNotBlank() }?.let { exp ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    exp,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textColor.copy(alpha = 0.8f)
+                )
             }
         }
         Spacer(modifier = Modifier.height(4.dp))
@@ -2692,15 +3689,20 @@ private fun PollCreationDialog(
     advancedPollsEnabled: Boolean,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onDismiss: () -> Unit,
-    onConfirm: (question: String, options: List<String>, isAnonymous: Boolean, allowMultiple: Boolean, closesAtMillis: Long?) -> Unit
+    onConfirm: (question: String, options: List<String>, isAnonymous: Boolean, allowMultiple: Boolean, closesAtMillis: Long?, isQuiz: Boolean, correctOptionIndex: Int?, explanation: String?) -> Unit
 ) {
     var question by remember { mutableStateOf("") }
     var options by remember { mutableStateOf(listOf("", "")) }
     var isAnonymous by remember { mutableStateOf(true) }
     var allowMultiple by remember { mutableStateOf(false) }
     var closesInHours by remember { mutableStateOf<Int?>(null) }
+    // НОВОЕ (викторина): режим викт��рины с ����равильным ответом и пояснением.
+    var isQuiz by remember { mutableStateOf(false) }
+    var correctIndex by remember { mutableStateOf<Int?>(null) }
+    var explanation by remember { mutableStateOf("") }
     val validOptionsCount = options.count { it.isNotBlank() }
-    val canSubmit = question.isNotBlank() && validOptionsCount >= 2
+    val correctIsValid = correctIndex?.let { it in options.indices && options[it].isNotBlank() } ?: false
+    val canSubmit = question.isNotBlank() && validOptionsCount >= 2 && (!isQuiz || correctIsValid)
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(20.dp),
@@ -2773,7 +3775,7 @@ private fun PollCreationDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Анонимный опрос", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Голоса не привязываются к именам в интерфейсе",
+                            "Голоса не ��ривяз��ваются к именам в интерфейсе",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2783,6 +3785,68 @@ private fun PollCreationDialog(
                         onCheckedChange = { isAnonymous = it },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colorTheme.primary)
                     )
+                }
+                // НОВОЕ (викторина): переключатель режима викторины и выбор правильного ответа.
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            isQuiz = !isQuiz
+                            if (isQuiz) allowMultiple = false else correctIndex = null
+                        }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Режим викторины", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Отметьте правильный ответ — участники увидят его после голосования",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isQuiz,
+                        onCheckedChange = {
+                            isQuiz = it
+                            if (it) allowMultiple = false else correctIndex = null
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colorTheme.primary)
+                    )
+                }
+                if (isQuiz) {
+                    Text(
+                        "Правильный ответ",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                    )
+                    options.forEachIndexed { index, optionText ->
+                        val label = optionText.trim().ifEmpty { "Вариант ${index + 1}" }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { correctIndex = index }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = correctIndex == index,
+                                onClick = { correctIndex = index }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = explanation,
+                        onValueChange = { explanation = it },
+                        label = { Text("Пояснение (необязательно)") },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
                 if (advancedPollsEnabled) {
                     HorizontalDivider()
@@ -2852,12 +3916,21 @@ private fun PollCreationDialog(
                             val closesAtMillis = closesInHours?.let {
                                 System.currentTimeMillis() + it.toLong() * 60 * 60 * 1000
                             }
+                            // Индекс правильного ответа нужн�� пересчитать относительно
+                            // очищенного списка (без пустых вариантов).
+                            val remappedCorrect = if (isQuiz) correctIndex?.let { ci ->
+                                if (options.getOrNull(ci)?.isBlank() != false) null
+                                else options.take(ci).count { it.isNotBlank() }
+                            } else null
                             onConfirm(
                                 question.trim(),
                                 options.map { it.trim() }.filter { it.isNotEmpty() },
                                 isAnonymous,
                                 if (advancedPollsEnabled) allowMultiple else false,
-                                if (advancedPollsEnabled) closesAtMillis else null
+                                if (advancedPollsEnabled) closesAtMillis else null,
+                                isQuiz,
+                                remappedCorrect,
+                                if (isQuiz) explanation.trim().ifEmpty { null } else null
                             )
                         }
                     ) {

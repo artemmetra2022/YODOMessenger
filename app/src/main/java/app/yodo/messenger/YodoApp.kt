@@ -2,6 +2,7 @@ package app.yodo.messenger
 
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
+import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.domain.repository.SessionRepository
@@ -25,6 +26,10 @@ class YodoApp : Application() {
     @Inject
     lateinit var sessionRepository: SessionRepository
 
+    // НОВОЕ (сквозное шифрование): генерация локальных ключей и публикация публичного ключа.
+    @Inject
+    lateinit var cryptoManager: CryptoManager
+
     private val appScope = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate() {
@@ -46,6 +51,13 @@ class YodoApp : Application() {
                 // Сессия обновится позже при входе пользователя.
                 android.util.Log.w("YodoApp", "Session update failed on startup", e)
             }
+        }
+
+        // НОВОЕ (сквозное шифрование): готовим локальные ключи и публикуем публичный ключ,
+        // если пользователь уже авторизован (для вернувшихся пользователей — на холодном старте).
+        appScope.launch {
+            runCatching { cryptoManager.ensureInitialized() }
+                .onFailure { e -> android.util.Log.w("YodoApp", "Crypto init failed on startup", e) }
         }
     }
 }

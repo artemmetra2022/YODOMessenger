@@ -82,12 +82,17 @@ class ForwardMessageViewModel @Inject constructor(
     fun forwardTo(targetChatId: String) {
         val message = messageToForward ?: return
         if (_isForwarding.value) return
-        val myName = firebaseAuth.currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Пользователь"
+        // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
+        // используем настоящий источник сообщения (например, название канала),
+        // сохранённый в holder'е при вызове prepareForward(), а не имя текущего
+        // пользователя, который выполняет пересылку.
+        val originSenderName = pendingForwardHolder.peekOriginSenderName()
+            ?: firebaseAuth.currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Пользователь"
         val myUid = firebaseAuth.currentUser?.uid ?: return
         _isForwarding.value = true
         _errorMessage.value = null
         viewModelScope.launch {
-            when (val result = messageRepository.forwardMessage(targetChatId, message, myName, myUid)) {
+            when (val result = messageRepository.forwardMessage(targetChatId, message, originSenderName, myUid)) {
                 is SendMessageResult.Success -> {
                     pendingForwardHolder.takeAndClear()
                     // п.2: кладём id пересланного сообщения в holder — ChatScreen того чата,

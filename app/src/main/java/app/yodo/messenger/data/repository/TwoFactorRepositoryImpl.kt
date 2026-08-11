@@ -16,6 +16,18 @@ import javax.crypto.spec.PBEKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * ВАЖНО (безопасность): PBKDF2 hash/salt второго пароля хранятся ОТДЕЛЬНО от
+ * публичного профиля пользователя — в приватной подколлекции
+ * users/{uid}/security/twoFactor, которая по firestore.rules читается только
+ * самим владельцем аккаунта. Раньше hash/salt лежали прямо в users/{uid},
+ * который читается публично (allow read: if true — это нужно для входа по
+ * username), из-за чего хеш второго пароля любого пользователя можно было
+ * скачать без авторизации и брутфорсить офлайн. Поле "enabled"/"hint"
+ * секретом не является (нужно для экрана входа, чтобы показать, что 2FA
+ * включена, и подсказку) и по-прежнему хранится в публичном профиле —
+ * это не даёт злоумышленнику ничего, кроме факта включённости 2FA.
+ */
 @Singleton
 class TwoFactorRepositoryImpl @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
@@ -24,6 +36,7 @@ class TwoFactorRepositoryImpl @Inject constructor(
 
     companion object {
         private const val FIELD = "twoFactor"
+        private const val SECURITY_DOC_ID = "twoFactor"
         private const val ITERATIONS = 120_000
         private const val KEY_LENGTH_BITS = 256
         private const val SALT_LENGTH_BYTES = 16
@@ -31,6 +44,12 @@ class TwoFactorRepositoryImpl @Inject constructor(
 
     private fun userDoc() =
         firebaseAuth.currentUser?.uid?.let { uid -> firestore.collection("users").document(uid) }
+
+    private fun securityDoc() =
+        firebaseAuth.currentUser?.uid?.let { uid ->
+            firestore.collection("users").document(uid)
+                .collection("security").document(SECURITY_DOC_ID)
+        }
 
     override fun observeState(): Flow<TwoFactorState> {
         val doc = userDoc() ?: return flowOf(TwoFactorState())
@@ -65,15 +84,26 @@ class TwoFactorRepositoryImpl @Inject constructor(
 
     override suspend fun setPassword(newPassword: String, hint: String?): Boolean {
         val doc = userDoc() ?: return false
+        val secDoc = securityDoc() ?: return false
         return try {
             val salt = generateSalt()
             val hash = hashPassword(newPassword, salt)
+
+            // Секретные данные (hash/salt) — в приватную подколлекцию.
+            secDoc.set(
+                mapOf(
+                    "salt" to salt.toHex(),
+                    "hash" to hash,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+            ).await()
+
+            // Публично видимые данные (только флаг и необязательная подсказка) —
+            // в профиль пользователя, как и раньше.
             doc.set(
                 mapOf(
                     FIELD to mapOf(
                         "enabled" to true,
-                        "salt" to salt.toHex(),
-                        "hash" to hash,
                         "hint" to (hint?.trim().takeUnless { it.isNullOrBlank() } ?: ""),
                         "updatedAt" to System.currentTimeMillis()
                     )
@@ -88,13 +118,11 @@ class TwoFactorRepositoryImpl @Inject constructor(
     }
 
     override suspend fun verifyPassword(password: String): Boolean {
-        val doc = userDoc() ?: return false
+        val secDoc = securityDoc() ?: return false
         return try {
-            val snap = doc.get().await()
-            @Suppress("UNCHECKED_CAST")
-            val map = snap.get(FIELD) as? Map<String, Any?> ?: return false
-            val saltHex = map["salt"] as? String ?: return false
-            val storedHash = map["hash"] as? String ?: return false
+            val snap = secDoc.get().await()
+            val saltHex = snap.getString("salt") ?: return false
+            val storedHash = snap.getString("hash") ?: return false
             val computedHash = hashPassword(password, saltHex.fromHex())
             computedHash == storedHash
         } catch (e: Exception) {
@@ -105,14 +133,20 @@ class TwoFactorRepositoryImpl @Inject constructor(
 
     override suspend fun disable(currentPassword: String): Boolean {
         val doc = userDoc() ?: return false
+        val secDoc = securityDoc() ?: return false
         if (!verifyPassword(currentPassword)) return false
         return try {
+            secDoc.set(
+                mapOf(
+                    "salt" to "",
+                    "hash" to "",
+                    "updatedAt" to System.currentTimeMillis()
+                )
+            ).await()
             doc.set(
                 mapOf(
                     FIELD to mapOf(
                         "enabled" to false,
-                        "salt" to "",
-                        "hash" to "",
                         "hint" to "",
                         "updatedAt" to System.currentTimeMillis()
                     )
