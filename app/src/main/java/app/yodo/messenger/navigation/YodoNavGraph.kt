@@ -42,6 +42,7 @@ import app.yodo.messenger.features.contacts.ContactsScreen
 import app.yodo.messenger.features.main.MainScreen
 import app.yodo.messenger.features.nearby.NearbyPeopleScreen
 import app.yodo.messenger.features.onboarding.OnboardingScreen
+import app.yodo.messenger.features.onboarding.OnboardingViewModel
 import app.yodo.messenger.features.profile.ProfileScreen
 import app.yodo.messenger.features.profile.UserProfileScreen
 import app.yodo.messenger.features.search.SearchScreen
