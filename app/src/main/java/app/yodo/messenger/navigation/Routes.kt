@@ -3,6 +3,8 @@ package app.yodo.messenger.navigation
 sealed class Routes(val route: String) {
 
     data object Welcome : Routes("welcome")
+    // НОВОЕ: экран обучения (онбординг) — показывается один раз сразу после первой регистрации.
+    data object Onboarding : Routes("onboarding")
     data object Login : Routes("login")
     data object PhoneLogin : Routes("phone_login")
     data object ForgotPassword : Routes("forgot_password")

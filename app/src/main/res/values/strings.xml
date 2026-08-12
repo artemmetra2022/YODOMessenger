@@ -48,6 +48,21 @@
     <string name="register_submit">Зарегистрироваться</string>
     <string name="register_have_account">Уже есть аккаунт? Войти</string>
 
+    <!-- Onboarding (обучение при первой регистрации) -->
+    <string name="onboarding_skip">Пропустить</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_start">Начать общение</string>
+    <string name="onboarding_welcome_title">Добро пожаловать в Yodo!</string>
+    <string name="onboarding_welcome_desc">Спасибо за регистрацию. Покажем за пару шагов, как всё устроено.</string>
+    <string name="onboarding_chats_title">Чаты и группы</string>
+    <string name="onboarding_chats_desc">Переписывайтесь один на один, создавайте группы и каналы для общения с друзьями и сообществами.</string>
+    <string name="onboarding_nearby_title">Люди рядом</string>
+    <string name="onboarding_nearby_desc">Находите и добавляйте в контакты пользователей поблизости — удобно для новых знакомств.</string>
+    <string name="onboarding_offline_title">Без интернета</string>
+    <string name="onboarding_offline_desc">Режим Bluetooth-чата позволяет общаться даже без сети и мобильного интернета.</string>
+    <string name="onboarding_settings_title">Настройки под себя</string>
+    <string name="onboarding_settings_desc">Настройте тему, конфиденциальность и уведомления в разделе «Настройки» — всё в ваших руках.</string>
+
     <!-- Настройки -->
     <string name="settings_title">Настройки</string>
     <string name="settings_profile">Профиль</string>

@@ -48,6 +48,21 @@
     <string name="register_submit">Sign up</string>
     <string name="register_have_account">Already have an account? Log in</string>
 
+    <!-- Onboarding (shown once, right after first registration) -->
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_start">Start chatting</string>
+    <string name="onboarding_welcome_title">Welcome to Yodo!</string>
+    <string name="onboarding_welcome_desc">Thanks for signing up. Let\'s show you around in a few quick steps.</string>
+    <string name="onboarding_chats_title">Chats and groups</string>
+    <string name="onboarding_chats_desc">Message one-on-one, create groups and channels to talk with friends and communities.</string>
+    <string name="onboarding_nearby_title">People nearby</string>
+    <string name="onboarding_nearby_desc">Find and add nearby users to your contacts — great for meeting new people.</string>
+    <string name="onboarding_offline_title">No internet needed</string>
+    <string name="onboarding_offline_desc">Bluetooth chat mode lets you talk even without Wi-Fi or mobile data.</string>
+    <string name="onboarding_settings_title">Make it yours</string>
+    <string name="onboarding_settings_desc">Customize theme, privacy and notifications in Settings — it\'s all up to you.</string>
+
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_profile">Profile</string>

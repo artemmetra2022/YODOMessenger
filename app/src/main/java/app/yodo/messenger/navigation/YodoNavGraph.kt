@@ -41,6 +41,7 @@ import app.yodo.messenger.features.chats.ImageViewerScreen
 import app.yodo.messenger.features.contacts.ContactsScreen
 import app.yodo.messenger.features.main.MainScreen
 import app.yodo.messenger.features.nearby.NearbyPeopleScreen
+import app.yodo.messenger.features.onboarding.OnboardingScreen
 import app.yodo.messenger.features.profile.ProfileScreen
 import app.yodo.messenger.features.profile.UserProfileScreen
 import app.yodo.messenger.features.search.SearchScreen
@@ -89,11 +90,31 @@ fun YodoNavGraph(
         composable(Routes.Register.route) {
             RegisterScreen(
                 onRegisterSuccess = {
-                    navController.navigate(Routes.ChatList.route) {
+                    // После первой регистрации ведём пользователя на обучение,
+                    // а не сразу в список чатов.
+                    navController.navigate(Routes.Onboarding.route) {
                         popUpTo(Routes.Welcome.route) { inclusive = true }
                     }
                 },
                 onNavigateToLogin = { navController.navigate(Routes.Login.route) }
+            )
+        }
+        // НОВОЕ: экран обучения — показывается один раз, сразу после первой регистрации.
+        composable(Routes.Onboarding.route) {
+            val onboardingViewModel: OnboardingViewModel = hiltViewModel()
+            OnboardingScreen(
+                onFinish = {
+                    onboardingViewModel.markOnboardingCompleted()
+                    navController.navigate(Routes.ChatList.route) {
+                        popUpTo(Routes.Onboarding.route) { inclusive = true }
+                    }
+                },
+                onSkip = {
+                    onboardingViewModel.markOnboardingCompleted()
+                    navController.navigate(Routes.ChatList.route) {
+                        popUpTo(Routes.Onboarding.route) { inclusive = true }
+                    }
+                }
             )
         }
         // НОВОЕ (Y): экран смены аккаунта.
