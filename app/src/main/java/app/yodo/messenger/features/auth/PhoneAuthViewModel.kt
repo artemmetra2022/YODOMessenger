@@ -58,6 +58,7 @@ class PhoneAuthViewModel @Inject constructor(
                         when (val result = phoneAuthRepository.completeAutoVerification()) {
                             is AuthResult.Success -> _uiState.value = PhoneAuthUiState.Success
                             is AuthResult.Error -> _uiState.value = PhoneAuthUiState.Error(result.message)
+                            is AuthResult.RequiresEmailVerification -> _uiState.value = PhoneAuthUiState.Success
                         }
                     }
                 }
@@ -88,6 +89,7 @@ class PhoneAuthViewModel @Inject constructor(
             when (val result = phoneAuthRepository.verifyCode(verificationId, code)) {
                 is AuthResult.Success -> _uiState.value = PhoneAuthUiState.Success
                 is AuthResult.Error -> _uiState.value = PhoneAuthUiState.Error(result.message)
+                is AuthResult.RequiresEmailVerification -> _uiState.value = PhoneAuthUiState.Success
             }
         }
     }

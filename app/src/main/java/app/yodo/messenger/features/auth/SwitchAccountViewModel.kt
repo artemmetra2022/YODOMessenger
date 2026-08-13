@@ -50,6 +50,8 @@ class SwitchAccountViewModel @Inject constructor(
             when (val result = authRepository.login(account.email, account.password)) {
                 is AuthResult.Success -> _switched.value = true
                 is AuthResult.Error -> _error.value = result.message
+                is AuthResult.RequiresEmailVerification ->
+                    _error.value = "Почта этого аккаунта ещё не подтверждена"
             }
             _switching.value = false
         }

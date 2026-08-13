@@ -24,6 +24,7 @@ import app.yodo.messenger.features.auth.ForgotPasswordScreen
 import app.yodo.messenger.features.auth.LoginScreen
 import app.yodo.messenger.features.auth.PhoneLoginScreen
 import app.yodo.messenger.features.auth.RegisterScreen
+import app.yodo.messenger.features.auth.VerifyEmailScreen
 import app.yodo.messenger.features.auth.WelcomeScreen
 import app.yodo.messenger.features.auth.GlobalBlockGateScreen
 import app.yodo.messenger.features.auth.GlobalBlockViewModel

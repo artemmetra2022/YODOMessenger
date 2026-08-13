@@ -186,6 +186,8 @@ class AuthViewModel @Inject constructor(
             when (val result = authRepository.loginWithGoogle(idToken)) {
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
+                is AuthResult.RequiresEmailVerification ->
+                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
             }
         }
     }
