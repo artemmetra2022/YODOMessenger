@@ -9,6 +9,8 @@ import app.yodo.messenger.domain.model.YodoUser
 sealed class AuthResult {
     data class Success(val user: YodoUser) : AuthResult()
     data class Error(val message: String) : AuthResult()
+    /** Регистрация/вход прошли успешно, но email ещё не подтверждён — письмо со ссылкой отправлено. */
+    data class RequiresEmailVerification(val email: String) : AuthResult()
 }
 
 /**
@@ -47,4 +49,13 @@ interface AuthRepository {
     fun logout()
 
     fun isLoggedIn(): Boolean
+
+    /** true, если текущий пользователь есть, но не подтвердил email. */
+    fun isEmailVerified(): Boolean
+
+    /** Повторно отправляет письмо с подтверждением на email текущего пользователя. */
+    suspend fun sendEmailVerification(): AuthResult
+
+    /** Перечитывает данные пользователя с сервера Firebase (чтобы узнать, подтверждён ли email уже). */
+    suspend fun reloadUser(): Boolean
 }

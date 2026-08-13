@@ -19,6 +19,8 @@ sealed class AuthUiState {
     data object Loading : AuthUiState()
     data object Success : AuthUiState()
     data class Error(val message: String) : AuthUiState()
+    /** Аккаунт создан/найден, но email ещё не подтверждён — показываем экран ожидания. */
+    data class RequiresEmailVerification(val email: String) : AuthUiState()
 }
 
 /** Отдельное состояние для экрана сброса пароля — не смешивается с [AuthUiState] экрана входа. */
@@ -70,6 +72,8 @@ class AuthViewModel @Inject constructor(
             when (val result = authRepository.login(emailOrUsername, password)) {
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
+                is AuthResult.RequiresEmailVerification ->
+                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
             }
         }
     }
@@ -87,8 +91,45 @@ class AuthViewModel @Inject constructor(
             when (val result = authRepository.register(name, username, email, password)) {
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
+                is AuthResult.RequiresEmailVerification ->
+                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
             }
         }
+    }
+
+    /** Повторная отправка письма с подтверждением с экрана ожидания. */
+    fun resendVerificationEmail() {
+        viewModelScope.launch {
+            when (val result = authRepository.sendEmailVerification()) {
+                is AuthResult.RequiresEmailVerification ->
+                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
+                is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
+                is AuthResult.Success -> Unit
+            }
+        }
+    }
+
+    /** Проверка по кнопке "Я подтвердил почту" — перечитывает пользователя с сервера. */
+    fun checkEmailVerified() {
+        val email = (uiState.value as? AuthUiState.RequiresEmailVerification)?.email.orEmpty()
+        viewModelScope.launch {
+            val verified = authRepository.reloadUser()
+            _uiState.value = if (verified) {
+                AuthUiState.Success
+            } else {
+                _notVerifiedYetEvent.value = true
+                AuthUiState.RequiresEmailVerification(email)
+            }
+        }
+    }
+
+    // НОВОЕ: одноразовый сигнал для показа "Почта ещё не подтверждена" на UI без
+    // подмешивания этого текста в основной AuthUiState (чтобы не терять email в состоянии).
+    private val _notVerifiedYetEvent = MutableStateFlow(false)
+    val notVerifiedYetEvent: StateFlow<Boolean> = _notVerifiedYetEvent
+
+    fun consumeNotVerifiedYetEvent() {
+        _notVerifiedYetEvent.value = false
     }
 
     private fun validateUsername(username: String): Boolean {
@@ -111,6 +152,12 @@ class AuthViewModel @Inject constructor(
 
     fun resetState() {
         _uiState.value = AuthUiState.Idle
+    }
+
+    /** Разлогинивает недоподтверждённого пользователя перед возвратом на экран входа. */
+    fun logoutAndReturnToLogin() {
+        authRepository.logout()
+        resetState()
     }
 
     /** [emailOrUsername] — как и при входе, можно ввести и email, и username. */

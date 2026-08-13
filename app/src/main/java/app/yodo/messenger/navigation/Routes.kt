@@ -9,6 +9,11 @@ sealed class Routes(val route: String) {
     data object PhoneLogin : Routes("phone_login")
     data object ForgotPassword : Routes("forgot_password")
     data object Register : Routes("register")
+    // НОВОЕ: экран ожидания подтверждения email после регистрации.
+    data object VerifyEmail : Routes("verify_email/{email}") {
+        fun createRoute(email: String) = "verify_email/${java.net.URLEncoder.encode(email, "UTF-8")}"
+        const val ARG_EMAIL = "email"
+    }
     data object ChatList : Routes("chat_list")
     data object Search : Routes("search")
     data object CreateGroup : Routes("create_group")

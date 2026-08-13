@@ -78,6 +78,9 @@ fun YodoNavGraph(
                         popUpTo(Routes.Welcome.route) { inclusive = true }
                     }
                 },
+                onRequiresVerification = { email ->
+                    navController.navigate(Routes.VerifyEmail.createRoute(email))
+                },
                 onNavigateToRegister = { navController.navigate(Routes.Register.route) },
                 onNavigateToPhoneLogin = { navController.navigate(Routes.PhoneLogin.route) },
                 onNavigateToForgotPassword = { navController.navigate(Routes.ForgotPassword.route) }
@@ -97,7 +100,34 @@ fun YodoNavGraph(
                         popUpTo(Routes.Welcome.route) { inclusive = true }
                     }
                 },
+                onRequiresVerification = { email ->
+                    // НОВОЕ: сразу после регистрации — экран "подтвердите почту",
+                    // а не онбординг/чаты. Убираем Register из бэкстека.
+                    navController.navigate(Routes.VerifyEmail.createRoute(email)) {
+                        popUpTo(Routes.Welcome.route) { inclusive = false }
+                    }
+                },
                 onNavigateToLogin = { navController.navigate(Routes.Login.route) }
+            )
+        }
+        // НОВОЕ: экран ожидания подтверждения email по ссылке из письма.
+        composable(Routes.VerifyEmail.route) { backStackEntry ->
+            val encodedEmail = backStackEntry.arguments?.getString(Routes.VerifyEmail.ARG_EMAIL).orEmpty()
+            val email = java.net.URLDecoder.decode(encodedEmail, "UTF-8")
+            VerifyEmailScreen(
+                email = email,
+                onVerified = {
+                    // Подтвердили — как и при обычной регистрации, ведём на онбординг.
+                    navController.navigate(Routes.Onboarding.route) {
+                        popUpTo(Routes.Welcome.route) { inclusive = true }
+                    }
+                },
+                onBackToLogin = {
+                    // Выходим из недоподтверждённого аккаунта и возвращаемся ко входу.
+                    navController.navigate(Routes.Login.route) {
+                        popUpTo(Routes.Welcome.route) { inclusive = false }
+                    }
+                }
             )
         }
         // НОВОЕ: экран обучения — показывается один раз, сразу после первой регистрации.

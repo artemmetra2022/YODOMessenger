@@ -68,6 +68,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
+    // НОВОЕ: если пользователь ещё не подтвердил email — уводим на экран ожидания.
+    onRequiresVerification: (String) -> Unit = {},
     onNavigateToRegister: () -> Unit,
     onNavigateToPhoneLogin: () -> Unit,
     onNavigateToForgotPassword: () -> Unit = {},
@@ -85,9 +87,16 @@ fun LoginScreen(
     val googleErrorPrefix = stringResource(R.string.auth_google_error, "")
 
     LaunchedEffect(uiState) {
-        if (uiState is AuthUiState.Success) {
-            onLoginSuccess()
-            viewModel.resetState()
+        when (val state = uiState) {
+            is AuthUiState.Success -> {
+                onLoginSuccess()
+                viewModel.resetState()
+            }
+            is AuthUiState.RequiresEmailVerification -> {
+                onRequiresVerification(state.email)
+                viewModel.resetState()
+            }
+            else -> Unit
         }
     }
 

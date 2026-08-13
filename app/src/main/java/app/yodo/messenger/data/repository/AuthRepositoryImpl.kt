@@ -45,6 +45,15 @@ class AuthRepositoryImpl @Inject constructor(
 
             val result = firebaseAuth.signInWithEmailAndPassword(email, password).await()
             val user = result.user ?: return AuthResult.Error("Не удалось получить данные пользователя")
+
+            // НОВОЕ: не пускаем в приложение, пока email не подтверждён. Аккаунт при этом
+            // уже аутентифицирован в Firebase — просто на экране входа покажем экран
+            // "подтвердите почту" вместо списка чатов.
+            user.reload().await()
+            if (!user.isEmailVerified) {
+                return AuthResult.RequiresEmailVerification(email)
+            }
+
             warmUpFirestore(user.uid)
             // НОВОЕ (Y): запоминаем аккаунт для быстрой смены.
             accountStore.saveAccount(
@@ -129,14 +138,23 @@ class AuthRepositoryImpl @Inject constructor(
                 )
             }
 
+            // НОВОЕ: отправляем письмо с подтверждением email. Само письмо и ссылку
+            // формирует и отправляет Firebase — свой SMTP/сервер не нужен.
+            try {
+                firebaseUser.sendEmailVerification().await()
+            } catch (e: Exception) {
+                android.util.Log.w("AuthRepository", "Не удалось отправить письмо подтверждения", e)
+            }
+
             warmUpFirestore(firebaseUser.uid)
             // НОВОЕ (Y): запоминаем аккаунт для быстрой смены.
             accountStore.saveAccount(
                 AccountStore.SavedAccount(firebaseUser.uid, email.trim(), password, name.trim())
             )
-            AuthResult.Success(
-                firebaseUser.toYodoUser(nameOverride = name.trim(), usernameOverride = normalizedUsername, publicIdOverride = publicId)
-            )
+            // НОВОЕ: сразу после регистрации отправляем на экран "подтвердите почту",
+            // а не в чаты — данные пользователя и username уже созданы, только доступ
+            // в основное приложение придержан до подтверждения.
+            AuthResult.RequiresEmailVerification(email.trim())
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Не удалось зарегистрироваться"))
         }
@@ -188,6 +206,35 @@ class AuthRepositoryImpl @Inject constructor(
 
     override fun logout() {
         firebaseAuth.signOut()
+    }
+
+    override fun isEmailVerified(): Boolean {
+        val user = firebaseAuth.currentUser ?: return false
+        // Если пользователь пришёл через Google — почта уже подтверждена Google,
+        // отдельного подтверждения по ссылке для него не требуем.
+        val isGoogleUser = user.providerData.any { it.providerId == GoogleAuthProvider.PROVIDER_ID }
+        return user.isEmailVerified || isGoogleUser
+    }
+
+    override suspend fun sendEmailVerification(): AuthResult {
+        val user = firebaseAuth.currentUser
+            ?: return AuthResult.Error("Вы не авторизованы")
+        return try {
+            user.sendEmailVerification().await()
+            AuthResult.RequiresEmailVerification(user.email.orEmpty())
+        } catch (e: Exception) {
+            AuthResult.Error(e.toUserMessage("Не удалось отправить письмо повторно"))
+        }
+    }
+
+    override suspend fun reloadUser(): Boolean {
+        val user = firebaseAuth.currentUser ?: return false
+        return try {
+            user.reload().await()
+            user.isEmailVerified
+        } catch (e: Exception) {
+            false
+        }
     }
 
     override suspend fun loginWithGoogle(idToken: String): AuthResult {

@@ -64,6 +64,8 @@ import app.yodo.messenger.ui.theme.YodoError
 fun RegisterScreen(
     onRegisterSuccess: () -> Unit,
     onNavigateToLogin: () -> Unit,
+    // НОВОЕ: после регистрации ведём не сразу в чаты, а на экран подтверждения email.
+    onRequiresVerification: (String) -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     var name by remember { mutableStateOf("") }
@@ -79,9 +81,16 @@ fun RegisterScreen(
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
 
     LaunchedEffect(uiState) {
-        if (uiState is AuthUiState.Success) {
-            onRegisterSuccess()
-            viewModel.resetState()
+        when (val state = uiState) {
+            is AuthUiState.Success -> {
+                onRegisterSuccess()
+                viewModel.resetState()
+            }
+            is AuthUiState.RequiresEmailVerification -> {
+                onRequiresVerification(state.email)
+                viewModel.resetState()
+            }
+            else -> Unit
         }
     }
 
