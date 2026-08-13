@@ -9,8 +9,17 @@ import app.yodo.messenger.domain.model.YodoUser
 sealed class AuthResult {
     data class Success(val user: YodoUser) : AuthResult()
     data class Error(val message: String) : AuthResult()
-    /** Регистрация/вход прошли успешно, но email ещё не подтверждён — письмо со ссылкой отправлено. */
-    data class RequiresEmailVerification(val email: String) : AuthResult()
+    /**
+     * Регистрация/вход прошли успешно, но email ещё не подтверждён.
+     * [emailSendFailed] = true означает, что отправить письмо со ссылкой не удалось
+     * (например, Firebase вернул ERROR_TOO_MANY_REQUESTS) — раньше эта ошибка тихо
+     * проглатывалась и пользователь не понимал, почему письмо не приходит.
+     */
+    data class RequiresEmailVerification(
+        val email: String,
+        val emailSendFailed: Boolean = false,
+        val emailSendError: String? = null
+    ) : AuthResult()
 }
 
 /**

@@ -19,8 +19,17 @@ sealed class AuthUiState {
     data object Loading : AuthUiState()
     data object Success : AuthUiState()
     data class Error(val message: String) : AuthUiState()
-    /** Аккаунт создан/найден, но email ещё не подтверждён — показываем экран ожидания. */
-    data class RequiresEmailVerification(val email: String) : AuthUiState()
+    /**
+     * Аккаунт создан/найден, но email ещё не подтверждён — показываем экран ожидания.
+     * ИСПРАВЛЕНО: [emailSendFailed] и [emailSendError] позволяют UI показать явную
+     * причину, если письмо со ссылкой на самом деле не отправилось (например, из-за
+     * лимита Firebase на количество писем), а не молча ждать письма, которое не придёт.
+     */
+    data class RequiresEmailVerification(
+        val email: String,
+        val emailSendFailed: Boolean = false,
+        val emailSendError: String? = null
+    ) : AuthUiState()
 }
 
 /** Отдельное состояние для экрана сброса пароля — не смешивается с [AuthUiState] экрана входа. */
@@ -73,7 +82,9 @@ class AuthViewModel @Inject constructor(
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
                 is AuthResult.RequiresEmailVerification ->
-                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
+                    _uiState.value = AuthUiState.RequiresEmailVerification(
+                        result.email, result.emailSendFailed, result.emailSendError
+                    )
             }
         }
     }
@@ -92,7 +103,9 @@ class AuthViewModel @Inject constructor(
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
                 is AuthResult.RequiresEmailVerification ->
-                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
+                    _uiState.value = AuthUiState.RequiresEmailVerification(
+                        result.email, result.emailSendFailed, result.emailSendError
+                    )
             }
         }
     }
@@ -102,7 +115,9 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = authRepository.sendEmailVerification()) {
                 is AuthResult.RequiresEmailVerification ->
-                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
+                    _uiState.value = AuthUiState.RequiresEmailVerification(
+                        result.email, result.emailSendFailed, result.emailSendError
+                    )
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
                 is AuthResult.Success -> Unit
             }
@@ -187,7 +202,9 @@ class AuthViewModel @Inject constructor(
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
                 is AuthResult.RequiresEmailVerification ->
-                    _uiState.value = AuthUiState.RequiresEmailVerification(result.email)
+                    _uiState.value = AuthUiState.RequiresEmailVerification(
+                        result.email, result.emailSendFailed, result.emailSendError
+                    )
             }
         }
     }

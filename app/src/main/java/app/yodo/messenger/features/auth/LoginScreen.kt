@@ -94,7 +94,11 @@ fun LoginScreen(
             }
             is AuthUiState.RequiresEmailVerification -> {
                 onRequiresVerification(state.email)
-                viewModel.resetState()
+                // ИСПРАВЛЕНО: не сбрасываем uiState, если письмо не отправилось —
+                // иначе VerifyEmailScreen не увидит причину (см. RegisterScreen).
+                if (!state.emailSendFailed) {
+                    viewModel.resetState()
+                }
             }
             else -> Unit
         }

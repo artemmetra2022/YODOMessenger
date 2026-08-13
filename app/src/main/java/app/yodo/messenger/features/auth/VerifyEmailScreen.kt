@@ -52,6 +52,13 @@ fun VerifyEmailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val notVerifiedYet by viewModel.notVerifiedYetEvent.collectAsState()
 
+    // ИСПРАВЛЕНО: раньше, если отправка письма реально падала (например, лимит
+    // Firebase), пользователь просто ничего не видел и не понимал, почему письмо
+    // не приходит. Теперь читаем эту причину из uiState и показываем явно.
+    val emailSendError = (uiState as? AuthUiState.RequiresEmailVerification)
+        ?.takeIf { it.emailSendFailed }
+        ?.emailSendError
+
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
             onVerified()
@@ -98,6 +105,16 @@ fun VerifyEmailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
+
+            if (emailSendError != null) {
+                Spacer1()
+                Text(
+                    "Письмо не отправлено: $emailSendError. Нажмите «Отправить письмо ещё раз».",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center
+                )
+            }
 
             if (notVerifiedYet) {
                 Spacer1()

@@ -88,7 +88,13 @@ fun RegisterScreen(
             }
             is AuthUiState.RequiresEmailVerification -> {
                 onRequiresVerification(state.email)
-                viewModel.resetState()
+                // ИСПРАВЛЕНО: раньше состояние сбрасывалось сразу, и VerifyEmailScreen
+                // не мог узнать, что письмо на самом деле не отправилось. Если отправка
+                // упала — оставляем uiState как есть, чтобы экран верификации показал
+                // причину; иначе сбрасываем как раньше.
+                if (!state.emailSendFailed) {
+                    viewModel.resetState()
+                }
             }
             else -> Unit
         }

@@ -140,10 +140,20 @@ class AuthRepositoryImpl @Inject constructor(
 
             // НОВОЕ: отправляем письмо с подтверждением email. Само письмо и ссылку
             // формирует и отправляет Firebase — свой SMTP/сервер не нужен.
+            // ИСПРАВЛЕНО: раньше ошибка здесь тихо проглатывалась (только Log.w),
+            // и пользователь попадал на экран "подтвердите почту", даже если письмо
+            // так и не ушло (например, Firebase вернул ERROR_TOO_MANY_REQUESTS из-за
+            // дневного лимита на встроенный email-сервис) — снаружи это выглядело
+            // как "письмо не приходит" без всякого объяснения. Теперь передаём
+            // результат отправки дальше, чтобы UI мог показать понятную причину.
+            var emailSendFailed = false
+            var emailSendError: String? = null
             try {
                 firebaseUser.sendEmailVerification().await()
             } catch (e: Exception) {
                 android.util.Log.w("AuthRepository", "Не удалось отправить письмо подтверждения", e)
+                emailSendFailed = true
+                emailSendError = e.toUserMessage("Не удалось отправить письмо подтверждения")
             }
 
             warmUpFirestore(firebaseUser.uid)
@@ -154,7 +164,11 @@ class AuthRepositoryImpl @Inject constructor(
             // НОВОЕ: сразу после регистрации отправляем на экран "подтвердите почту",
             // а не в чаты — данные пользователя и username уже созданы, только доступ
             // в основное приложение придержан до подтверждения.
-            AuthResult.RequiresEmailVerification(email.trim())
+            AuthResult.RequiresEmailVerification(
+                email = email.trim(),
+                emailSendFailed = emailSendFailed,
+                emailSendError = emailSendError
+            )
         } catch (e: Exception) {
             AuthResult.Error(e.toUserMessage("Не удалось зарегистрироваться"))
         }
@@ -223,6 +237,11 @@ class AuthRepositoryImpl @Inject constructor(
             user.sendEmailVerification().await()
             AuthResult.RequiresEmailVerification(user.email.orEmpty())
         } catch (e: Exception) {
+            // ИСПРАВЛЕНО: раньше при повторной отправке письмо тоже могло не уйти
+            // из-за лимита Firebase (FirebaseTooManyRequestsException), а пользователь
+            // видел общий текст "Не удалось отправить письмо повторно" без объяснения
+            // причины. Теперь используем toUserMessage(), который для этого случая
+            // вернёт "Слишком много попыток. Попробуйте позже".
             AuthResult.Error(e.toUserMessage("Не удалось отправить письмо повторно"))
         }
     }
