@@ -269,9 +269,22 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow create: if isSignedIn() &&
           (chatId != 'yodo_official_channel' || isOfficialChannelAdmin()) &&
-          // Отправитель сообщения обязан совпадать с текущим пользователем —
-          // запрещает отправку сообщений от чужого имени.
-          request.auth.uid == request.resource.data.senderId;
+          (
+            // Отправитель сообщения обязан совпадать с текущим пользователем —
+            // запрещает отправку сообщений от чужого имени.
+            request.auth.uid == request.resource.data.senderId ||
+            // НОВОЕ (приветствие поддержки, без Cloud Functions): владелец support-чата
+            // может один раз создать ровно ОДНО системное приветственное сообщение
+            // от имени "support_system" — сразу при первом открытии чата поддержки.
+            // Проверяем, что чат ещё пуст (сообщений от support_system ещё нет),
+            // это не даёт злоупотребить правилом и наштамповать много таких сообщений.
+            (
+              isSupportChat(chatId) &&
+              chatId == 'support_' + request.auth.uid &&
+              request.resource.data.senderId == 'support_system' &&
+              !exists(/databases/$(database)/documents/chats/$(chatId)/messages/support_welcome)
+            )
+          );
 
         // Редактировать/удалять сообщение может только его автор
         // (senderId == текущий пользователь), либо один из двух

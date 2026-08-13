@@ -959,6 +959,14 @@ class ChatRepositoryImpl @Inject constructor(
                 val name = userDoc.getString("displayName") ?: user.displayName ?: "Пользователь"
                 val email = user.email ?: userDoc.getString("email") ?: ""
                 val now = System.currentTimeMillis()
+                // НОВОЕ (приветствие поддержки, без Cloud Functions — план Firebase не Blaze):
+                // текст приветственного сообщения. Пишем его прямо с клиента как обычное
+                // Message-сообщение от имени "support_system" — allow в firestore.rules
+                // разрешает это ровно один раз для владельца чата, документ с фиксированным
+                // id "support_welcome" не даёт создать приветствие повторно.
+                val welcomeText = "Здравствуйте, это аккаунт поддержки. Задавайте вопросы именно в него — " +
+                    "мы отвечаем в этом же чате. Опишите проблему подробно и, если есть, приложите " +
+                    "скриншот — так мы разберёмся быстрее."
                 ref.set(
                     mapOf(
                         "participantIds" to listOf(uid),
@@ -970,16 +978,30 @@ class ChatRepositoryImpl @Inject constructor(
                         "supportUserName" to name,
                         "supportUserEmail" to email,
                         "supportUserAvatar" to userDoc.getString("photoBase64"),
-                        "lastMessage" to "",
+                        "lastMessage" to welcomeText,
                         "lastMessageTimestamp" to now,
-                        "lastMessageSenderId" to uid,
+                        "lastMessageSenderId" to "support_system",
                         "lastMessageStatus" to "SENT",
-                        "unreadCounts" to mapOf(uid to 0),
+                        "unreadCounts" to mapOf(uid to 1),
                         "isOnline" to false,
                         "createdBy" to uid,
                         "createdAt" to now
                     )
                 ).await()
+                try {
+                    ref.collection("messages").document("support_welcome").set(
+                        mapOf(
+                            "senderId" to "support_system",
+                            "text" to welcomeText,
+                            "timestamp" to now,
+                            "status" to "SENT",
+                            "notified" to true
+                        )
+                    ).await()
+                } catch (_: Exception) {
+                    // Не критично: если приветствие не удалось создать (например, оффлайн),
+                    // сам чат поддержки уже создан и пользователь всё равно может им пользоваться.
+                }
             }
             CreateChatResult.Success(chatId)
         } catch (e: Exception) {
