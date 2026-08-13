@@ -296,3 +296,47 @@ exports.getLinkPreview = onCall(async (request) => {
   await cacheRef.set({ preview, fetchedAt: Date.now() });
   return preview;
 });
+
+/**
+ * НОВОЕ (приветствие в чате поддержки): срабатывает при создании документа
+ * chats/{chatId} с type == "SUPPORT" (см. ChatRepositoryImpl.getOrCreateSupportChat).
+ * Дописывает первое сообщение от системного отправителя "support_system" и обновляет
+ * lastMessage/lastMessageTimestamp самого чата, чтобы приветствие сразу было видно
+ * в списке чатов. Серверная реализация выбрана намеренно: срабатывает для любого
+ * способа создания чата (не только из приложения) и не создаёт гонку условий
+ * с клиентским кодом создания того же документа.
+ */
+const SUPPORT_SYSTEM_SENDER_ID = "support_system";
+const SUPPORT_WELCOME_TEXT =
+  "Здравствуйте, это аккаунт поддержки. Задавайте вопросы именно в него — " +
+  "мы отвечаем в этом же чате. Опишите проблему подробно и, если есть, приложите " +
+  "скриншот — так мы разберёмся быстрее.";
+
+exports.onSupportChatCreated = onDocumentCreated(
+  "chats/{chatId}",
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const chat = snapshot.data();
+    if (chat.type !== "SUPPORT") return;
+
+    const chatRef = snapshot.ref;
+    const now = Date.now();
+
+    await chatRef.collection("messages").add({
+      senderId: SUPPORT_SYSTEM_SENDER_ID,
+      text: SUPPORT_WELCOME_TEXT,
+      timestamp: now,
+      status: "SENT",
+      notified: true, // не триггерим onNewMessage-пуш ради системного приветствия
+    });
+
+    await chatRef.update({
+      lastMessage: SUPPORT_WELCOME_TEXT,
+      lastMessageTimestamp: now,
+      lastMessageSenderId: SUPPORT_SYSTEM_SENDER_ID,
+      lastMessageStatus: "SENT",
+    });
+  }
+);

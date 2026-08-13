@@ -53,6 +53,12 @@ class AuthRepositoryImpl @Inject constructor(
             if (!user.isEmailVerified) {
                 return AuthResult.RequiresEmailVerification(email)
             }
+            // НОВОЕ (email-статус): синхронизируем флаг в Firestore при обычном логине —
+            // покрывает случай, когда почта была подтверждена по ссылке, минуя reloadUser().
+            try {
+                firestore.collection("users").document(user.uid)
+                    .update("isEmailVerified", true).await()
+            } catch (_: Exception) { }
 
             warmUpFirestore(user.uid)
             // НОВОЕ (Y): запоминаем аккаунт для быстрой смены.
@@ -117,6 +123,9 @@ class AuthRepositoryImpl @Inject constructor(
                             "usernameLowercase" to normalizedUsername,
                             "email" to email.trim(),
                             "publicId" to publicId,
+                            // НОВОЕ (email-статус): дублируем флаг в Firestore, т.к. Firebase Auth
+                            // недоступен напрямую при просмотре ЧУЖОГО профиля.
+                            "isEmailVerified" to firebaseUser.isEmailVerified,
                             "createdAt" to System.currentTimeMillis()
                         )
                     )
@@ -250,6 +259,18 @@ class AuthRepositoryImpl @Inject constructor(
         val user = firebaseAuth.currentUser ?: return false
         return try {
             user.reload().await()
+            // НОВОЕ (email-статус): как только Auth подтвердил почту — дублируем флаг
+            // в Firestore, чтобы он стал виден в чужих профилях (UserProfileScreen).
+            // Пишем только при переходе в true, чтобы не дёргать Firestore на каждый reload.
+            if (user.isEmailVerified) {
+                try {
+                    firestore.collection("users").document(user.uid)
+                        .update("isEmailVerified", true).await()
+                } catch (_: Exception) {
+                    // Не критично: если запись не прошла (например, оффлайн), статус
+                    // подтянется при следующем успешном reload/логине.
+                }
+            }
             user.isEmailVerified
         } catch (e: Exception) {
             false
@@ -286,6 +307,8 @@ class AuthRepositoryImpl @Inject constructor(
                                 "usernameLowercase" to autoUsername,
                                 "email" to user.email,
                                 "avatarUrl" to user.photoUrl?.toString(),
+                                // НОВОЕ (email-статус): Google-аккаунты считаем подтверждёнными сразу.
+                                "isEmailVerified" to true,
                                 "createdAt" to System.currentTimeMillis()
                             )
                         )
@@ -326,7 +349,10 @@ class AuthRepositoryImpl @Inject constructor(
         email = email,
         phoneNumber = phoneNumber,
         photoUrl = photoUrl?.toString(),
-        publicId = publicIdOverride
+        publicId = publicIdOverride,
+        // НОВОЕ (email-статус): берём напрямую из Firebase Auth — здесь это всегда актуальное
+        // значение (после user.reload() в login(), либо всегда true для Google-входа).
+        isEmailVerified = isEmailVerified
     )
 
     companion object {

@@ -42,7 +42,8 @@ class UserRepositoryImpl @Inject constructor(
                         displayName = firebaseAuth.currentUser?.displayName.orEmpty(),
                         email = firebaseAuth.currentUser?.email,
                         phoneNumber = firebaseAuth.currentUser?.phoneNumber,
-                        photoUrl = firebaseAuth.currentUser?.photoUrl?.toString()
+                        photoUrl = firebaseAuth.currentUser?.photoUrl?.toString(),
+                        isEmailVerified = firebaseAuth.currentUser?.isEmailVerified ?: false
                     ))
                     return@addSnapshotListener
                 }
@@ -432,6 +433,7 @@ class UserRepositoryImpl @Inject constructor(
         publicKey = getString("publicKey"),
         publicId = getString("publicId"),
         emojiStatus = getString("emojiStatus"),
-        customStatus = getString("customStatus")
+        customStatus = getString("customStatus"),
+        isEmailVerified = getBoolean("isEmailVerified") ?: false
     )
 }

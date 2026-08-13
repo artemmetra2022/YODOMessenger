@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -122,6 +123,8 @@ fun SettingsScreen(
     onOpenSecurity: () -> Unit = {},
     // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
     onOpenReports: () -> Unit = {},
+    // НОВОЕ (обучение): повторно открыть экран онбординга из настроек.
+    onOpenOnboarding: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currentLanguage by viewModel.currentLanguage.collectAsState()
@@ -945,6 +948,19 @@ fun SettingsScreen(
                         subtitle = "Двухфакторная аутентификация, сброс через вопросы, защита от скриншотов, статусы",
                         colorTheme = colorTheme,
                         onClick = onOpenSecurity
+                    )
+                }
+            }
+            // НОВОЕ (обучение): повторный показ онбординга — тот же экран, что и при первой
+            // регистрации, но без сброса/повторной установки флага "обучение пройдено".
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.School,
+                        title = "Пройти обучение",
+                        subtitle = "Короткий тур по возможностям приложения",
+                        colorTheme = colorTheme,
+                        onClick = onOpenOnboarding
                     )
                 }
             }

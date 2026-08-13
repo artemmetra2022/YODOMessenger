@@ -26,9 +26,11 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.QrCode
@@ -75,6 +77,7 @@ import app.yodo.messenger.features.security.SecurityViewModel
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.YodoError
+import app.yodo.messenger.ui.theme.YodoSuccess
 import app.yodo.messenger.util.BirthDateValidator
 import app.yodo.messenger.util.EmojiOnlyValidator
 import kotlinx.coroutines.Job
@@ -446,8 +449,28 @@ fun ProfileScreen(
                     isSaving = uiState.isSavingWebsite
                 )
 
-                uiState.user?.email?.let {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                // НОВОЕ (email-статус): рядом с почтой — бейдж "подтверждена/не подтверждена".
+                uiState.user?.email?.let { email ->
+                    val isVerified = uiState.user?.isEmailVerified == true
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) {
+                        Text(email, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = if (isVerified) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
+                            contentDescription = null,
+                            tint = if (isVerified) YodoSuccess else YodoError,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isVerified) "Подтверждена" else "Не подтверждена",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isVerified) YodoSuccess else YodoError
+                        )
+                    }
                 }
             }
 

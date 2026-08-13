@@ -26,5 +26,8 @@ data class YodoUser(
     val publicId: String? = null,
     // НОВОЕ (батч 7): эмодзи-статус и текстовый статус, видимые другим пользователям.
     val emojiStatus: String? = null,
-    val customStatus: String? = null
+    val customStatus: String? = null,
+    // НОВОЕ (email-статус): подтверждена ли почта. Дублируется из Firebase Auth в Firestore,
+    // чтобы бейдж "подтверждён/не подтверждён" был виден и в чужом профиле (не только в своём).
+    val isEmailVerified: Boolean = false
 )

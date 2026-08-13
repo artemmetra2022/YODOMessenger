@@ -570,11 +570,23 @@ fun YodoNavGraph(
                 onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
                 // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
                 onOpenReports = { navController.navigate(Routes.ReportInbox.route) },
+                // НОВОЕ (обучение): повторный показ онбординга из настроек.
+                onOpenOnboarding = { navController.navigate(Routes.OnboardingReplay.route) },
                 onLoggedOut = {
                     navController.navigate(Routes.Welcome.route) {
                         popUpTo(navController.graph.id) { inclusive = true }
                     }
                 }
+            )
+        }
+        // НОВОЕ (обучение): повторный показ онбординга по запросу из настроек. В отличие
+        // от Routes.Onboarding, здесь просто возвращаемся назад — не трогаем
+        // markOnboardingCompleted() (флаг уже true, раз пользователь дошёл до настроек)
+        // и не чистим бэкстек, чтобы вернуться туда, откуда пришли.
+        composable(Routes.OnboardingReplay.route) {
+            OnboardingScreen(
+                onFinish = { navController.popBackStack() },
+                onSkip = { navController.popBackStack() }
             )
         }
         composable(Routes.OfflineChat.route) {

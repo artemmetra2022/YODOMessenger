@@ -27,7 +27,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocationOn
@@ -70,6 +72,8 @@ import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
+import app.yodo.messenger.ui.theme.YodoError
+import app.yodo.messenger.ui.theme.YodoSuccess
 
 @Composable
 fun UserProfileScreen(
@@ -330,19 +334,21 @@ fun UserProfileScreen(
                     // ════════════════════════════════════════
                     // Расширенный профиль
                     // ════════════════════════════════════════
+                    // НОВОЕ (email-статус): для поля email дополнительно передаём флаг подтверждения,
+                    // остальным полям он не нужен (isVerified = null).
                     val extendedFields = buildList {
                         if (user.showAboutMe && !user.aboutMe.isNullOrBlank())
-                            add(Triple(Icons.Filled.Info, stringResource(R.string.user_profile_about), user.aboutMe!!))
+                            add(ProfileExtendedField(Icons.Filled.Info, stringResource(R.string.user_profile_about), user.aboutMe!!))
                         if (user.showBirthDate && !user.birthDate.isNullOrBlank())
-                            add(Triple(Icons.Filled.CalendarMonth, stringResource(R.string.user_profile_birth_date), user.birthDate!!))
+                            add(ProfileExtendedField(Icons.Filled.CalendarMonth, stringResource(R.string.user_profile_birth_date), user.birthDate!!))
                         if (user.showLocation && !user.location.isNullOrBlank())
-                            add(Triple(Icons.Filled.LocationOn, stringResource(R.string.user_profile_location), user.location!!))
+                            add(ProfileExtendedField(Icons.Filled.LocationOn, stringResource(R.string.user_profile_location), user.location!!))
                         if (user.showWebsite && !user.website.isNullOrBlank())
-                            add(Triple(Icons.Filled.Language, stringResource(R.string.user_profile_website), user.website!!))
+                            add(ProfileExtendedField(Icons.Filled.Language, stringResource(R.string.user_profile_website), user.website!!))
                         if (user.showPhoneNumber && !user.phoneNumber.isNullOrBlank())
-                            add(Triple(Icons.Filled.Phone, stringResource(R.string.user_profile_phone), user.phoneNumber!!))
+                            add(ProfileExtendedField(Icons.Filled.Phone, stringResource(R.string.user_profile_phone), user.phoneNumber!!))
                         if (user.showEmail && !user.email.isNullOrBlank())
-                            add(Triple(Icons.Filled.Email, "Email", user.email!!))
+                            add(ProfileExtendedField(Icons.Filled.Email, "Email", user.email!!, isVerified = user.isEmailVerified))
                     }
 
                     if (extendedFields.isNotEmpty()) {
@@ -379,8 +385,14 @@ fun UserProfileScreen(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(MaterialTheme.colorScheme.surface)
                         ) {
-                            extendedFields.forEachIndexed { index, (icon, label, value) ->
-                                ProfileInfoRow(icon = icon, label = label, value = value, colorTheme = colorTheme)
+                            extendedFields.forEachIndexed { index, field ->
+                                ProfileInfoRow(
+                                    icon = field.icon,
+                                    label = field.label,
+                                    value = field.value,
+                                    colorTheme = colorTheme,
+                                    isVerified = field.isVerified
+                                )
                                 if (index < extendedFields.lastIndex) {
                                     HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                                 }
@@ -504,13 +516,23 @@ private fun UserAvatarRing(
     }
 }
 
+// НОВОЕ (email-статус): контейнер для поля расширенного профиля. isVerified используется
+// только строкой email — null означает "бейдж не показываем" (для остальных полей).
+private data class ProfileExtendedField(
+    val icon: ImageVector,
+    val label: String,
+    val value: String,
+    val isVerified: Boolean? = null
+)
+
 /** Строка расширенного профиля в карточке. */
 @Composable
 private fun ProfileInfoRow(
     icon: ImageVector,
     label: String,
     value: String,
-    colorTheme: app.yodo.messenger.ui.theme.ColorTheme
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    isVerified: Boolean? = null
 ) {
     Row(
         modifier = Modifier
@@ -538,6 +560,16 @@ private fun ProfileInfoRow(
                 value,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium
+            )
+        }
+        // НОВОЕ (email-статус): бейдж "подтверждена/не подтверждена" рядом с email в чужом профиле.
+        if (isVerified != null) {
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(
+                imageVector = if (isVerified) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
+                contentDescription = if (isVerified) "Почта подтверждена" else "Почта не подтверждена",
+                tint = if (isVerified) YodoSuccess else YodoError,
+                modifier = Modifier.size(18.dp)
             )
         }
     }

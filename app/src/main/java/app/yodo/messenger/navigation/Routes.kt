@@ -5,6 +5,9 @@ sealed class Routes(val route: String) {
     data object Welcome : Routes("welcome")
     // НОВОЕ: экран обучения (онбординг) — показывается один раз сразу после первой регистрации.
     data object Onboarding : Routes("onboarding")
+    // НОВОЕ (обучение): повторный показ того же экрана из настроек — отдельный route,
+    // чтобы не путать со связанной с ним логикой popUpTo(Welcome) при первой регистрации.
+    data object OnboardingReplay : Routes("onboarding_replay")
     data object Login : Routes("login")
     data object PhoneLogin : Routes("phone_login")
     data object ForgotPassword : Routes("forgot_password")
