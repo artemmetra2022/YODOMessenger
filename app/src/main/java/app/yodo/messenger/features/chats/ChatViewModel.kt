@@ -78,8 +78,22 @@ data class ChatUiState(
     // и обратный отсчёт секунд до автоскрытия плашки (5,4,3,2,1).
     val justForwardedTargetName: String? = null,
     val justForwardedTargetUserId: String? = null,
-    val forwardUndoSecondsLeft: Int = 0
+    val forwardUndoSecondsLeft: Int = 0,
+    // НОВОЕ (FAQ-бот поддержки): текущий экран бота поддержки. null == панель бота
+    // скрыта (пользователь свернул её и печатает оператору вручную).
+    val supportFaqScreen: SupportFaqScreen? = null
 )
+
+// НОВОЕ (FAQ-бот поддержки): три состояния кнопочного бота внутри чата поддержки —
+// список разделов, открытый раздел со списком вопросов, либо открытый вопрос с ответом.
+// Раздел "Не нашли нужный вопрос?" обрабатывается как обычный FaqSection (id = OTHER_SECTION_ID),
+// но его единственный "вопрос" на самом деле не открывает экран ответа, а сразу зовёт оператора
+// (см. ChatScreen: SupportFaqPanel).
+sealed class SupportFaqScreen {
+    object SectionList : SupportFaqScreen()
+    data class QuestionList(val sectionId: String) : SupportFaqScreen()
+    data class Answer(val sectionId: String, val questionId: String) : SupportFaqScreen()
+}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -119,6 +133,9 @@ class ChatViewModel @Inject constructor(
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
     val currentUserId: String? get() = firebaseAuth.currentUser?.uid
+    // НОВОЕ (FAQ-бот поддержки): чтобы ChatScreen не показывал кнопочный FAQ оператору,
+    // который зашёл в этот же support_<uid> чат из админ-панели, чтобы ответить пользователю.
+    val isSupportAdmin: Boolean get() = chatRepository.isSupportAdmin()
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState
@@ -152,6 +169,13 @@ class ChatViewModel @Inject constructor(
 
     init {
         loadChatInfo()
+        // НОВОЕ (FAQ-бот поддержки): в чате поддержки бот открыт по умолчанию —
+        // пользователь сразу видит разделы вопросов вместо пустого поля ввода.
+        // Если это чат поддержки не выяснится сразу (chatType грузится асинхронно
+        // в loadChatInfo), панель включится тем же вызовом чуть ниже.
+        if (chatId.startsWith(ChatRepository.SUPPORT_CHAT_PREFIX) && !chatRepository.isSupportAdmin()) {
+            _uiState.value = _uiState.value.copy(supportFaqScreen = SupportFaqScreen.SectionList)
+        }
         observeMessages()
         observePinnedMessages()
         observeTyping()
@@ -766,6 +790,42 @@ class ChatViewModel @Inject constructor(
 
     fun consumeError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+
+    // === НОВОЕ (FAQ-бот поддержки) ===
+    // Кнопочная панель поверх поля ввода в чате поддержки: разделы -> вопросы -> ответ,
+    // как в Telegram-ботах. Полностью на клиенте, ничего не пишет в Firestore, пока
+    // пользователь сам не решит написать оператору обычным текстом.
+
+    fun openSupportFaqMenu() {
+        _uiState.value = _uiState.value.copy(supportFaqScreen = SupportFaqScreen.SectionList)
+    }
+
+    fun openFaqSection(sectionId: String) {
+        _uiState.value = _uiState.value.copy(
+            supportFaqScreen = SupportFaqScreen.QuestionList(sectionId)
+        )
+    }
+
+    fun openFaqQuestion(sectionId: String, questionId: String) {
+        _uiState.value = _uiState.value.copy(
+            supportFaqScreen = SupportFaqScreen.Answer(sectionId, questionId)
+        )
+    }
+
+    fun backToFaqSections() {
+        _uiState.value = _uiState.value.copy(supportFaqScreen = SupportFaqScreen.SectionList)
+    }
+
+    fun backToFaqQuestions(sectionId: String) {
+        _uiState.value = _uiState.value.copy(
+            supportFaqScreen = SupportFaqScreen.QuestionList(sectionId)
+        )
+    }
+
+    /** Пользователь сворачивает бота и переходит к обычной переписке с оператором. */
+    fun closeSupportFaq() {
+        _uiState.value = _uiState.value.copy(supportFaqScreen = null)
     }
 
     override fun onCleared() {

@@ -4,6 +4,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Bolt
 import android.Manifest
@@ -108,6 +111,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -162,6 +166,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.MessageStatus
+import app.yodo.messenger.domain.model.SupportFaqData
+import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.components.swipeToGoBack
 import app.yodo.messenger.ui.theme.LocalColorTheme
@@ -396,6 +402,9 @@ fun ChatScreen(
         uiState.messages
     }
     val isChannel = uiState.chatType == "CHANNEL"
+    // НОВОЕ (FAQ-бот поддержки): бот показывается только пользователю, не оператору,
+    // который отвечает в этом же чате из своего аккаунта поддержки.
+    val isSupportAdmin = viewModel.isSupportAdmin
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -804,7 +813,24 @@ fun ChatScreen(
                         onCancel = { viewModel.setReplyingTo(null) }
                     )
                 }
-                if (isChannel && !uiState.isAdmin) {
+                // НОВОЕ (FAQ-бот поддержки): в чате поддержки вместо обычного поля ввода
+                // показываем кнопочный FAQ (разделы -> вопросы -> ответ), пока пользователь
+                // сам не свернёт его, чтобы написать оператору вручную.
+                val isSupportChat = uiState.chatType == "SUPPORT" && !isSupportAdmin
+                if (isSupportChat && uiState.supportFaqScreen != null) {
+                    SupportFaqPanel(
+                        screen = uiState.supportFaqScreen!!,
+                        colorTheme = colorTheme,
+                        onSelectSection = { viewModel.openFaqSection(it) },
+                        onSelectQuestion = { sectionId, questionId ->
+                            viewModel.openFaqQuestion(sectionId, questionId)
+                        },
+                        onBackToSections = { viewModel.backToFaqSections() },
+                        onBackToQuestions = { viewModel.backToFaqQuestions(it) },
+                        onContactOperator = { viewModel.closeSupportFaq() },
+                        onCollapse = { viewModel.closeSupportFaq() }
+                    )
+                } else if (isChannel && !uiState.isAdmin) {
                     ChannelBottomBar(
                         isSubscribed = uiState.isSubscribed,
                         isOfficial = uiState.isVerified,
@@ -982,28 +1008,59 @@ fun ChatScreen(
                             )
                         }
                         else -> {
-                            MessageInputBar(
-                                text = inputText,
-                                onTextChange = { inputText = it; viewModel.onInputTextChanged(it) },
-                                onSendClick = { trySend() },
-                                onSendLongPress = { if (inputText.isNotBlank()) showScheduleDialog = true },
-                                onKeyboardSend = { if (sendOnEnter) trySend() },
-                                sendOnEnter = sendOnEnter,
-                                isSending = uiState.isSending,
-                                onAttachClick = { showAttachMenu = true },
-                                onMicPressStart = { startVoiceRecording() },
-                                onMicPressEnd = { stopVoiceRecordingToPreview() },
-                                colorTheme = colorTheme,
-                                placeholder = if (isChannel && uiState.isAdmin) "Вы админ, вам можно писать" else "Сообщение...",
-                                pendingTtlSeconds = pendingMessageTtlSeconds,
-                                isTtlExplicitlySet = pendingMessageTtlExplicitlySet,
-                                onTtlIconClick = { showPerMessageTtlDialog = true },
-                                onScheduleClick = { if (inputText.isNotBlank()) showScheduleDialog = true },
-                                onQuickReplyClick = { showQuickReplies = true },
-                                isChannel = isChannel,
-                                silentMode = channelSilentMode,
-                                onToggleSilent = { channelSilentMode = !channelSilentMode }
-                            )
+                            Column {
+                                // НОВОЕ (FAQ-бот поддержки): если пользователь свернул FAQ и пишет
+                                // оператору вручную, оставляем узкую плашку, чтобы можно было
+                                // вернуться к разделам вопросов в один тап.
+                                if (isSupportChat) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { viewModel.openSupportFaqMenu() }
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.HelpOutline,
+                                            contentDescription = null,
+                                            tint = colorTheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            "Открыть список вопросов",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = colorTheme.primary,
+                                            modifier = Modifier.padding(start = 8.dp)
+                                        )
+                                    }
+                                }
+                                MessageInputBar(
+                                    text = inputText,
+                                    onTextChange = { inputText = it; viewModel.onInputTextChanged(it) },
+                                    onSendClick = { trySend() },
+                                    onSendLongPress = { if (inputText.isNotBlank()) showScheduleDialog = true },
+                                    onKeyboardSend = { if (sendOnEnter) trySend() },
+                                    sendOnEnter = sendOnEnter,
+                                    isSending = uiState.isSending,
+                                    onAttachClick = { showAttachMenu = true },
+                                    onMicPressStart = { startVoiceRecording() },
+                                    onMicPressEnd = { stopVoiceRecordingToPreview() },
+                                    colorTheme = colorTheme,
+                                    placeholder = when {
+                                        isChannel && uiState.isAdmin -> "Вы админ, вам можно писать"
+                                        isSupportChat -> "Опишите вопрос оператору..."
+                                        else -> "Сообщение..."
+                                    },
+                                    pendingTtlSeconds = pendingMessageTtlSeconds,
+                                    isTtlExplicitlySet = pendingMessageTtlExplicitlySet,
+                                    onTtlIconClick = { showPerMessageTtlDialog = true },
+                                    onScheduleClick = { if (inputText.isNotBlank()) showScheduleDialog = true },
+                                    onQuickReplyClick = { showQuickReplies = true },
+                                    isChannel = isChannel,
+                                    silentMode = channelSilentMode,
+                                    onToggleSilent = { channelSilentMode = !channelSilentMode }
+                                )
+                            }
                         }
                     }
                     if (showPerMessageTtlDialog) {
@@ -2479,6 +2536,226 @@ private fun MessageInputBar(
                 }
             }
         }
+    }
+}
+
+@Composable
+// НОВОЕ (FAQ-бот поддержки): кнопочная панель бота поддержки — заменяет обычное поле
+// ввода в чате поддержки, пока пользователь не свернёт её. Три экрана:
+// 1) SectionList — разделы FAQ (плюс "Не нашли нужный вопрос?" внизу);
+// 2) QuestionList — список вопросов внутри раздела, с кнопкой "Назад";
+// 3) Answer — вопрос и ответ, с кнопками "Назад" и "Связаться с поддержкой".
+@Composable
+private fun SupportFaqPanel(
+    screen: SupportFaqScreen,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onSelectSection: (String) -> Unit,
+    onSelectQuestion: (String, String) -> Unit,
+    onBackToSections: () -> Unit,
+    onBackToQuestions: (String) -> Unit,
+    onContactOperator: () -> Unit,
+    onCollapse: () -> Unit
+) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+        ) {
+            // Заголовок панели
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (screen !is SupportFaqScreen.SectionList) {
+                    IconButton(
+                        onClick = {
+                            when (screen) {
+                                is SupportFaqScreen.QuestionList -> onBackToSections()
+                                is SupportFaqScreen.Answer -> onBackToQuestions(screen.sectionId)
+                                else -> {}
+                            }
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Назад", tint = colorTheme.primary)
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                Icon(
+                    Icons.Filled.SupportAgent, contentDescription = null,
+                    tint = colorTheme.primary, modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = when (screen) {
+                        is SupportFaqScreen.SectionList -> "Чем помочь?"
+                        is SupportFaqScreen.QuestionList ->
+                            SupportFaqData.findSection(screen.sectionId)?.title ?: "Вопросы"
+                        is SupportFaqScreen.Answer ->
+                            SupportFaqData.findSection(screen.sectionId)?.title ?: "Ответ"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+                TextButton(onClick = onCollapse) {
+                    Text("Свернуть", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            when (screen) {
+                is SupportFaqScreen.SectionList -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(vertical = 6.dp)
+                    ) {
+                        items(SupportFaqData.sections, key = { it.id }) { section ->
+                            FaqRow(
+                                emoji = section.emoji,
+                                title = section.title,
+                                onClick = { onSelectSection(section.id) }
+                            )
+                        }
+                        item(key = "other_section") {
+                            FaqRow(
+                                emoji = "🙋",
+                                title = "Нет нужного вопроса?",
+                                titleColor = colorTheme.primary,
+                                onClick = { onSelectSection(SupportFaqData.OTHER_SECTION_ID) }
+                            )
+                        }
+                    }
+                }
+                is SupportFaqScreen.QuestionList -> {
+                    if (screen.sectionId == SupportFaqData.OTHER_SECTION_ID) {
+                        OtherQuestionBlock(colorTheme = colorTheme, onContactOperator = onContactOperator)
+                    } else {
+                        val section = SupportFaqData.findSection(screen.sectionId)
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 6.dp)
+                        ) {
+                            section?.questions?.forEach { q ->
+                                item(key = q.id) {
+                                    FaqRow(
+                                        emoji = null,
+                                        title = q.question,
+                                        onClick = { onSelectQuestion(screen.sectionId, q.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                is SupportFaqScreen.Answer -> {
+                    val question = SupportFaqData.findQuestion(screen.sectionId, screen.questionId)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = question?.question ?: "",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = question?.answer ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onBackToQuestions(screen.sectionId) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Другие вопросы", style = MaterialTheme.typography.labelMedium)
+                            }
+                            Button(
+                                onClick = onContactOperator,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary)
+                            ) {
+                                Text("Это не помогло", style = MaterialTheme.typography.labelMedium, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OtherQuestionBlock(
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    onContactOperator: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+        Text(
+            text = "Не нашли ответ среди готовых вопросов?",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Опишите вашу проблему своими словами — оператор поддержки ответит вам в этом же чате.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = onContactOperator,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary)
+        ) {
+            Icon(Icons.Filled.SupportAgent, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Связаться с поддержкой", color = Color.White, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun FaqRow(
+    emoji: String?,
+    title: String,
+    titleColor: Color = Color.Unspecified,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (emoji != null) {
+            Text(emoji, style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (titleColor != Color.Unspecified) titleColor else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = Color.Gray,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
