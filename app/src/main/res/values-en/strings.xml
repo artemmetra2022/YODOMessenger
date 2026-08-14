@@ -461,6 +461,11 @@ or channels by title</string>
     <string name="search_no_results">Nobody and nothing found</string>
     <string name="search_channels_header">Channels</string>
     <string name="search_people_header">People</string>
+    <!-- НОВОЕ (settings search): settings results in global search -->
+    <string name="search_settings_header">Settings</string>
+    <!-- НОВОЕ (settings search): search field and results inside the settings screen -->
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_no_results">No results found</string>
     <string name="search_placeholder">Name, @username or channel</string>
     <string name="search_clear_cd">Clear</string>
     <string name="search_verified_cd">Verified</string>

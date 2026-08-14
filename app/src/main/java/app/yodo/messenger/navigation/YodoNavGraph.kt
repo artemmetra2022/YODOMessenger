@@ -554,10 +554,22 @@ fun YodoNavGraph(
                 // в его профиль (если не подписан) или сразу в чат (если подписан).
                 onOpenChannelProfile = { channelId ->
                     navController.navigate(Routes.ChannelProfile.createRoute(channelId))
+                },
+                // НОВОЕ (поиск по настройкам): тап по найденной настройке — открываем
+                // экран настроек и прокручиваем сразу к нужному пункту.
+                onOpenSettings = { anchorId ->
+                    navController.navigate(Routes.Settings.createRoute(anchorId))
                 }
             )
         }
-        composable(Routes.Settings.route) {
+        composable(
+            route = Routes.Settings.route,
+            arguments = listOf(navArgument(Routes.Settings.ARG_ANCHOR) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            })
+        ) { backStackEntry ->
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 onProfileClick = { navController.navigate(Routes.Profile.route) },
@@ -572,6 +584,8 @@ fun YodoNavGraph(
                 onOpenReports = { navController.navigate(Routes.ReportInbox.route) },
                 // НОВОЕ (обучение): повторный показ онбординга из настроек.
                 onOpenOnboarding = { navController.navigate(Routes.OnboardingReplay.route) },
+                // НОВОЕ (поиск по настройкам): прокрутка к пункту, если пришли из общего поиска.
+                initialAnchorId = backStackEntry.arguments?.getString(Routes.Settings.ARG_ANCHOR),
                 onLoggedOut = {
                     navController.navigate(Routes.Welcome.route) {
                         popUpTo(navController.graph.id) { inclusive = true }

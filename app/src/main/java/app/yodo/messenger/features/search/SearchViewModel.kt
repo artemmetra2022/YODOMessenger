@@ -2,16 +2,20 @@ package app.yodo.messenger.features.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.CreateChatResult
 import app.yodo.messenger.domain.repository.UserRepository
+import app.yodo.messenger.features.settings.SettingsSearchItem
+import app.yodo.messenger.features.settings.SettingsSearchMatcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -20,16 +24,20 @@ sealed class SearchUiState {
     data object Loading : SearchUiState()
     data object NoResults : SearchUiState()
     // НОВОЕ (переработка каналов): результаты теперь — и люди, и каналы.
+    // НОВОЕ (поиск по настройкам): а также совпадения по настройкам приложения.
     data class Results(
         val users: List<YodoUser>,
-        val channels: List<ChannelSearchItem>
+        val channels: List<ChannelSearchItem>,
+        val settings: List<SettingsSearchItem> = emptyList()
     ) : SearchUiState()
 }
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val userRepository: UserRepository,
-    private val chatRepository: ChatRepository
+    private val chatRepository: ChatRepository,
+    // НОВОЕ (поиск по настройкам): нужен, чтобы узнать, включён ли показ настроек в общем поиске.
+    private val userSettingsPreferences: UserSettingsPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<SearchUiState>(SearchUiState.Idle)
@@ -42,6 +50,11 @@ class SearchViewModel @Inject constructor(
     // открываем профиль канала (там можно подписаться), а не чат.
     private val _openChannelProfileId = MutableStateFlow<String?>(null)
     val openChannelProfileId: StateFlow<String?> = _openChannelProfileId
+
+    // НОВОЕ (поиск по настройкам): тап по найденной настройке — переходим в
+    // экран настроек и прокручиваем к нужному пункту (по anchorId).
+    private val _openSettingsAnchor = MutableStateFlow<String?>(null)
+    val openSettingsAnchor: StateFlow<String?> = _openSettingsAnchor
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
@@ -59,10 +72,14 @@ class SearchViewModel @Inject constructor(
             delay(350) // debounce — не долбим Firestore на каждое нажатие клавиши
             val users = userRepository.searchUsers(query)
             val channels = chatRepository.searchChannels(query)
-            _uiState.value = if (users.isEmpty() && channels.isEmpty()) {
+            // НОВОЕ (поиск по настройкам): подмешиваем совпадения по настройкам,
+            // если пользователь не отключил их показ в общем поиске.
+            val showSettings = userSettingsPreferences.showSettingsInGlobalSearch.first()
+            val settings = if (showSettings) SettingsSearchMatcher.search(query) else emptyList()
+            _uiState.value = if (users.isEmpty() && channels.isEmpty() && settings.isEmpty()) {
                 SearchUiState.NoResults
             } else {
-                SearchUiState.Results(users = users, channels = channels)
+                SearchUiState.Results(users = users, channels = channels, settings = settings)
             }
         }
     }
@@ -85,7 +102,13 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    // НОВОЕ (поиск по настройкам): тап по найденной настройке.
+    fun openSetting(item: SettingsSearchItem) {
+        _openSettingsAnchor.value = item.anchorId
+    }
+
     fun consumeErrorMessage() { _errorMessage.value = null }
     fun consumeOpenChatId() { _openChatId.value = null }
     fun consumeOpenChannelProfileId() { _openChannelProfileId.value = null }
+    fun consumeOpenSettingsAnchor() { _openSettingsAnchor.value = null }
 }

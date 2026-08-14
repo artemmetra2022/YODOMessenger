@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -60,6 +61,7 @@ import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
+import app.yodo.messenger.features.settings.SettingsSearchItem
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.ColorTheme
 import app.yodo.messenger.ui.theme.LocalColorTheme
@@ -78,12 +80,15 @@ fun SearchScreen(
     onChatOpened: (String) -> Unit,
     onViewProfile: (String) -> Unit,
     onOpenChannelProfile: (String) -> Unit,
+    // НОВОЕ (поиск по настройкам): открыть экран настроек и прокрутить к найденному пункту.
+    onOpenSettings: (String) -> Unit = {},
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     var query by remember { mutableStateOf("") }
     val uiState by viewModel.uiState.collectAsState()
     val openChatId by viewModel.openChatId.collectAsState()
     val openChannelProfileId by viewModel.openChannelProfileId.collectAsState()
+    val openSettingsAnchor by viewModel.openSettingsAnchor.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val colorTheme = LocalColorTheme.current
 
@@ -97,6 +102,13 @@ fun SearchScreen(
         openChannelProfileId?.let {
             onOpenChannelProfile(it)
             viewModel.consumeOpenChannelProfileId()
+        }
+    }
+    // НОВОЕ (поиск по настройкам): переход в настройки при тапе на найденный пункт.
+    LaunchedEffect(openSettingsAnchor) {
+        openSettingsAnchor?.let {
+            onOpenSettings(it)
+            viewModel.consumeOpenSettingsAnchor()
         }
     }
 
@@ -179,6 +191,17 @@ fun SearchScreen(
                                         channel = channel,
                                         colorTheme = colorTheme,
                                         onClick = { viewModel.openChannel(channel) }
+                                    )
+                                }
+                            }
+                            // ═══ Секция настроек ═══
+                            if (state.settings.isNotEmpty()) {
+                                item { SearchSectionHeader(title = stringResource(R.string.search_settings_header), count = state.settings.size, colorTheme = colorTheme) }
+                                items(state.settings, key = { "st_${it.id}" }) { settingItem ->
+                                    SettingsResultCard(
+                                        item = settingItem,
+                                        colorTheme = colorTheme,
+                                        onClick = { viewModel.openSetting(settingItem) }
                                     )
                                 }
                             }
@@ -410,6 +433,53 @@ private fun ChannelResultCard(channel: ChannelSearchItem, colorTheme: ColorTheme
                     tint = colorTheme.primary, modifier = Modifier.size(18.dp)
                 )
             }
+        }
+    }
+}
+
+/** НОВОЕ (поиск по настройкам): карточка найденной настройки в общей выдаче поиска. */
+@Composable
+private fun SettingsResultCard(item: SettingsSearchItem, colorTheme: ColorTheme, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
+            .shadow(1.dp, shape)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(colorTheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.Settings, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(22.dp))
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                "${item.sectionTitle} · ${item.subtitle}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(colorTheme.primary.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(18.dp))
         }
     }
 }

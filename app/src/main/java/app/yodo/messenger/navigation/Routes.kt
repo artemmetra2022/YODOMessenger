@@ -27,7 +27,12 @@ sealed class Routes(val route: String) {
     data object Contacts : Routes("contacts")
     data object ForwardMessage : Routes("forward_message")
     data object Profile : Routes("profile")
-    data object Settings : Routes("settings")
+    data object Settings : Routes("settings?anchor={anchor}") {
+        // НОВОЕ (поиск по настройкам): переход из общего поиска на конкретный пункт настроек.
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings" else "settings?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
     data object Tools : Routes("tools")
     data object SecurityCenter : Routes("security_center")

@@ -22,13 +22,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.BubbleChart
@@ -55,6 +58,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.RemoveRedEye
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Vibration
@@ -83,14 +88,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -125,6 +135,9 @@ fun SettingsScreen(
     onOpenReports: () -> Unit = {},
     // НОВОЕ (обучение): повторно открыть экран онбординга из настроек.
     onOpenOnboarding: () -> Unit = {},
+    // НОВОЕ (поиск по настройкам): если экран открыт из результата поиска —
+    // id пункта, к которому нужно сразу прокрутить список.
+    initialAnchorId: String? = null,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currentLanguage by viewModel.currentLanguage.collectAsState()
@@ -179,6 +192,52 @@ fun SettingsScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val colorTheme = LocalColorTheme.current
+
+    // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске.
+    val showSettingsInGlobalSearch by viewModel.showSettingsInGlobalSearch.collectAsState()
+
+    // НОВОЕ (поиск по настройкам): строка поиска, найденные пункты и прокрутка к ним.
+    var settingsSearchQuery by remember { mutableStateOf("") }
+    val settingsSearchResults = remember(settingsSearchQuery) {
+        if (settingsSearchQuery.isBlank()) emptyList()
+        else SettingsSearchMatcher.search(settingsSearchQuery)
+    }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    // Заполняется реальными Y-координатами (относительно LazyColumn) по мере отрисовки
+    // секций — anchorId -> текущее смещение на экране. Используется, чтобы прокрутить
+    // список к найденному пункту после тапа по результату поиска настроек.
+    val anchorPositions = remember { mutableMapOf<String, Float>() }
+    var highlightedAnchor by remember { mutableStateOf<String?>(null) }
+    fun jumpToAnchor(anchorId: String) {
+        settingsSearchQuery = ""
+        highlightedAnchor = anchorId
+        coroutineScope.launch {
+            // Небольшая задержка — даём LazyColumn перестроиться после закрытия поиска
+            // и обновить измеренные позиции секций.
+            kotlinx.coroutines.delay(80)
+            val targetY = anchorPositions[anchorId]
+            if (targetY != null) {
+                // targetY уже измерен относительно верхней границы LazyColumn,
+                // поэтому просто скроллим на эту величину минус небольшой отступ сверху.
+                listState.animateScrollBy(targetY - 16f)
+            }
+        }
+    }
+
+    // НОВОЕ (поиск по настройкам): если экран открыт из результата поиска —
+    // сразу прокручиваем к найденному пункту, когда его позиция станет известна.
+    LaunchedEffect(initialAnchorId) {
+        if (initialAnchorId != null) {
+            highlightedAnchor = initialAnchorId
+            // Ждём, пока LazyColumn отрисуется и измерит позиции секций.
+            kotlinx.coroutines.delay(250)
+            val targetY = anchorPositions[initialAnchorId]
+            if (targetY != null) {
+                listState.animateScrollBy(targetY - 16f)
+            }
+        }
+    }
 
     val notAuthorizedText = stringResource(R.string.settings_not_authorized)
     LaunchedEffect(accountDeleted) { if (accountDeleted) onLoggedOut() }
@@ -299,6 +358,7 @@ fun SettingsScreen(
         containerColor = Color.Transparent
     ) { padding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .background(
@@ -310,12 +370,33 @@ fun SettingsScreen(
                 .padding(padding)
         ) {
             // ════════════════════════════════════════
+            // ПОИСК ПО НАСТРОЙКАМ
+            // ════════════════════════════════════════
+            item {
+                SettingsSearchBar(
+                    query = settingsSearchQuery,
+                    onQueryChanged = { settingsSearchQuery = it },
+                    colorTheme = colorTheme
+                )
+            }
+            if (settingsSearchQuery.isNotBlank()) {
+                item {
+                    SettingsSearchResultsList(
+                        results = settingsSearchResults,
+                        colorTheme = colorTheme,
+                        onResultClick = { jumpToAnchor(it.anchorId) }
+                    )
+                }
+            }
+
+            // ════════════════════════════════════════
             // ОФОРМЛЕНИЕ
             // ════════════════════════════════════════
             item {
                 SettingsSectionHeader(
                     icon = Icons.Filled.ColorLens,
                     title = stringResource(R.string.settings_section_appearance),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_APPEARANCE, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -340,6 +421,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.BubbleChart,
                     title = stringResource(R.string.settings_section_customization),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CUSTOMIZATION, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -443,6 +525,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.Language,
                     title = stringResource(R.string.settings_section_language),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_LANGUAGE, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -491,6 +574,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.Chat,
                     title = stringResource(R.string.settings_section_chats),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CHATS, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -537,7 +621,7 @@ fun SettingsScreen(
             // НОВОЕ (п.13): фон чата
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CHAT_BACKGROUND, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Image,
                         title = "Фон чата",
@@ -551,7 +635,7 @@ fun SettingsScreen(
             // НОВОЕ (п.4): папки чатов
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CHAT_FOLDERS, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Folder,
                         title = "Папки чатов",
@@ -570,6 +654,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.PrivacyTip,
                     title = stringResource(R.string.settings_section_privacy),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_PRIVACY, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -598,7 +683,7 @@ fun SettingsScreen(
             // НОВОЕ (п.18): автоудаление аккаунта
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_AUTO_DELETE, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Timer,
                         title = "Автоудаление аккаунта",
@@ -618,7 +703,7 @@ fun SettingsScreen(
                 val pinNeverSubtitle = stringResource(R.string.settings_pin_never)
                 val pinOnCloseSubtitle = stringResource(R.string.settings_pin_on_close)
                 val pinOnBackgroundSubtitle = stringResource(R.string.settings_pin_on_background)
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_PIN, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Lock,
                         title = if (isPinSet) pinSetTitle else pinSetUpTitle,
@@ -651,7 +736,7 @@ fun SettingsScreen(
                 if (isPinSet) {
                     var showDecoyDialog by remember { mutableStateOf(false) }
                     Spacer(modifier = Modifier.height(8.dp))
-                    SettingsCard {
+                    SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_DECOY_PIN, anchorPositions)) {
                         SettingsNavigateRow(
                             icon = Icons.Filled.Lock,
                             title = if (isDecoyPinSet) "Ложный PIN задан" else "Настроить ложный PIN",
@@ -680,7 +765,7 @@ fun SettingsScreen(
             // Заблокированные
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_BLOCKED_USERS, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Block,
                         title = stringResource(R.string.settings_blocked_users),
@@ -691,10 +776,10 @@ fun SettingsScreen(
                 }
             }
 
-            // Рас��иренный профиль
+            // Расширенный профиль
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_PROFILE_VISIBILITY, anchorPositions)) {
                     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -789,6 +874,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.VolumeUp,
                     title = stringResource(R.string.settings_section_notifications),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_NOTIFICATIONS, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -835,7 +921,7 @@ fun SettingsScreen(
             // ════════════════════════════════════════
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_QUIET_HOURS, anchorPositions)) {
                     SettingsToggleRow(
                         icon = Icons.Filled.NotificationsOff,
                         title = "Тихие часы",
@@ -910,6 +996,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.Person,
                     title = stringResource(R.string.settings_section_account),
+                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_ACCOUNT, anchorPositions),
                     colorTheme = colorTheme
                 )
             }
@@ -929,7 +1016,7 @@ fun SettingsScreen(
             }
             // НОВОЕ (батч 7): вход в раздел с 20 новыми функциями.
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_TOOLS, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Star,
                         title = "Фишки и инструменты",
@@ -941,7 +1028,7 @@ fun SettingsScreen(
             }
             // НОВОЕ (батч 7): Центр безопасности (2FA, контрольные вопросы, защита от скриншотов, статусы).
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_SECURITY_CENTER, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Security,
                         title = "Центр безопасности",
@@ -954,7 +1041,7 @@ fun SettingsScreen(
             // НОВОЕ (обучение): повторный показ онбординга — тот же экран, что и при первой
             // регистрации, но без сброса/повторной установки флага "обучение пройдено".
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_ONBOARDING, anchorPositions)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.School,
                         title = "Пройти обучение",
@@ -964,8 +1051,21 @@ fun SettingsScreen(
                     )
                 }
             }
+            // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
             item {
-                SettingsCard {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_SEARCH_IN_GLOBAL, anchorPositions)) {
+                    SettingsToggleRow(
+                        icon = Icons.Filled.Search,
+                        title = "Показывать настройки в общем поиске",
+                        subtitle = "Результаты поиска настроек будут видны на главном экране поиска",
+                        checked = showSettingsInGlobalSearch,
+                        onCheckedChange = { viewModel.setShowSettingsInGlobalSearch(it) },
+                        colorTheme = colorTheme
+                    )
+                }
+            }
+            item {
+                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_SWITCH_ACCOUNT, anchorPositions)) {
                     // НОВОЕ (Y): сменить аккаунт без повторного входа.
                     SettingsNavigateRow(
                         icon = Icons.Filled.SwapHoriz,
@@ -1474,14 +1574,135 @@ private fun DecoyPinDialog(
     )
 }
 
+/**
+ * НОВОЕ (поиск по настройкам): модификатор, который запоминает Y-координату
+ * элемента на экране в карте [positions] под ключом [anchorId] — используется,
+ * чтобы прокрутить список к найденному пункту после тапа по результату поиска.
+ * Координата берётся относительно окна, чего достаточно, поскольку список
+ * прокручивается на разницу между текущей и целевой позицией на экране.
+ */
+private fun Modifier.onSettingsAnchor(
+    anchorId: String,
+    positions: MutableMap<String, Float>
+): Modifier = this.then(
+    Modifier.onGloballyPositioned { coordinates ->
+        positions[anchorId] = coordinates.positionInWindow().y
+    }
+)
+
+@Composable
+private fun SettingsSearchBar(
+    query: String,
+    onQueryChanged: (String) -> Unit,
+    colorTheme: ColorTheme
+) {
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .shadow(1.dp, shape)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 14.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Filled.Search, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(10.dp))
+        Box(modifier = Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    stringResource(R.string.settings_search_hint),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChanged,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(colorTheme.primary),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp)
+            )
+        }
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQueryChanged("") }, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.search_clear_cd), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSearchResultsList(
+    results: List<SettingsSearchItem>,
+    colorTheme: ColorTheme,
+    onResultClick: (SettingsSearchItem) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        if (results.isEmpty()) {
+            Text(
+                stringResource(R.string.settings_search_no_results),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)
+            )
+        } else {
+            SettingsCard {
+                results.forEachIndexed { index, item ->
+                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onResultClick(item) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colorTheme.primary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                            Text(
+                                "${item.sectionTitle} · ${item.subtitle}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SettingsSectionHeader(
     icon: ImageVector,
     title: String,
-    colorTheme: ColorTheme
+    colorTheme: ColorTheme,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1507,9 +1728,9 @@ private fun SettingsSectionHeader(
 }
 
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
+private fun SettingsCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .shadow(1.dp, RoundedCornerShape(16.dp))

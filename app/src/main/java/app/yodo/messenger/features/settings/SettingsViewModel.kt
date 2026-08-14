@@ -64,6 +64,8 @@ class SettingsViewModel @Inject constructor(
     val hideNotificationPreview: StateFlow<Boolean> = userSettingsPreferences.hideNotificationPreview.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val notificationsSnoozedUntil: StateFlow<Long> = userSettingsPreferences.notificationsSnoozedUntil.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
+    val showSettingsInGlobalSearch: StateFlow<Boolean> = userSettingsPreferences.showSettingsInGlobalSearch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val pinRequirement: StateFlow<PinRequirement> = userSettingsPreferences.pinRequirement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PinRequirement.NEVER)
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -138,6 +140,8 @@ class SettingsViewModel @Inject constructor(
         )
     }
     fun setAdvancedPollsEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setAdvancedPollsEnabled(enabled) } }
+    // НОВОЕ (поиск по настройкам): переключатель показа настроек в общем поиске.
+    fun setShowSettingsInGlobalSearch(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setShowSettingsInGlobalSearch(enabled) } }
 
     fun setPin(pin: String, requirement: PinRequirement = PinRequirement.ON_CLOSE) {
         viewModelScope.launch {
