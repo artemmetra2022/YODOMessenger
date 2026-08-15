@@ -460,6 +460,12 @@
     <!-- НОВОЕ (поиск по настройкам): поле поиска и результаты внутри экрана настроек -->
     <string name="settings_search_hint">Поиск по настройкам</string>
     <string name="settings_search_no_results">Ничего не найдено</string>
+    <plurals name="settings_search_results_count">
+        <item quantity="one">Найден %d результат</item>
+        <item quantity="few">Найдено %d результата</item>
+        <item quantity="many">Найдено %d результатов</item>
+        <item quantity="other">Найдено %d результата</item>
+    </plurals>
     <string name="search_placeholder">Имя, @username или канал</string>
     <string name="search_clear_cd">Очистить</string>
     <string name="search_verified_cd">Верифицирован</string>

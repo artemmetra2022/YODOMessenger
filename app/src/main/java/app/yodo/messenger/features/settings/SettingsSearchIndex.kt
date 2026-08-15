@@ -137,7 +137,7 @@ object SettingsSearchIndex {
         SettingsSearchItem(
             id = "pin_code", anchorId = ANCHOR_PIN,
             title = "PIN-код", subtitle = "Защитить приложение кодом-паролем",
-            keywords = listOf("пин", "код", "пароль", "блокировка приложения", "защита", "pin", "код доступа"),
+            keywords = listOf("пин", "код", "пароль", "блокировка приложения", "защита", "pin", "код доступа", "поменять пин", "сменить пароль", "сменить пин"),
             sectionTitle = SEC_PRIVACY
         ),
         SettingsSearchItem(
@@ -149,7 +149,13 @@ object SettingsSearchIndex {
         SettingsSearchItem(
             id = "blocked_users", anchorId = ANCHOR_BLOCKED_USERS,
             title = "Заблокированные пользователи", subtitle = "Управлять списком блокировок",
-            keywords = listOf("блокировка", "чёрный список", "заблокирован", "бан", "block"),
+            keywords = listOf("блокировка", "чёрный список", "черный список", "заблокирован", "бан", "block", "разблокировать", "unblock"),
+            sectionTitle = SEC_PRIVACY
+        ),
+        SettingsSearchItem(
+            id = "extended_profile", anchorId = ANCHOR_PROFILE_VISIBILITY,
+            title = "Расширенный профиль", subtitle = "Что из профиля видно другим пользователям",
+            keywords = listOf("расширенный профиль", "видимость профиля", "приватность профиля", "что видят другие"),
             sectionTitle = SEC_PRIVACY
         ),
         SettingsSearchItem(
@@ -191,7 +197,7 @@ object SettingsSearchIndex {
         SettingsSearchItem(
             id = "mute_all", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Отключить все уведомления", subtitle = "Полностью выключить уведомления",
-            keywords = listOf("выключить уведомления", "без звука", "тишина", "mute"),
+            keywords = listOf("выключить уведомления", "без звука", "тишина", "mute", "пуш", "push", "отключить пуши", "не уведомлять"),
             sectionTitle = SEC_NOTIFICATIONS
         ),
         SettingsSearchItem(
@@ -276,70 +282,114 @@ object SettingsSearchIndex {
 }
 
 /**
- * Нечёткий поиск по индексу настроек: учитывает опечатки (расстояние Левенштейна)
- * и совпадения по смыслу (ключевые слова/синонимы), а не только точную подстроку.
+ * Нечёткий поиск по индексу настроек: учитывает опечатки (расстояние Левенштейна),
+ * неверную раскладку клавиатуры (например «ntvf» вместо «тема») и совпадения по
+ * смыслу (ключевые слова/синонимы), а не только точную подстроку.
  */
 object SettingsSearchMatcher {
 
+    // Очки за разные типы совпадения — чем точнее и «важнее» поле, в котором
+    // найдено совпадение, тем выше результат в выдаче.
+    private const val SCORE_EXACT_TITLE = 100
+    private const val SCORE_TITLE_STARTS_WITH = 92
+    private const val SCORE_TITLE_CONTAINS = 85
+    private const val SCORE_OTHER_EXACT = 78
+    private const val SCORE_OTHER_STARTS_WITH = 70
+    private const val SCORE_OTHER_CONTAINS = 60
+    private const val SCORE_TOKEN_TITLE = 55
+    private const val SCORE_TOKEN_OTHER = 45
+    private const val SCORE_FUZZY_BASE = 32
+
     /** Возвращает найденные пункты, отсортированные по релевантности (лучшие — первыми). */
     fun search(query: String, items: List<SettingsSearchItem> = SettingsSearchIndex.items): List<SettingsSearchItem> {
-        val normalizedQuery = normalize(query)
-        if (normalizedQuery.isBlank()) return emptyList()
-        val queryTokens = normalizedQuery.split(" ").filter { it.isNotBlank() }
+        val rawNormalized = normalize(query)
+        if (rawNormalized.isBlank()) return emptyList()
+
+        // Пробуем запрос как есть, а также — на случай, если пользователь не
+        // переключил раскладку клавиатуры — перевод RU↔EN посимвольно.
+        val remappedNormalized = normalize(remapKeyboardLayout(query))
+        val candidates = if (remappedNormalized != rawNormalized && remappedNormalized.isNotBlank()) {
+            listOf(rawNormalized, remappedNormalized)
+        } else {
+            listOf(rawNormalized)
+        }
 
         return items
-            .mapNotNull { item -> scoreItem(item, normalizedQuery, queryTokens)?.let { score -> item to score } }
-            .sortedByDescending { it.second }
+            .mapNotNull { item ->
+                val bestScore = candidates.maxOf { candidateQuery ->
+                    val tokens = candidateQuery.split(" ").filter { it.isNotBlank() }
+                    scoreItem(item, candidateQuery, tokens) ?: 0
+                }
+                if (bestScore > 0) item to bestScore else null
+            }
+            // При равном скоре — стабильный порядок по секции и заголовку, чтобы
+            // выдача не «прыгала» на разные нажатия одной и той же опечатки.
+            .sortedWith(compareByDescending<Pair<SettingsSearchItem, Int>> { it.second }
+                .thenBy { it.first.sectionTitle }
+                .thenBy { it.first.title })
             .map { it.first }
     }
 
     private fun scoreItem(item: SettingsSearchItem, normalizedQuery: String, queryTokens: List<String>): Int? {
-        val haystacks = buildList {
-            add(normalize(item.title))
+        val title = normalize(item.title)
+        val otherHaystacks = buildList {
             add(normalize(item.subtitle))
             add(normalize(item.sectionTitle))
             addAll(item.keywords.map { normalize(it) })
         }
 
         var bestScore = 0
-        var matched = false
 
-        // Точное вхождение всей фразы — наивысший приоритет.
-        haystacks.forEach { haystack ->
-            if (haystack.contains(normalizedQuery)) {
-                matched = true
-                bestScore = maxOf(bestScore, if (haystack == normalizedQuery) 100 else 80)
+        // Совпадение всей фразы целиком — самый сильный сигнал. Заголовок пункта
+        // ценится выше, чем подзаголовок/раздел/ключевые слова.
+        when {
+            title == normalizedQuery -> bestScore = maxOf(bestScore, SCORE_EXACT_TITLE)
+            title.startsWith(normalizedQuery) -> bestScore = maxOf(bestScore, SCORE_TITLE_STARTS_WITH)
+            title.contains(normalizedQuery) -> bestScore = maxOf(bestScore, SCORE_TITLE_CONTAINS)
+        }
+        otherHaystacks.forEach { haystack ->
+            when {
+                haystack == normalizedQuery -> bestScore = maxOf(bestScore, SCORE_OTHER_EXACT)
+                haystack.startsWith(normalizedQuery) -> bestScore = maxOf(bestScore, SCORE_OTHER_STARTS_WITH)
+                haystack.contains(normalizedQuery) -> bestScore = maxOf(bestScore, SCORE_OTHER_CONTAINS)
             }
         }
 
-        // Совпадение по отдельным словам запроса (в т.ч. с опечатками).
+        // Совпадение по отдельным словам запроса (в т.ч. с опечатками) — на случай
+        // многословных запросов вроде «включить звук уведомлений».
         for (token in queryTokens) {
             if (token.length < 2) continue
-            var tokenMatched = false
-            for (haystack in haystacks) {
-                for (word in haystack.split(" ")) {
-                    if (word.isBlank()) continue
-                    if (word.contains(token) || token.contains(word)) {
-                        tokenMatched = true
-                        bestScore = maxOf(bestScore, 60)
-                    } else {
-                        val maxAllowedDistance = when {
-                            token.length <= 3 -> 1
-                            token.length <= 6 -> 2
-                            else -> 3
-                        }
-                        val distance = levenshtein(token, word)
-                        if (distance <= maxAllowedDistance) {
-                            tokenMatched = true
-                            bestScore = maxOf(bestScore, 40 - distance * 5)
-                        }
-                    }
-                }
+            matchToken(token, title.split(" "))?.let { bestScore = maxOf(bestScore, it + (SCORE_TOKEN_TITLE - SCORE_TOKEN_OTHER)) }
+            otherHaystacks.forEach { haystack ->
+                matchToken(token, haystack.split(" "))?.let { bestScore = maxOf(bestScore, it) }
             }
-            if (tokenMatched) matched = true
         }
 
-        return if (matched) bestScore else null
+        return if (bestScore > 0) bestScore else null
+    }
+
+    /** Ищет [token] среди [words] — точное вхождение или совпадение с учётом опечаток. */
+    private fun matchToken(token: String, words: List<String>): Int? {
+        var best: Int? = null
+        for (word in words) {
+            if (word.isBlank()) continue
+            if (word == token) {
+                best = maxOf(best ?: 0, SCORE_TOKEN_OTHER + 5)
+            } else if (word.startsWith(token) || token.startsWith(word)) {
+                best = maxOf(best ?: 0, SCORE_TOKEN_OTHER)
+            } else {
+                val maxAllowedDistance = when {
+                    token.length <= 3 -> 1
+                    token.length <= 6 -> 2
+                    else -> 3
+                }
+                val distance = levenshtein(token, word)
+                if (distance <= maxAllowedDistance) {
+                    best = maxOf(best ?: 0, SCORE_FUZZY_BASE - distance * 5)
+                }
+            }
+        }
+        return best
     }
 
     private fun normalize(text: String): String =
@@ -349,6 +399,34 @@ object SettingsSearchMatcher {
             .replace(Regex("[^a-zа-я0-9 ]"), " ")
             .replace(Regex(" +"), " ")
             .trim()
+
+    // Раскладки клавиатуры ЙЦУКЕН (RU) и QWERTY (EN) в одном порядке символов —
+    // используются, чтобы перевести запрос, набранный не в той раскладке.
+    private const val LAYOUT_RU = "йцукенгшщзхъфывапролджэячсмитьбю.ё"
+    private const val LAYOUT_EN = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`"
+
+    /**
+     * Перекладывает строку с английской раскладки на русскую и наоборот — так же,
+     * как это делают привычные Punto Switcher-подобные инструменты. Символы, не
+     * входящие ни в одну из раскладок (цифры, уже правильно набранный текст),
+     * остаются без изменений — из-за этого «неправильный» вариант для уже
+     * корректного запроса совпадёт с нормализованным и будет просто отброшен.
+     */
+    private fun remapKeyboardLayout(text: String): String {
+        val builder = StringBuilder(text.length)
+        for (ch in text) {
+            val lower = ch.lowercaseChar()
+            val enIndex = LAYOUT_EN.indexOf(lower)
+            val ruIndex = LAYOUT_RU.indexOf(lower)
+            val mapped = when {
+                enIndex >= 0 -> LAYOUT_RU[enIndex]
+                ruIndex >= 0 -> LAYOUT_EN[ruIndex]
+                else -> lower
+            }
+            builder.append(mapped)
+        }
+        return builder.toString()
+    }
 
     /** Классическое расстояние Левенштейна — допускает опечатки при поиске. */
     private fun levenshtein(a: String, b: String): Int {

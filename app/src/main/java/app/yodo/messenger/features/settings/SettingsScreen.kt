@@ -4,6 +4,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
@@ -28,6 +30,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
@@ -101,6 +104,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -208,34 +212,44 @@ fun SettingsScreen(
     // секций — anchorId -> текущее смещение на экране. Используется, чтобы прокрутить
     // список к найденному пункту после тапа по результату поиска настроек.
     val anchorPositions = remember { mutableMapOf<String, Float>() }
+    // НОВОЕ (поиск по настройкам): id пункта, который сейчас подсвечен после
+    // перехода из поиска. Подсветка гаснет сама через HIGHLIGHT_DURATION_MS —
+    // см. onSettingsAnchor, который читает это значение и анимирует фон.
     var highlightedAnchor by remember { mutableStateOf<String?>(null) }
+
+    suspend fun scrollAndHighlight(anchorId: String) {
+        highlightedAnchor = anchorId
+        val targetY = anchorPositions[anchorId]
+        if (targetY != null) {
+            // targetY уже измерен относительно верхней границы LazyColumn,
+            // поэтому просто скроллим на эту величину минус небольшой отступ сверху,
+            // чтобы найденный пункт не прилипал к самому краю экрана.
+            listState.animateScrollBy(targetY - 24f)
+        }
+        // Подсветка держится некоторое время, затем гаснет — чтобы пользователь
+        // успел заметить, какой именно пункт нашёлся, но она не мешала дальше.
+        kotlinx.coroutines.delay(HIGHLIGHT_DURATION_MS)
+        if (highlightedAnchor == anchorId) highlightedAnchor = null
+    }
+
     fun jumpToAnchor(anchorId: String) {
         settingsSearchQuery = ""
-        highlightedAnchor = anchorId
         coroutineScope.launch {
             // Небольшая задержка — даём LazyColumn перестроиться после закрытия поиска
             // и обновить измеренные позиции секций.
             kotlinx.coroutines.delay(80)
-            val targetY = anchorPositions[anchorId]
-            if (targetY != null) {
-                // targetY уже измерен относительно верхней границы LazyColumn,
-                // поэтому просто скроллим на эту величину минус небольшой отступ сверху.
-                listState.animateScrollBy(targetY - 16f)
-            }
+            scrollAndHighlight(anchorId)
         }
     }
 
     // НОВОЕ (поиск по настройкам): если экран открыт из результата поиска —
-    // сразу прокручиваем к найденному пункту, когда его позиция станет известна.
+    // сразу прокручиваем к найденному пункту и подсвечиваем его, когда его
+    // позиция станет известна (после того как LazyColumn измерит секции).
     LaunchedEffect(initialAnchorId) {
         if (initialAnchorId != null) {
-            highlightedAnchor = initialAnchorId
             // Ждём, пока LazyColumn отрисуется и измерит позиции секций.
             kotlinx.coroutines.delay(250)
-            val targetY = anchorPositions[initialAnchorId]
-            if (targetY != null) {
-                listState.animateScrollBy(targetY - 16f)
-            }
+            scrollAndHighlight(initialAnchorId)
         }
     }
 
@@ -396,7 +410,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.ColorLens,
                     title = stringResource(R.string.settings_section_appearance),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_APPEARANCE, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_APPEARANCE, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -421,7 +435,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.BubbleChart,
                     title = stringResource(R.string.settings_section_customization),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CUSTOMIZATION, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_CUSTOMIZATION, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -525,7 +539,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.Language,
                     title = stringResource(R.string.settings_section_language),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_LANGUAGE, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_LANGUAGE, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -574,7 +588,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.Chat,
                     title = stringResource(R.string.settings_section_chats),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CHATS, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_CHATS, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -621,7 +635,7 @@ fun SettingsScreen(
             // НОВОЕ (п.13): фон чата
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CHAT_BACKGROUND, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_CHAT_BACKGROUND, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Image,
                         title = "Фон чата",
@@ -635,7 +649,7 @@ fun SettingsScreen(
             // НОВОЕ (п.4): папки чатов
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_CHAT_FOLDERS, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_CHAT_FOLDERS, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Folder,
                         title = "Папки чатов",
@@ -654,7 +668,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.PrivacyTip,
                     title = stringResource(R.string.settings_section_privacy),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_PRIVACY, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_PRIVACY, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -683,7 +697,7 @@ fun SettingsScreen(
             // НОВОЕ (п.18): автоудаление аккаунта
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_AUTO_DELETE, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_AUTO_DELETE, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Timer,
                         title = "Автоудаление аккаунта",
@@ -703,7 +717,7 @@ fun SettingsScreen(
                 val pinNeverSubtitle = stringResource(R.string.settings_pin_never)
                 val pinOnCloseSubtitle = stringResource(R.string.settings_pin_on_close)
                 val pinOnBackgroundSubtitle = stringResource(R.string.settings_pin_on_background)
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_PIN, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_PIN, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Lock,
                         title = if (isPinSet) pinSetTitle else pinSetUpTitle,
@@ -736,7 +750,7 @@ fun SettingsScreen(
                 if (isPinSet) {
                     var showDecoyDialog by remember { mutableStateOf(false) }
                     Spacer(modifier = Modifier.height(8.dp))
-                    SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_DECOY_PIN, anchorPositions)) {
+                    SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_DECOY_PIN, anchorPositions, highlightedAnchor, colorTheme)) {
                         SettingsNavigateRow(
                             icon = Icons.Filled.Lock,
                             title = if (isDecoyPinSet) "Ложный PIN задан" else "Настроить ложный PIN",
@@ -765,7 +779,7 @@ fun SettingsScreen(
             // Заблокированные
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_BLOCKED_USERS, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_BLOCKED_USERS, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Block,
                         title = stringResource(R.string.settings_blocked_users),
@@ -779,7 +793,7 @@ fun SettingsScreen(
             // Расширенный профиль
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_PROFILE_VISIBILITY, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_PROFILE_VISIBILITY, anchorPositions, highlightedAnchor, colorTheme)) {
                     Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -874,7 +888,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.VolumeUp,
                     title = stringResource(R.string.settings_section_notifications),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_NOTIFICATIONS, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_NOTIFICATIONS, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -921,7 +935,7 @@ fun SettingsScreen(
             // ════════════════════════════════════════
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_QUIET_HOURS, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_QUIET_HOURS, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsToggleRow(
                         icon = Icons.Filled.NotificationsOff,
                         title = "Тихие часы",
@@ -996,7 +1010,7 @@ fun SettingsScreen(
                 SettingsSectionHeader(
                     icon = Icons.Filled.Person,
                     title = stringResource(R.string.settings_section_account),
-                    modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_ACCOUNT, anchorPositions),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_ACCOUNT, anchorPositions, highlightedAnchor, colorTheme),
                     colorTheme = colorTheme
                 )
             }
@@ -1016,7 +1030,7 @@ fun SettingsScreen(
             }
             // НОВОЕ (батч 7): вход в раздел с 20 новыми функциями.
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_TOOLS, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_TOOLS, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Star,
                         title = "Фишки и инструменты",
@@ -1028,7 +1042,7 @@ fun SettingsScreen(
             }
             // НОВОЕ (батч 7): Центр безопасности (2FA, контрольные вопросы, защита от скриншотов, статусы).
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_SECURITY_CENTER, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SECURITY_CENTER, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.Security,
                         title = "Центр безопасности",
@@ -1041,7 +1055,7 @@ fun SettingsScreen(
             // НОВОЕ (обучение): повторный показ онбординга — тот же экран, что и при первой
             // регистрации, но без сброса/повторной установки флага "обучение пройдено".
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_ONBOARDING, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_ONBOARDING, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
                         icon = Icons.Filled.School,
                         title = "Пройти обучение",
@@ -1053,7 +1067,7 @@ fun SettingsScreen(
             }
             // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_SEARCH_IN_GLOBAL, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SEARCH_IN_GLOBAL, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsToggleRow(
                         icon = Icons.Filled.Search,
                         title = "Показывать настройки в общем поиске",
@@ -1065,7 +1079,7 @@ fun SettingsScreen(
                 }
             }
             item {
-                SettingsCard(modifier = Modifier.onSettingsAnchor(SettingsSearchIndex.ANCHOR_SWITCH_ACCOUNT, anchorPositions)) {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SWITCH_ACCOUNT, anchorPositions, highlightedAnchor, colorTheme)) {
                     // НОВОЕ (Y): сменить аккаунт без повторного входа.
                     SettingsNavigateRow(
                         icon = Icons.Filled.SwapHoriz,
@@ -1574,6 +1588,9 @@ private fun DecoyPinDialog(
     )
 }
 
+/** Сколько миллисекунд держится подсветка найденного пункта после перехода из поиска. */
+private const val HIGHLIGHT_DURATION_MS = 1600L
+
 /**
  * НОВОЕ (поиск по настройкам): модификатор, который запоминает Y-координату
  * элемента на экране в карте [positions] под ключом [anchorId] — используется,
@@ -1589,6 +1606,30 @@ private fun Modifier.onSettingsAnchor(
         positions[anchorId] = coordinates.positionInWindow().y
     }
 )
+
+/**
+ * НОВОЕ (поиск по настройкам): подсветка найденного пункта после перехода из
+ * результатов поиска. Пока [anchorId] == [highlightedAnchor] — фон элемента
+ * плавно подсвечивается акцентным цветом, а затем так же плавно гаснет.
+ * Совмещает [onSettingsAnchor] (для скролла) с анимированной заливкой фона.
+ */
+@Composable
+private fun Modifier.settingsSearchAnchor(
+    anchorId: String,
+    positions: MutableMap<String, Float>,
+    highlightedAnchor: String?,
+    colorTheme: ColorTheme
+): Modifier {
+    val isHighlighted = anchorId == highlightedAnchor
+    val highlightColor by animateColorAsState(
+        targetValue = if (isHighlighted) colorTheme.primary.copy(alpha = 0.16f) else Color.Transparent,
+        animationSpec = tween(durationMillis = if (isHighlighted) 220 else 500),
+        label = "settingsAnchorHighlight"
+    )
+    return this
+        .onSettingsAnchor(anchorId, positions)
+        .background(highlightColor, RoundedCornerShape(16.dp))
+}
 
 @Composable
 private fun SettingsSearchBar(
@@ -1617,12 +1658,17 @@ private fun SettingsSearchBar(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            val keyboardController = LocalSoftwareKeyboardController.current
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChanged,
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(colorTheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSearch = { keyboardController?.hide() }
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 12.dp)
@@ -1651,6 +1697,12 @@ private fun SettingsSearchResultsList(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)
             )
         } else {
+            Text(
+                pluralStringResource(R.plurals.settings_search_results_count, results.size, results.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+            )
             SettingsCard {
                 results.forEachIndexed { index, item ->
                     if (index > 0) HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
@@ -1778,8 +1830,8 @@ private fun SettingsToggleRow(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                color = if (enabled) colorTheme.primary
+                else colorTheme.primary.copy(alpha = 0.4f)
             )
             Text(
                 subtitle,
