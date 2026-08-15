@@ -56,21 +56,23 @@ object MeshCrypto {
         val cipher = Cipher.getInstance(AES_GCM)
         val iv = ByteArray(GCM_IV_BYTES)
         java.security.SecureRandom().nextBytes(iv)
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS.toLong(), iv))
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
         val ct = cipher.doFinal(plaintext)
         return iv + ct
     }
 
     /** AES-256-GCM расшифрование. IV извлекается из начала. */
-    fun decryptAES(data: ByteArray, key: ByteArray): ByteArray? = try {
+    fun decryptAES(data: ByteArray, key: ByteArray): ByteArray? {
         if (data.size < GCM_IV_BYTES + 16) return null
-        val iv = data.copyOfRange(0, GCM_IV_BYTES)
-        val ct = data.copyOfRange(GCM_IV_BYTES, data.size)
-        val cipher = Cipher.getInstance(AES_GCM)
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS.toLong(), iv))
-        cipher.doFinal(ct)
-    } catch (_: Exception) {
-        null
+        return try {
+            val iv = data.copyOfRange(0, GCM_IV_BYTES)
+            val ct = data.copyOfRange(GCM_IV_BYTES, data.size)
+            val cipher = Cipher.getInstance(AES_GCM)
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.doFinal(ct)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun base64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
