@@ -27,4 +27,20 @@ interface TwoFactorRepository {
 
     /** Отключает облачный пароль. Требует текущий пароль для подтверждения. */
     suspend fun disable(currentPassword: String): Boolean
+
+    /**
+     * Запрашивает отправку 6-значного кода на почту, к которой привязан аккаунт
+     * (второй шаг 2FA после верного пароля). Возвращает замаскированный адрес
+     * почты (например "п***н@gmail.com") для показа в UI, либо null при ошибке.
+     */
+    suspend fun sendEmailCode(): TwoFactorEmailSendResult
+
+    /** Проверяет введённый пользователем 6-значный код (сравнение хэша). */
+    suspend fun verifyEmailCode(code: String): Boolean
+}
+
+/** Результат запроса на отправку email-кода. */
+sealed class TwoFactorEmailSendResult {
+    data class Success(val maskedEmail: String) : TwoFactorEmailSendResult()
+    data class Error(val message: String) : TwoFactorEmailSendResult()
 }

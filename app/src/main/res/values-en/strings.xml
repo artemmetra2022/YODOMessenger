@@ -152,6 +152,12 @@
     <string name="two_factor_continue">Continue</string>
     <string name="two_factor_logout">Log out</string>
     <string name="two_factor_wrong_password">Incorrect password</string>
+    <string name="two_factor_email_title">Two-factor authentication is enabled 🔒</string>
+    <string name="two_factor_email_subtitle">We sent a code to: %1$s. Enter it below</string>
+    <string name="two_factor_email_code_label">Code from the email</string>
+    <string name="two_factor_email_continue">Confirm</string>
+    <string name="two_factor_email_resend">Resend code</string>
+    <string name="two_factor_email_wrong_code">Incorrect or expired code</string>
 
     <!-- PhoneLogin -->
     <string name="phone_login_title">Log in with phone</string>
