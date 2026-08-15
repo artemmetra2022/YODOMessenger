@@ -135,13 +135,7 @@
     <string name="pin_dialog_disable">Отключить</string>
 
     <!-- TwoFactorGate -->
-    <string name="two_factor_title">Введите пароль</string>
-    <string name="two_factor_subtitle">Для этого аккаунта включена двухэтапная аутентификация</string>
-    <string name="two_factor_password_label">Пароль</string>
-    <string name="two_factor_hint_prefix">Подсказка: %1$s</string>
-    <string name="two_factor_continue">Продолжить</string>
     <string name="two_factor_logout">Выйти из аккаунта</string>
-    <string name="two_factor_wrong_password">Неверный пароль</string>
     <string name="two_factor_email_title">У вас включена двухфакторная аутентификация 🔒</string>
     <string name="two_factor_email_subtitle">Мы отправили код на почту: %1$s. Введите его тут</string>
     <string name="two_factor_email_code_label">Код из письма</string>
@@ -496,21 +490,12 @@
     <string name="pin_lock_backspace_cd">Стереть</string>
 
     <!-- TwoFactor settings -->
-    <string name="two_factor_settings_title">Двухэтапная аутентификация</string>
-    <string name="two_factor_settings_enabled">Дополнительный пароль включён. Он потребуется каждый раз при входе в аккаунт на новом устройстве.</string>
-    <string name="two_factor_settings_disabled">Установите дополнительный пароль. Он будет запрашиваться при входе в аккаунт — так же, как в Telegram — и защитит доступ, даже если кто-то узнает пароль от почты.</string>
-    <string name="two_factor_settings_new_password">Новый пароль</string>
-    <string name="two_factor_settings_repeat_password">Повторите пароль</string>
-    <string name="two_factor_settings_hint_label">Подсказка (необязательно)</string>
-    <string name="two_factor_settings_enable_btn">Включить пароль</string>
-    <string name="two_factor_settings_hint_prefix">Подсказка: %1$s</string>
-    <string name="two_factor_settings_change_btn">Изменить пароль</string>
+    <string name="two_factor_settings_title">Двухфакторная аутентификация</string>
+    <string name="two_factor_settings_enabled">Включена. При входе в аккаунт на новом устройстве мы отправим код на вашу почту.</string>
+    <string name="two_factor_settings_disabled">Включите двухфакторную аутентификацию по email. При входе в аккаунт на новом устройстве мы будем присылать 6-значный код на вашу почту — это защитит доступ, даже если кто-то узнает пароль от аккаунта.</string>
+    <string name="two_factor_settings_enable_btn">Включить</string>
     <string name="two_factor_settings_disable_btn">Отключить</string>
-    <string name="two_factor_settings_current_password">Текущий пароль</string>
-    <string name="two_factor_settings_new_password2">Новый пароль</string>
-    <string name="two_factor_settings_repeat_new">Повторите новый пароль</string>
-    <string name="two_factor_settings_save_btn">Сохранить</string>
-    <string name="two_factor_settings_disable_password_btn">Отключить пароль</string>
+    <string name="two_factor_settings_disable_password_btn">Подтвердить отключение</string>
     <string name="two_factor_settings_cancel">Отмена</string>
 
     <!-- Nearby -->

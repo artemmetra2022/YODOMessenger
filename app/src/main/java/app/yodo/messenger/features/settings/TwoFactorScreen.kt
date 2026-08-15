@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,7 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
@@ -124,9 +125,19 @@ fun TwoFactorScreen(
             )
 
             if (uiState.state.enabled) {
-                EnabledContent(uiState = uiState, onChange = viewModel::changePassword, onDisable = viewModel::disable)
+                EnabledContent(
+                    uiState = uiState,
+                    onStartDisable = viewModel::startDisable,
+                    onConfirmDisable = viewModel::confirmDisable,
+                    onCancelDisable = viewModel::cancelDisable
+                )
             } else {
-                SetupContent(onEnable = viewModel::enablePassword)
+                OutlinedButton(
+                    onClick = viewModel::enable,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.two_factor_settings_enable_btn))
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -135,145 +146,61 @@ fun TwoFactorScreen(
 }
 
 @Composable
-private fun SetupContent(onEnable: (String, String, String?) -> Unit) {
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var hint by remember { mutableStateOf("") }
-    val colorTheme = LocalColorTheme.current
-
-    OutlinedTextField(
-        value = password,
-        onValueChange = { password = it },
-        label = { Text(stringResource(R.string.two_factor_settings_new_password)) },
-        visualTransformation = PasswordVisualTransformation(),
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth()
-    )
-    Spacer(modifier = Modifier.height(12.dp))
-    OutlinedTextField(
-        value = confirmPassword,
-        onValueChange = { confirmPassword = it },
-        label = { Text(stringResource(R.string.two_factor_settings_repeat_password)) },
-        visualTransformation = PasswordVisualTransformation(),
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth()
-    )
-    Spacer(modifier = Modifier.height(12.dp))
-    OutlinedTextField(
-        value = hint,
-        onValueChange = { hint = it },
-        label = { Text(stringResource(R.string.two_factor_settings_hint_label)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth()
-    )
-    Spacer(modifier = Modifier.height(20.dp))
-    Button(
-        onClick = { onEnable(password, confirmPassword, hint.takeIf { it.isNotBlank() }) },
-        colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(stringResource(R.string.two_factor_settings_enable_btn))
-    }
-}
-
-@Composable
 private fun EnabledContent(
     uiState: TwoFactorUiState,
-    onChange: (String, String, String, String?) -> Unit,
-    onDisable: (String) -> Unit
+    onStartDisable: () -> Unit,
+    onConfirmDisable: (String) -> Unit,
+    onCancelDisable: () -> Unit
 ) {
     val colorTheme = LocalColorTheme.current
-    var mode by remember { mutableStateOf(EnabledMode.NONE) }
 
-    uiState.state.hint?.let { hint ->
-        Text(
-            text = stringResource(R.string.two_factor_settings_hint_prefix, hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-    }
-
-    if (mode == EnabledMode.NONE) {
-        OutlinedButton(onClick = { mode = EnabledMode.CHANGE }, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.two_factor_settings_change_btn))
-        }
-        Spacer(modifier = Modifier.height(12.dp))
+    if (!uiState.awaitingDisableCode) {
         OutlinedButton(
-            onClick = { mode = EnabledMode.DISABLE },
+            onClick = onStartDisable,
+            enabled = !uiState.isSendingCode,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = YodoError),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(stringResource(R.string.two_factor_settings_disable_btn))
+            if (uiState.isSendingCode) {
+                CircularProgressIndicator(modifier = Modifier.height(20.dp), color = YodoError)
+            } else {
+                Text(stringResource(R.string.two_factor_settings_disable_btn))
+            }
         }
         return
     }
 
-    var currentPassword by remember { mutableStateOf("") }
-    var newPassword by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var hint by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+
+    Text(
+        text = stringResource(R.string.two_factor_email_subtitle, uiState.maskedEmail.orEmpty()),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(bottom = 12.dp)
+    )
 
     OutlinedTextField(
-        value = currentPassword,
-        onValueChange = { currentPassword = it },
-        label = { Text(stringResource(R.string.two_factor_settings_current_password)) },
-        visualTransformation = PasswordVisualTransformation(),
+        value = code,
+        onValueChange = { new -> if (new.length <= 6 && new.all { it.isDigit() }) code = new },
+        label = { Text(stringResource(R.string.two_factor_email_code_label)) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
         singleLine = true,
         modifier = Modifier.fillMaxWidth()
     )
 
-    if (mode == EnabledMode.CHANGE) {
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(
-            value = newPassword,
-            onValueChange = { newPassword = it },
-            label = { Text(stringResource(R.string.two_factor_settings_new_password2)) },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(
-            value = confirmPassword,
-            onValueChange = { confirmPassword = it },
-            label = { Text(stringResource(R.string.two_factor_settings_repeat_new)) },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(
-            value = hint,
-            onValueChange = { hint = it },
-            label = { Text(stringResource(R.string.two_factor_settings_hint_label)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-
     Spacer(modifier = Modifier.height(20.dp))
 
     Button(
-        onClick = {
-            if (mode == EnabledMode.CHANGE) {
-                onChange(currentPassword, newPassword, confirmPassword, hint.takeIf { it.isNotBlank() })
-            } else {
-                onDisable(currentPassword)
-            }
-            mode = EnabledMode.NONE
-        },
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (mode == EnabledMode.DISABLE) YodoError else colorTheme.primary
-        ),
+        onClick = { onConfirmDisable(code) },
+        enabled = code.length == 6,
+        colors = ButtonDefaults.buttonColors(containerColor = YodoError),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text(if (mode == EnabledMode.CHANGE) stringResource(R.string.two_factor_settings_save_btn) else stringResource(R.string.two_factor_settings_disable_password_btn))
+        Text(stringResource(R.string.two_factor_settings_disable_password_btn))
     }
     Spacer(modifier = Modifier.height(8.dp))
-    OutlinedButton(onClick = { mode = EnabledMode.NONE }, modifier = Modifier.fillMaxWidth()) {
+    OutlinedButton(onClick = onCancelDisable, modifier = Modifier.fillMaxWidth()) {
         Text(stringResource(R.string.two_factor_settings_cancel))
     }
 }
-
-private enum class EnabledMode { NONE, CHANGE, DISABLE }

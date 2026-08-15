@@ -3,6 +3,7 @@ package app.yodo.messenger.features.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.domain.model.TwoFactorState
+import app.yodo.messenger.domain.repository.TwoFactorEmailSendResult
 import app.yodo.messenger.domain.repository.TwoFactorRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,10 +11,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** Экран настроек двухэтапной аутентификации (облачный пароль, аналог Telegram). */
+/** Экран настроек 2FA по email-коду. */
 data class TwoFactorUiState(
     val isLoading: Boolean = true,
     val state: TwoFactorState = TwoFactorState(),
+    /** Идёт подтверждение отключения: код уже отправлен, ждём ввод. */
+    val awaitingDisableCode: Boolean = false,
+    val maskedEmail: String? = null,
+    val isSendingCode: Boolean = false,
     val errorMessage: String? = null,
     val successMessage: String? = null
 )
@@ -34,61 +39,53 @@ class TwoFactorViewModel @Inject constructor(
         }
     }
 
-    /** Включает облачный пароль впервые. */
-    fun enablePassword(newPassword: String, confirmPassword: String, hint: String?) {
-        if (newPassword.isBlank()) {
-            showError("Введите пароль")
-            return
-        }
-        if (newPassword != confirmPassword) {
-            showError("Пароли не совпадают")
-            return
-        }
+    /** Включает 2FA — при следующем входе на новом устройстве придёт код на почту. */
+    fun enable() {
         viewModelScope.launch {
-            val ok = twoFactorRepository.setPassword(newPassword, hint)
+            val ok = twoFactorRepository.enable()
             if (ok) {
-                showSuccess("Пароль включён")
+                showSuccess("Двухфакторная аутентификация включена")
             } else {
-                showError("Не удалось включить пароль, попробуйте ещё раз")
+                showError("Не удалось включить, попробуйте ещё раз")
             }
         }
     }
 
-    /** Меняет уже установленный пароль на новый (требует текущий пароль). */
-    fun changePassword(currentPassword: String, newPassword: String, confirmPassword: String, hint: String?) {
-        if (newPassword.isBlank()) {
-            showError("Введите новый пароль")
-            return
-        }
-        if (newPassword != confirmPassword) {
-            showError("Пароли не совпадают")
-            return
-        }
+    /** Первый шаг отключения: запрашиваем код на почту для подтверждения. */
+    fun startDisable() {
+        _uiState.value = _uiState.value.copy(isSendingCode = true, errorMessage = null)
         viewModelScope.launch {
-            val verified = twoFactorRepository.verifyPassword(currentPassword)
-            if (!verified) {
-                showError("Неверный текущий пароль")
-                return@launch
-            }
-            val ok = twoFactorRepository.setPassword(newPassword, hint)
-            if (ok) {
-                showSuccess("Пароль изменён")
-            } else {
-                showError("Не удалось изменить пароль, попробуйте ещё раз")
+            when (val result = twoFactorRepository.sendEmailCode()) {
+                is TwoFactorEmailSendResult.Success -> {
+                    _uiState.value = _uiState.value.copy(
+                        isSendingCode = false,
+                        awaitingDisableCode = true,
+                        maskedEmail = result.maskedEmail
+                    )
+                }
+                is TwoFactorEmailSendResult.Error -> {
+                    _uiState.value = _uiState.value.copy(isSendingCode = false)
+                    showError(result.message)
+                }
             }
         }
     }
 
-    /** Отключает облачный пароль (требует текущий пароль для подтверждения). */
-    fun disable(currentPassword: String) {
+    /** Второй шаг отключения: проверка кода из письма. */
+    fun confirmDisable(emailCode: String) {
         viewModelScope.launch {
-            val ok = twoFactorRepository.disable(currentPassword)
+            val ok = twoFactorRepository.disable(emailCode)
             if (ok) {
-                showSuccess("Пароль отключён")
+                _uiState.value = _uiState.value.copy(awaitingDisableCode = false, maskedEmail = null)
+                showSuccess("Двухфакторная аутентификация отключена")
             } else {
-                showError("Неверный пароль")
+                showError("Неверный или устаревший код")
             }
         }
+    }
+
+    fun cancelDisable() {
+        _uiState.value = _uiState.value.copy(awaitingDisableCode = false, maskedEmail = null)
     }
 
     /** Снэкбар показан — очищаем сообщение, чтобы не показать его повторно. */

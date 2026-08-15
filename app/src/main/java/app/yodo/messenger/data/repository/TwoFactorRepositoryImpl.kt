@@ -25,16 +25,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * ВАЖНО (безопасность): PBKDF2 hash/salt второго пароля хранятся ОТДЕЛЬНО от
- * публичного профиля пользователя — в приватной подколлекции
- * users/{uid}/security/twoFactor, которая по firestore.rules читается только
- * самим владельцем аккаунта. Раньше hash/salt лежали прямо в users/{uid},
- * который читается публично (allow read: if true — это нужно для входа по
- * username), из-за чего хеш второго пароля любого пользователя можно было
- * скачать без авторизации и брутфорсить офлайн. Поле "enabled"/"hint"
- * секретом не является (нужно для экрана входа, чтобы показать, что 2FA
- * включена, и подсказку) и по-прежнему хранится в публичном профиле —
- * это не даёт злоумышленнику ничего, кроме факта включённости 2FA.
+ * ВАЖНО (безопасность): включённость 2FA ("enabled") хранится в публичном
+ * профиле users/{uid} — это не секрет, а нужен экрану входа, чтобы понять,
+ * что после пароля/Google-входа нужно запросить email-код. Сам код —
+ * в приватной подколлекции users/{uid}/security/emailCode, которая по
+ * firestore.rules читается и пишется только владельцем аккаунта.
+ *
+ * Прежняя версия дополнительно требовала отдельный "облачный пароль"
+ * (как в Telegram) перед email-кодом. Это убрано: включённая 2FA теперь
+ * значит только одно — при входе после пароля/Google придёт код на почту,
+ * без отдельного пароля.
  */
 @Singleton
 class TwoFactorRepositoryImpl @Inject constructor(
@@ -44,10 +44,9 @@ class TwoFactorRepositoryImpl @Inject constructor(
 
     companion object {
         private const val FIELD = "twoFactor"
-        private const val SECURITY_DOC_ID = "twoFactor"
         private const val EMAIL_CODE_DOC_ID = "emailCode"
-        private const val ITERATIONS = 120_000
         private const val KEY_LENGTH_BITS = 256
+        private const val ITERATIONS = 120_000
         private const val SALT_LENGTH_BYTES = 16
 
         private const val EMAIL_CODE_TTL_MS = 10 * 60 * 1000L // код действует 10 минут
@@ -72,12 +71,6 @@ class TwoFactorRepositoryImpl @Inject constructor(
     private fun userDoc() =
         firebaseAuth.currentUser?.uid?.let { uid -> firestore.collection("users").document(uid) }
 
-    private fun securityDoc() =
-        firebaseAuth.currentUser?.uid?.let { uid ->
-            firestore.collection("users").document(uid)
-                .collection("security").document(SECURITY_DOC_ID)
-        }
-
     private fun emailCodeDoc() =
         firebaseAuth.currentUser?.uid?.let { uid ->
             firestore.collection("users").document(uid)
@@ -95,8 +88,7 @@ class TwoFactorRepositoryImpl @Inject constructor(
                 @Suppress("UNCHECKED_CAST")
                 val map = snapshot?.get(FIELD) as? Map<String, Any?>
                 val enabled = (map?.get("enabled") as? Boolean) == true
-                val hint = map?.get("hint") as? String
-                trySend(TwoFactorState(enabled = enabled, hint = hint?.takeIf { it.isNotBlank() }))
+                trySend(TwoFactorState(enabled = enabled))
             }
             awaitClose { listener.remove() }
         }
@@ -115,29 +107,13 @@ class TwoFactorRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun setPassword(newPassword: String, hint: String?): Boolean {
+    override suspend fun enable(): Boolean {
         val doc = userDoc() ?: return false
-        val secDoc = securityDoc() ?: return false
         return try {
-            val salt = generateSalt()
-            val hash = hashPassword(newPassword, salt)
-
-            // Секретные данные (hash/salt) — в приватную подколлекцию.
-            secDoc.set(
-                mapOf(
-                    "salt" to salt.toHex(),
-                    "hash" to hash,
-                    "updatedAt" to System.currentTimeMillis()
-                )
-            ).await()
-
-            // Публично видимые данные (только флаг и необязательная подсказка) —
-            // в профиль пользователя, как и раньше.
             doc.set(
                 mapOf(
                     FIELD to mapOf(
                         "enabled" to true,
-                        "hint" to (hint?.trim().takeUnless { it.isNullOrBlank() } ?: ""),
                         "updatedAt" to System.currentTimeMillis()
                     )
                 ),
@@ -145,42 +121,20 @@ class TwoFactorRepositoryImpl @Inject constructor(
             ).await()
             true
         } catch (e: Exception) {
-            android.util.Log.w("TwoFactorRepository", "Не удалось установить пароль: ${e.message}")
+            android.util.Log.w("TwoFactorRepository", "Не удалось включить 2FA: ${e.message}")
             false
         }
     }
 
-    override suspend fun verifyPassword(password: String): Boolean {
-        val secDoc = securityDoc() ?: return false
-        return try {
-            val snap = secDoc.get().await()
-            val saltHex = snap.getString("salt") ?: return false
-            val storedHash = snap.getString("hash") ?: return false
-            val computedHash = hashPassword(password, saltHex.fromHex())
-            computedHash == storedHash
-        } catch (e: Exception) {
-            android.util.Log.w("TwoFactorRepository", "Не удалось проверить пароль: ${e.message}")
-            false
-        }
-    }
-
-    override suspend fun disable(currentPassword: String): Boolean {
+    /** Отключает 2FA. Требует свежий email-код (запрошен через sendEmailCode) для подтверждения. */
+    override suspend fun disable(emailCode: String): Boolean {
         val doc = userDoc() ?: return false
-        val secDoc = securityDoc() ?: return false
-        if (!verifyPassword(currentPassword)) return false
+        if (!verifyEmailCode(emailCode)) return false
         return try {
-            secDoc.set(
-                mapOf(
-                    "salt" to "",
-                    "hash" to "",
-                    "updatedAt" to System.currentTimeMillis()
-                )
-            ).await()
             doc.set(
                 mapOf(
                     FIELD to mapOf(
                         "enabled" to false,
-                        "hint" to "",
                         "updatedAt" to System.currentTimeMillis()
                     )
                 ),
@@ -188,13 +142,13 @@ class TwoFactorRepositoryImpl @Inject constructor(
             ).await()
             true
         } catch (e: Exception) {
-            android.util.Log.w("TwoFactorRepository", "Не удалось отключить пароль: ${e.message}")
+            android.util.Log.w("TwoFactorRepository", "Не удалось отключить 2FA: ${e.message}")
             false
         }
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // Второй шаг 2FA: 6-значный код на почту, к которой привязан аккаунт.
+    // 2FA по email: 6-значный код на почту, к которой привязан аккаунт.
     //
     // ВАЖНО (безопасность, чем это отличается от "серверного" варианта):
     // здесь нет Cloud Functions (нужен платный план Blaze), поэтому код
@@ -202,17 +156,17 @@ class TwoFactorRepositoryImpl @Inject constructor(
     // сторонний бесплатный сервис EmailJS напрямую с телефона. Сам код
     // никогда не хранится и не передаётся в открытом виде — в Firestore
     // (users/{uid}/security/emailCode, читает/пишет только владелец
-    // аккаунта — см. firestore.rules) лежит только SHA-256 хэш с солью и
-    // срок действия, как и с обычным паролем 2FA выше. Тем не менее это
-    // немного менее безопасно, чем полностью серверная проверка: человек с
-    // доступом к декомпилированному APK теоретически может увидеть саму
-    // логику генерации/сравнения хэша (не сам код — код случаен и хранится
-    // только как хэш) и написать себе клиент, который читает произвольный
-    // документ security/emailCode ДРУГОГО пользователя. Чтобы это не давало
-    // ничего полезного, доступ к чужому security/emailCode по-прежнему
-    // закрыт правилами Firestore — прочитать/подобрать хэш чужого кода
-    // нельзя, можно только для СВОЕГО аккаунта, что и так уже требует
-    // valid Firebase-сессии этого же пользователя.
+    // аккаунта — см. firestore.rules) лежит только хэш с солью и срок
+    // действия. Тем не менее это немного менее безопасно, чем полностью
+    // серверная проверка: человек с доступом к декомпилированному APK
+    // теоретически может увидеть саму логику генерации/сравнения хэша (не
+    // сам код — код случаен и хранится только как хэш) и написать себе
+    // клиент, который читает произвольный документ security/emailCode
+    // ДРУГОГО пользователя. Чтобы это не давало ничего полезного, доступ к
+    // чужому security/emailCode по-прежнему закрыт правилами Firestore —
+    // прочитать/подобрать хэш чужого кода нельзя, можно только для СВОЕГО
+    // аккаунта, что и так уже требует valid Firebase-сессии этого же
+    // пользователя.
     // ────────────────────────────────────────────────────────────────────────────
 
     override suspend fun sendEmailCode(): TwoFactorEmailSendResult {
@@ -337,7 +291,7 @@ class TwoFactorRepositoryImpl @Inject constructor(
         }
 
     private suspend fun hashCode(code: String, salt: ByteArray): String =
-        withContext(Dispatchers.Default) { hashPassword(code, salt) }
+        withContext(Dispatchers.Default) { hashValue(code, salt) }
 
     private fun maskEmail(email: String): String {
         val at = email.indexOf('@')
@@ -352,8 +306,8 @@ class TwoFactorRepositoryImpl @Inject constructor(
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // Криптография: PBKDF2WithHmacSHA256, случайная соль на пользователя.
-    // Ни сам пароль, ни обратимая форма никогда не покидают это устройство.
+    // Криптография: PBKDF2WithHmacSHA256, случайная соль на каждый код.
+    // Сам код никогда не покидает это устройство в открытом виде.
     // ────────────────────────────────────────────────────────────────────────────
 
     private fun generateSalt(): ByteArray {
@@ -362,8 +316,8 @@ class TwoFactorRepositoryImpl @Inject constructor(
         return salt
     }
 
-    private fun hashPassword(password: String, salt: ByteArray): String {
-        val spec: KeySpec = PBEKeySpec(password.toCharArray(), salt, ITERATIONS, KEY_LENGTH_BITS)
+    private fun hashValue(value: String, salt: ByteArray): String {
+        val spec: KeySpec = PBEKeySpec(value.toCharArray(), salt, ITERATIONS, KEY_LENGTH_BITS)
         val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
         val hash = factory.generateSecret(spec).encoded
         return hash.toHex()

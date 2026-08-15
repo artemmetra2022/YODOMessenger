@@ -66,13 +66,13 @@ service cloud.firestore {
     match /users/{userId} {
       // Публичное чтение нужно для входа по username (email резолвится ДО
       // авторизации в FirebaseAuth) и для профилей пользователей.
-      // ВАЖНО: секретные/чувствительные поля (в т.ч. twoFactor.hash/salt)
-      // больше НЕ хранятся в этом документе — см. подколлекцию /security ниже.
+      // ВАЖНО: поле twoFactor.enabled — это флаг "включена ли 2FA по email",
+      // не секрет (нужен экрану входа, чтобы понять, что после пароля нужно
+      // запросить email-код), поэтому владелец пишет его прямо сюда.
+      // Секретные данные (хэш/соль email-кода) — в подколлекции /security,
+      // публично недоступной даже для владельца через этот документ.
       allow read: if true;
-      // Дополнительно запрещаем клиенту писать поле twoFactor напрямую сюда,
-      // даже владельцу документа — 2FA обслуживается только через /security.
-      allow write: if isSignedIn() && request.auth.uid == userId &&
-        !("twoFactor" in request.resource.data);
+      allow write: if isSignedIn() && request.auth.uid == userId;
 
       // Сессии (устройства) — только владелец аккаунта может читать и писать.
       match /sessions/{sessionId} {

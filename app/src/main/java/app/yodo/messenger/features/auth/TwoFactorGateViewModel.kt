@@ -13,17 +13,11 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 sealed class TwoFactorGateUiState {
-    /** Проверяем, включена ли двухэтапная аутентификация у этого пользователя. */
+    /** Проверяем, включена ли 2FA у этого пользователя. */
     data object Checking : TwoFactorGateUiState()
     /** Не включена — можно сразу пропускать пользователя дальше. */
     data object NotRequired : TwoFactorGateUiState()
-    /** Включена — показываем поле ввода пароля (первый шаг). */
-    data class AwaitingPassword(val hint: String?, val error: String? = null, val isVerifying: Boolean = false) :
-        TwoFactorGateUiState()
-    /**
-     * Пароль верен, код на почту отправляется/отправлен — показываем поле
-     * ввода 6-значного кода (второй шаг).
-     */
+    /** Включена — код на почту отправляется/отправлен, показываем поле ввода 6-значного кода. */
     data class AwaitingEmailCode(
         val maskedEmail: String,
         val error: String? = null,
@@ -31,7 +25,7 @@ sealed class TwoFactorGateUiState {
         val isResending: Boolean = false,
         val infoMessage: String? = null
     ) : TwoFactorGateUiState()
-    /** Оба шага пройдены — можно пропускать пользователя дальше. */
+    /** Код подтверждён — можно пропускать пользователя дальше. */
     data object Verified : TwoFactorGateUiState()
 }
 
@@ -47,26 +41,11 @@ class TwoFactorGateViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val state = twoFactorRepository.observeState().first()
-            _uiState.value = if (state.enabled) {
-                TwoFactorGateUiState.AwaitingPassword(hint = state.hint)
+            if (state.enabled) {
+                requestEmailCode(isResend = false)
             } else {
-                TwoFactorGateUiState.NotRequired
+                _uiState.value = TwoFactorGateUiState.NotRequired
             }
-        }
-    }
-
-    /** Первый шаг: проверка облачного пароля. При успехе сразу запрашивает email-код. */
-    fun verify(password: String) {
-        val current = _uiState.value
-        if (current !is TwoFactorGateUiState.AwaitingPassword) return
-        _uiState.value = current.copy(isVerifying = true, error = null)
-        viewModelScope.launch {
-            val ok = twoFactorRepository.verifyPassword(password)
-            if (!ok) {
-                _uiState.value = current.copy(isVerifying = false, error = "Неверный пароль")
-                return@launch
-            }
-            requestEmailCode(isResend = false)
         }
     }
 
@@ -91,16 +70,16 @@ class TwoFactorGateViewModel @Inject constructor(
                 _uiState.value = if (current is TwoFactorGateUiState.AwaitingEmailCode) {
                     current.copy(isResending = false, error = result.message)
                 } else {
-                    // Ошибка при первой отправке (сразу после пароля) — остаёмся
-                    // на экране пароля с сообщением об ошибке, чтобы не застрять
-                    // на пустом экране кода без адреса почты.
-                    TwoFactorGateUiState.AwaitingPassword(hint = null, error = result.message)
+                    // Ошибка при самой первой отправке (сразу после входа) — показываем
+                    // экран кода с пустым адресом и ошибкой, чтобы дать возможность
+                    // нажать "отправить ещё раз", а не застрять на пустом экране.
+                    TwoFactorGateUiState.AwaitingEmailCode(maskedEmail = "", error = result.message)
                 }
             }
         }
     }
 
-    /** Второй шаг: проверка 6-значного кода из письма. */
+    /** Проверка 6-значного кода из письма — единственный шаг 2FA при входе. */
     fun verifyEmailCode(code: String) {
         val current = _uiState.value
         if (current !is TwoFactorGateUiState.AwaitingEmailCode) return

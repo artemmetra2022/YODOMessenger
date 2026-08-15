@@ -145,13 +145,7 @@
     <string name="pin_dialog_disable">Disable</string>
 
     <!-- TwoFactorGate -->
-    <string name="two_factor_title">Enter password</string>
-    <string name="two_factor_subtitle">Two-step verification is enabled for this account</string>
-    <string name="two_factor_password_label">Password</string>
-    <string name="two_factor_hint_prefix">Hint: %1$s</string>
-    <string name="two_factor_continue">Continue</string>
     <string name="two_factor_logout">Log out</string>
-    <string name="two_factor_wrong_password">Incorrect password</string>
     <string name="two_factor_email_title">Two-factor authentication is enabled 🔒</string>
     <string name="two_factor_email_subtitle">We sent a code to: %1$s. Enter it below</string>
     <string name="two_factor_email_code_label">Code from the email</string>
@@ -500,21 +494,12 @@ or channels by title</string>
     <string name="pin_lock_backspace_cd">Backspace</string>
 
     <!-- TwoFactor settings -->
-    <string name="two_factor_settings_title">Two-step verification</string>
-    <string name="two_factor_settings_enabled">An additional password is set. It will be required every time you sign in to your account on a new device.</string>
-    <string name="two_factor_settings_disabled">Set an additional password. It will be asked when signing in — just like in Telegram — and protects access even if someone gets your email password.</string>
-    <string name="two_factor_settings_new_password">New password</string>
-    <string name="two_factor_settings_repeat_password">Repeat password</string>
-    <string name="two_factor_settings_hint_label">Hint (optional)</string>
-    <string name="two_factor_settings_enable_btn">Enable password</string>
-    <string name="two_factor_settings_hint_prefix">Hint: %1$s</string>
-    <string name="two_factor_settings_change_btn">Change password</string>
+    <string name="two_factor_settings_title">Two-factor authentication</string>
+    <string name="two_factor_settings_enabled">Enabled. We\'ll send a code to your email when signing in on a new device.</string>
+    <string name="two_factor_settings_disabled">Turn on two-factor authentication by email. We\'ll send a 6-digit code to your email when signing in on a new device — this protects access even if someone gets your account password.</string>
+    <string name="two_factor_settings_enable_btn">Enable</string>
     <string name="two_factor_settings_disable_btn">Disable</string>
-    <string name="two_factor_settings_current_password">Current password</string>
-    <string name="two_factor_settings_new_password2">New password</string>
-    <string name="two_factor_settings_repeat_new">Repeat new password</string>
-    <string name="two_factor_settings_save_btn">Save</string>
-    <string name="two_factor_settings_disable_password_btn">Disable password</string>
+    <string name="two_factor_settings_disable_password_btn">Confirm disable</string>
     <string name="two_factor_settings_cancel">Cancel</string>
 
     <!-- Nearby -->
