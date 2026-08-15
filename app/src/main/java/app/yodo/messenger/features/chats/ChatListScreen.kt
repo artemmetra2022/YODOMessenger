@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.OfficialChannelAvatar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -1017,9 +1018,12 @@ private fun ChatListItem(
                     size = 56.dp,
                     userId = chat.chatId
                 )
+            } else if (chat.isVerified) {
+                // Официальный канал — фирменный аватар вместо буквы «Y»
+                OfficialChannelAvatar(size = 56.dp)
             } else {
                 UserAvatar(
-                    displayName = if (chat.isVerified) "Y" else chat.title,
+                    displayName = chat.title,
                     photoUrl = null,
                     avatarBase64 = null,
                     size = 56.dp,

@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.DeveloperVerifiedBadge
+import app.yodo.messenger.ui.components.isDeveloperAccount
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -167,12 +169,19 @@ fun UserProfileScreen(
                         Spacer(modifier = Modifier.height(14.dp))
 
                         // Имя
-                        Text(
-                            text = user.displayName,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            textAlign = TextAlign.Center
-                        )
+                        // Имя + галочка разработчика
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = user.displayName,
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                textAlign = TextAlign.Center
+                            )
+                            if (isDeveloperAccount(user.email)) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                DeveloperVerifiedBadge(size = 24.dp)
+                            }
+                        }
 
                         // @username
                         user.username?.let {

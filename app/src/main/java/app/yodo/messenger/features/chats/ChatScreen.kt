@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.OfficialChannelAvatar
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -442,15 +443,19 @@ fun ChatScreen(
                                             size = 36.dp,
                                             modifier = Modifier.padding(end = 8.dp)
                                         )
+                                    } else if (uiState.isOfficialChannel) {
+                                        OfficialChannelAvatar(
+                                            size = 36.dp,
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        )
                                     } else {
-                                        Box(
-                                            modifier = Modifier.size(36.dp).clip(CircleShape)
-                                                .background(colorTheme.primary.copy(alpha = 0.15f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("Y", fontWeight = FontWeight.Bold, color = colorTheme.primary,
-                                                style = MaterialTheme.typography.titleMedium)
-                                        }
+                                        UserAvatar(
+                                            displayName = uiState.chatTitle,
+                                            photoUrl = null,
+                                            avatarBase64 = null,
+                                            size = 36.dp,
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        )
                                     }
                                 } else if (otherUserId != null) {
                                     UserAvatar(

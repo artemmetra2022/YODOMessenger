@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.profile
 
+
+import app.yodo.messenger.ui.components.DeveloperVerifiedBadge
+import app.yodo.messenger.ui.components.isDeveloperAccount
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -244,13 +247,17 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text(
-                text = uiState.user?.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.profile_no_name),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            uiState.user?.username?.takeIf { it.isNotBlank() }?.let {
-                Text("@$it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = uiState.user?.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.profile_no_name),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                if (isDeveloperAccount(uiState.user?.email)) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    DeveloperVerifiedBadge(size = 22.dp)
+                }
             }
             // НОВОЕ (AE): публичный ID — можно нажать, чтобы скопировать.
             uiState.user?.publicId?.takeIf { it.isNotBlank() }?.let { pid ->
