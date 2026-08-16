@@ -75,7 +75,7 @@ fun YodoNavGraph(
         composable(Routes.Login.route) {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate(Routes.ChatList.route) {
+                    navController.navigate(Routes.TwoFactorGate.route) {
                         popUpTo(Routes.Welcome.route) { inclusive = true }
                     }
                 },
@@ -175,11 +175,28 @@ fun YodoNavGraph(
         composable(Routes.PhoneLogin.route) {
             PhoneLoginScreen(
                 onLoginSuccess = {
-                    navController.navigate(Routes.ChatList.route) {
+                    navController.navigate(Routes.TwoFactorGate.route) {
                         popUpTo(Routes.Welcome.route) { inclusive = true }
                     }
                 },
                 onNavigateToEmailLogin = { navController.navigate(Routes.Login.route) }
+            )
+        }
+        // НОВОЕ: гейт 2FA — показывается сразу после успешного входа (пароль/username,
+        // телефон или Google), если у пользователя включена 2FA по email. Если 2FA
+        // выключена, TwoFactorGateScreen сам сразу пропускает дальше (см. onPassed).
+        composable(Routes.TwoFactorGate.route) {
+            app.yodo.messenger.features.auth.TwoFactorGateScreen(
+                onPassed = {
+                    navController.navigate(Routes.ChatList.route) {
+                        popUpTo(Routes.TwoFactorGate.route) { inclusive = true }
+                    }
+                },
+                onCancelled = {
+                    navController.navigate(Routes.Welcome.route) {
+                        popUpTo(Routes.TwoFactorGate.route) { inclusive = true }
+                    }
+                }
             )
         }
         composable(Routes.ChatList.route) {

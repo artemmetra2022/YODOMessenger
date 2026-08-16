@@ -9,6 +9,9 @@ sealed class Routes(val route: String) {
     // чтобы не путать со связанной с ним логикой popUpTo(Welcome) при первой регистрации.
     data object OnboardingReplay : Routes("onboarding_replay")
     data object Login : Routes("login")
+    // НОВОЕ: экран ввода 6-значного email-кода сразу после успешного входа
+    // (пароль/username, телефон или Google) — только если у пользователя включена 2FA.
+    data object TwoFactorGate : Routes("two_factor_gate")
     data object PhoneLogin : Routes("phone_login")
     data object ForgotPassword : Routes("forgot_password")
     data object Register : Routes("register")

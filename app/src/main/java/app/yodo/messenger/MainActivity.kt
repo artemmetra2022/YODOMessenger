@@ -21,7 +21,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.navigation.compose.rememberNavController
-import kotlinx.coroutines.flow.map
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinRequirement
 import app.yodo.messenger.data.local.ThemePreferences
@@ -45,7 +44,6 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var themePreferences: ThemePreferences
     @Inject lateinit var userSettingsPreferences: UserSettingsPreferences
     @Inject lateinit var languagePreferences: LanguagePreferences
-    @Inject lateinit var twoFactorRepository: app.yodo.messenger.domain.repository.TwoFactorRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,12 +66,7 @@ class MainActivity : ComponentActivity() {
             // PIN-блокировка
             val pinRequirement by userSettingsPreferences.pinRequirement.collectAsState(initial = PinRequirement.NEVER)
             val isPinSet by userSettingsPreferences.isPinSet.collectAsState(initial = false)
-            // НОВОЕ (батч 7): 2FA по email-коду при входе и защита от скриншотов.
-            val isTwoFactorSet by twoFactorRepository.observeState()
-                .map { it.enabled }
-                .collectAsState(initial = false)
             val screenshotProtection by userSettingsPreferences.screenshotProtection.collectAsState(initial = false)
-            var twoFactorPassed by remember { mutableStateOf(false) }
             LaunchedEffect(screenshotProtection) {
                 if (screenshotProtection) {
                     window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
@@ -155,11 +148,6 @@ class MainActivity : ComponentActivity() {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         if (isLocked && isPinSet && pinRequirement != PinRequirement.NEVER) {
                             PinLockScreen(onUnlocked = { isLocked = false })
-                        } else if (isTwoFactorSet && !twoFactorPassed) {
-                            // НОВОЕ (батч 7): второй пароль (двухфакторная аутентификация) при запуске.
-                            app.yodo.messenger.features.security.AppTwoFactorGateScreen(
-                                onUnlocked = { twoFactorPassed = true }
-                            )
                         } else {
                             val navController = rememberNavController()
 
