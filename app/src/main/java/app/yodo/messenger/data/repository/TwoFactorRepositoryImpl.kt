@@ -64,6 +64,11 @@ class TwoFactorRepositoryImpl @Inject constructor(
         private const val EMAILJS_SERVICE_ID = "service_qzw3tzg"
         private const val EMAILJS_TEMPLATE_ID = "template_nn2lzzt"
         private const val EMAILJS_PUBLIC_KEY = "ASKDalVpd2AQSK6Jo"
+        // ВАЖНО: обязателен, когда в аккаунте EmailJS включено "Allow EmailJS API
+        // for non-browser applications" (без этого Android-запросы получают 403,
+        // т.к. у них нет Origin, как у браузера). Private Key берётся в EmailJS:
+        // Account → Security → API Keys. Он не должен быть пустым в релизной сборке.
+        private const val EMAILJS_PRIVATE_KEY = "w2cmF5gpd-4Dl29atVaTO"
     }
 
     private val httpClient = OkHttpClient()
@@ -256,6 +261,9 @@ class TwoFactorRepositoryImpl @Inject constructor(
                     put("service_id", EMAILJS_SERVICE_ID)
                     put("template_id", EMAILJS_TEMPLATE_ID)
                     put("user_id", EMAILJS_PUBLIC_KEY)
+                    if (EMAILJS_PRIVATE_KEY.isNotBlank() && !EMAILJS_PRIVATE_KEY.startsWith("ЗАПОЛНИТЕ")) {
+                        put("accessToken", EMAILJS_PRIVATE_KEY)
+                    }
                     put(
                         "template_params",
                         JSONObject().apply {
@@ -283,7 +291,16 @@ class TwoFactorRepositoryImpl @Inject constructor(
                     .post(body)
                     .build()
 
-                httpClient.newCall(request).execute().use { response -> response.isSuccessful }
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val bodyText = response.body?.string()
+                        android.util.Log.w(
+                            "TwoFactorRepository",
+                            "EmailJS вернул ошибку: код=${response.code}, тело=$bodyText"
+                        )
+                    }
+                    response.isSuccessful
+                }
             } catch (e: Exception) {
                 android.util.Log.w("TwoFactorRepository", "EmailJS: ${e.message}")
                 false
