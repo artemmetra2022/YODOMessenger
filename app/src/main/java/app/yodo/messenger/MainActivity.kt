@@ -21,6 +21,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.flow.map
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinRequirement
 import app.yodo.messenger.data.local.ThemePreferences
@@ -68,7 +69,8 @@ class MainActivity : ComponentActivity() {
             val pinRequirement by userSettingsPreferences.pinRequirement.collectAsState(initial = PinRequirement.NEVER)
             val isPinSet by userSettingsPreferences.isPinSet.collectAsState(initial = false)
             // НОВОЕ (батч 7): 2FA по email-коду при входе и защита от скриншотов.
-            val isTwoFactorSet by kotlinx.coroutines.flow.map(twoFactorRepository.observeState()) { it.enabled }
+            val isTwoFactorSet by twoFactorRepository.observeState()
+                .map { it.enabled }
                 .collectAsState(initial = false)
             val screenshotProtection by userSettingsPreferences.screenshotProtection.collectAsState(initial = false)
             var twoFactorPassed by remember { mutableStateOf(false) }

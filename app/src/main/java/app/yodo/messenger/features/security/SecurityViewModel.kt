@@ -14,6 +14,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -32,7 +33,7 @@ class SecurityViewModel @Inject constructor(
     private val firebaseAuth: FirebaseAuth
 ) : ViewModel() {
 
-    val isTwoFactorSet: Flow<Boolean> = kotlinx.coroutines.flow.map(twoFactorRepository.observeState()) { it.enabled }
+    val isTwoFactorSet: Flow<Boolean> = twoFactorRepository.observeState().map { it.enabled }
     val screenshotProtection: Flow<Boolean> = prefs.screenshotProtection
     val emojiStatus: Flow<String> = prefs.emojiStatus
     val customStatus: Flow<String> = prefs.customStatus
