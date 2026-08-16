@@ -244,7 +244,7 @@ object SettingsSearchIndex {
         ),
         SettingsSearchItem(
             id = "security_center", anchorId = ANCHOR_SECURITY_CENTER,
-            title = "Центр безопасности", subtitle = "2FA, контрольные вопросы, защита от скриншотов",
+            title = "Центр безопасности", subtitle = "2FA по email, защита от скриншотов",
             keywords = listOf("безопасность", "двухфакторная", "2fa", "скриншот", "security"),
             sectionTitle = SEC_ACCOUNT
         ),

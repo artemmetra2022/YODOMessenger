@@ -63,6 +63,16 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ: глобальные настройки приложения (сейчас — только флаг
+    // requireEmailVerification, переключатель "требовать подтверждение почты
+    // при входе"). Читать может кто угодно, даже без авторизации — значение
+    // нужно ДО завершения логина, чтобы решить, показывать ли экран
+    // "подтвердите почту". Менять могут только 2 доверенных email.
+    match /config/appSettings {
+      allow read: if true;
+      allow write: if isOfficialChannelAdmin();
+    }
+
     match /users/{userId} {
       // Публичное чтение нужно для входа по username (email резолвится ДО
       // авторизации в FirebaseAuth) и для профилей пользователей.

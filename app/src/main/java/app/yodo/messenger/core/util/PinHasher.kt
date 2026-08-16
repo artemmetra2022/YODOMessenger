@@ -14,7 +14,7 @@ import javax.crypto.spec.PBEKeySpec
  * практически мгновенно, если атакующий получит доступ к сохранённым
  * hash+salt (например, из бэкапа или рутованного устройства). Используем
  * PBKDF2WithHmacSHA256 с большим числом итераций — тот же алгоритм, что и
- * для облачного пароля (2FA) в TwoFactorRepositoryImpl, — чтобы подбор PIN
+ * для хэширования email-кода в TwoFactorRepositoryImpl, — чтобы подбор PIN
  * требовал заметного времени даже офлайн.
  */
 object PinHasher {

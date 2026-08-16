@@ -3,6 +3,7 @@ package app.yodo.messenger.data.repository
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.AccountStore
 import app.yodo.messenger.domain.model.YodoUser
+import app.yodo.messenger.domain.repository.AppSettingsRepository
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.AuthResult
 import app.yodo.messenger.domain.repository.ResetPasswordResult
@@ -21,7 +22,10 @@ class AuthRepositoryImpl @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     // НОВОЕ (Y): сохраняем аккаунты для быстрой смены аккаунта.
-    private val accountStore: AccountStore
+    private val accountStore: AccountStore,
+    // НОВОЕ: глобальный переключатель "требовать подтверждение почты при входе"
+    // (config/appSettings, меняют только 2 доверенных email — см. AppSettingsRepositoryImpl).
+    private val appSettingsRepository: AppSettingsRepository
 ) : AuthRepository {
 
     override val currentUser: YodoUser?
@@ -46,11 +50,15 @@ class AuthRepositoryImpl @Inject constructor(
             val result = firebaseAuth.signInWithEmailAndPassword(email, password).await()
             val user = result.user ?: return AuthResult.Error("Не удалось получить данные пользователя")
 
-            // НОВОЕ: не пускаем в приложение, пока email не подтверждён. Аккаунт при этом
-            // уже аутентифицирован в Firebase — просто на экране входа покажем экран
+            // НОВОЕ: не пускаем в приложение, пока email не подтверждён — но только
+            // если это требование включено (config/appSettings.requireEmailVerification,
+            // переключают 2 доверенных email — см. AppSettingsRepositoryImpl). Если
+            // выключено, неподтверждённый email проходит без изменений; на уже
+            // подтверждённые email флаг никак не влияет. Аккаунт при этом уже
+            // аутентифицирован в Firebase — просто на экране входа покажем экран
             // "подтвердите почту" вместо списка чатов.
             user.reload().await()
-            if (!user.isEmailVerified) {
+            if (!user.isEmailVerified && appSettingsRepository.isEmailVerificationRequired()) {
                 return AuthResult.RequiresEmailVerification(email)
             }
             // НОВОЕ (email-статус): синхронизируем флаг в Firestore при обычном логине —

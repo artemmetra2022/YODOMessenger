@@ -1,5 +1,6 @@
 package app.yodo.messenger.di
 
+import app.yodo.messenger.data.repository.AppSettingsRepositoryImpl
 import app.yodo.messenger.data.repository.AuthRepositoryImpl
 import app.yodo.messenger.data.repository.ChatRepositoryImpl
 import app.yodo.messenger.data.repository.MessageRepositoryImpl
@@ -11,6 +12,7 @@ import app.yodo.messenger.data.repository.ReportRepositoryImpl
 import app.yodo.messenger.data.repository.SessionRepositoryImpl
 import app.yodo.messenger.data.repository.TwoFactorRepositoryImpl
 import app.yodo.messenger.data.repository.UserRepositoryImpl
+import app.yodo.messenger.domain.repository.AppSettingsRepository
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.MessageRepository
@@ -75,4 +77,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindReportRepository(impl: ReportRepositoryImpl): ReportRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAppSettingsRepository(impl: AppSettingsRepositoryImpl): AppSettingsRepository
 }

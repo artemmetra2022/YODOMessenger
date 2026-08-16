@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var themePreferences: ThemePreferences
     @Inject lateinit var userSettingsPreferences: UserSettingsPreferences
     @Inject lateinit var languagePreferences: LanguagePreferences
+    @Inject lateinit var twoFactorRepository: app.yodo.messenger.domain.repository.TwoFactorRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,8 +67,9 @@ class MainActivity : ComponentActivity() {
             // PIN-блокировка
             val pinRequirement by userSettingsPreferences.pinRequirement.collectAsState(initial = PinRequirement.NEVER)
             val isPinSet by userSettingsPreferences.isPinSet.collectAsState(initial = false)
-            // НОВОЕ (батч 7): двухфакторный пароль при входе и защита от скриншотов.
-            val isTwoFactorSet by userSettingsPreferences.isTwoFactorSet.collectAsState(initial = false)
+            // НОВОЕ (батч 7): 2FA по email-коду при входе и защита от скриншотов.
+            val isTwoFactorSet by kotlinx.coroutines.flow.map(twoFactorRepository.observeState()) { it.enabled }
+                .collectAsState(initial = false)
             val screenshotProtection by userSettingsPreferences.screenshotProtection.collectAsState(initial = false)
             var twoFactorPassed by remember { mutableStateOf(false) }
             LaunchedEffect(screenshotProtection) {

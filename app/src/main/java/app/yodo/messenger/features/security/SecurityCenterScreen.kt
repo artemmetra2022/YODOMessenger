@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,17 +32,21 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.domain.repository.TwoFactorEmailSendResult
 import app.yodo.messenger.ui.theme.LocalColorTheme
+import kotlinx.coroutines.launch
 
 /**
- * Batch 7: «Центр безопасности» — настройка двухфакторной аутентификации,
- * контрольных вопросов, защиты от скриншотов и статусов профиля.
+ * Batch 7: «Центр безопасности» — 2FA по email-коду, защита от скриншотов
+ * и статусы профиля. Второй пароль и контрольные вопросы для сброса убраны:
+ * единственный дополнительный шаг при входе теперь — код на почту.
  */
 @Composable
 fun SecurityCenterScreen(
@@ -48,9 +54,11 @@ fun SecurityCenterScreen(
     viewModel: SecurityViewModel = hiltViewModel()
 ) {
     val colorTheme = LocalColorTheme.current
+    val scope = rememberCoroutineScope()
     val is2faSet by viewModel.isTwoFactorSet.collectAsState(initial = false)
-    val isRecoverySet by viewModel.isRecoverySet.collectAsState(initial = false)
+    val isSendingCode by viewModel.isSendingCode.collectAsState()
     val screenshotProtection by viewModel.screenshotProtection.collectAsState(initial = false)
+    val requireEmailVerification by viewModel.requireEmailVerification.collectAsState(initial = true)
 
     Scaffold(
         topBar = {
@@ -72,84 +80,106 @@ fun SecurityCenterScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Двухфакторная аутентификация
+            // Двухфакторная аутентификация по email-коду
             SectionCard("Двухфакторная аутентификация") {
-                Text(
-                    if (is2faSet) "Включена: при запуске приложения будет запрошен второй пароль."
-                    else "Задайте второй пароль — он будет запрашиваться при каждом входе, помимо пароля аккаунта.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
                 if (!is2faSet) {
-                    var pass by remember { mutableStateOf("") }
-                    var confirm by remember { mutableStateOf("") }
-                    var hint by remember { mutableStateOf("") }
-                    var localError by remember { mutableStateOf<String?>(null) }
-                    OutlinedTextField(pass, { pass = it }, label = { Text("Новый пароль") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(confirm, { confirm = it }, label = { Text("Повторите пароль") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(hint, { hint = it }, label = { Text("Подсказка (необязательно)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    localError?.let { Spacer(Modifier.height(6.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    Text(
+                        "Включите — и при входе в аккаунт на новом устройстве мы будем присылать 6-значный код на вашу почту.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.height(12.dp))
                     Button(
-                        onClick = {
-                            localError = when {
-                                pass.length < 4 -> "Пароль слишком короткий"
-                                pass != confirm -> "Пароли не совпадают"
-                                else -> null
-                            }
-                            if (localError == null) viewModel.enableTwoFactor(pass, hint.takeIf { it.isNotBlank() })
-                        },
+                        onClick = { viewModel.enableTwoFactor() },
                         colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Включить") }
                 } else {
-                    OutlinedButton(onClick = { viewModel.disableTwoFactor() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Отключить")
+                    var awaitingCode by remember { mutableStateOf(false) }
+                    var maskedEmail by remember { mutableStateOf("") }
+                    var code by remember { mutableStateOf("") }
+                    var error by remember { mutableStateOf<String?>(null) }
+
+                    if (!awaitingCode) {
+                        Text(
+                            "Включена: при входе в аккаунт на новом устройстве мы пришлём код на вашу почту.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = {
+                                error = null
+                                scope.launch {
+                                    when (val result = viewModel.requestDisableCode()) {
+                                        is TwoFactorEmailSendResult.Success -> {
+                                            maskedEmail = result.maskedEmail
+                                            awaitingCode = true
+                                        }
+                                        is TwoFactorEmailSendResult.Error -> error = result.message
+                                    }
+                                }
+                            },
+                            enabled = !isSendingCode,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isSendingCode) {
+                                CircularProgressIndicator(modifier = Modifier.height(20.dp))
+                            } else {
+                                Text("Отключить")
+                            }
+                        }
+                        error?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else {
+                        Text(
+                            "Мы отправили код на почту: $maskedEmail. Введите его, чтобы подтвердить отключение.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { new -> if (new.length <= 6 && new.all { it.isDigit() }) code = new },
+                            label = { Text("Код из письма") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            singleLine = true,
+                            isError = error != null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        error?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val ok = viewModel.disableTwoFactor(code)
+                                    if (ok) {
+                                        awaitingCode = false
+                                        code = ""
+                                    } else {
+                                        error = "Неверный или устаревший код"
+                                    }
+                                }
+                            },
+                            enabled = code.length == 6,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Подтвердить отключение") }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { awaitingCode = false; code = ""; error = null },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Отмена") }
                     }
                 }
             }
 
-            // 2. Контрольные вопросы (сброс пароля)
-            SectionCard("Сброс пароля: 3 контрольных вопроса") {
-                Text(
-                    if (isRecoverySet) "Вопросы заданы. С помощью ответов можно сбросить второй пароль."
-                    else "Задайте 3 вопроса и ответа — они помогут восстановить доступ, если забудете второй пароль.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-                var q1 by remember { mutableStateOf("") }
-                var a1 by remember { mutableStateOf("") }
-                var q2 by remember { mutableStateOf("") }
-                var a2 by remember { mutableStateOf("") }
-                var q3 by remember { mutableStateOf("") }
-                var a3 by remember { mutableStateOf("") }
-                var saved by remember { mutableStateOf(false) }
-                OutlinedTextField(q1, { q1 = it }, label = { Text("Вопрос 1") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(a1, { a1 = it }, label = { Text("Ответ 1") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(q2, { q2 = it }, label = { Text("Вопрос 2") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(a2, { a2 = it }, label = { Text("Ответ 2") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(q3, { q3 = it }, label = { Text("Вопрос 3") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(a3, { a3 = it }, label = { Text("Ответ 3") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        viewModel.setRecoveryQuestions(listOf(q1, q2, q3), listOf(a1, a2, a3))
-                        saved = true
-                    },
-                    enabled = q1.isNotBlank() && a1.isNotBlank() && q2.isNotBlank() && a2.isNotBlank() && q3.isNotBlank() && a3.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Сохранить вопросы") }
-                if (saved) { Spacer(Modifier.height(6.dp)); Text("Сохранено ✓", color = colorTheme.primary, style = MaterialTheme.typography.bodySmall) }
-            }
-
-            // 3. Защита от скриншотов
+            // Защита от скриншотов
             SectionCard("Защита от скриншотов") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -157,6 +187,27 @@ fun SecurityCenterScreen(
                         Text("Содержимое не видно в скриншотах и в меню недавних приложений.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = screenshotProtection, onCheckedChange = { viewModel.setScreenshotProtection(it) })
+                }
+            }
+
+            // НОВОЕ: видно только двум доверенным email (создатели приложения).
+            // Глобальный переключатель — применяется ко ВСЕМ пользователям приложения.
+            if (viewModel.isAppAdmin) {
+                SectionCard("Подтверждение почты при входе (для всех пользователей)") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Требовать подтверждённый email для входа", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Если включено, пользователи с неподтверждённой почтой не смогут войти, пока не перейдут по ссылке из письма. На уже подтверждённые email не влияет.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = requireEmailVerification,
+                            onCheckedChange = { viewModel.setRequireEmailVerification(it) }
+                        )
+                    }
                 }
             }
 

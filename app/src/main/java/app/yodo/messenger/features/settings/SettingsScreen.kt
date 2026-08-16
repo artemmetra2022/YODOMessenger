@@ -1040,7 +1040,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            // НОВОЕ (батч 7): Центр безопасности (2FA, контрольные вопросы, защита от скриншотов, статусы).
+            // НОВОЕ (батч 7): Центр безопасности (2FA по email-коду, защита от скриншотов, статусы).
             item {
                 SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SECURITY_CENTER, anchorPositions, highlightedAnchor, colorTheme)) {
                     SettingsNavigateRow(
