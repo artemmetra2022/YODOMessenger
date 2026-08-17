@@ -36,9 +36,16 @@ class MessageRepositoryImpl @Inject constructor(
     private val cryptoManager: CryptoManager
 ) : MessageRepository {
 
-    override fun observeMessages(chatId: String): Flow<List<Message>> = callbackFlow {
-        val listener = firestore.collection("chats").document(chatId)
+    override fun observeMessages(chatId: String, topicId: String?): Flow<List<Message>> = callbackFlow {
+        var query: Query = firestore.collection("chats").document(chatId)
             .collection("messages")
+        // НОВОЕ (форумные группы): если открыта конкретная тема — показываем только
+        // сообщения этой темы. Общая (нефильтрованная) лента используется, когда
+        // тема не выбрана (обычный чат, группа без форума, или список всех сообщений).
+        if (topicId != null) {
+            query = query.whereEqualTo("topicId", topicId)
+        }
+        val listener = query
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { trySend(emptyList<Message>()); return@addSnapshotListener }
@@ -73,7 +80,8 @@ class MessageRepositoryImpl @Inject constructor(
         data: MutableMap<String, Any?>,
         hasTtlOverride: Boolean = false,
         ttlOverrideSeconds: Long? = null,
-        silent: Boolean = false
+        silent: Boolean = false,
+        topicId: String? = null
     ): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
         return try {
@@ -84,6 +92,7 @@ class MessageRepositoryImpl @Inject constructor(
             data["senderId"] = uid
             data["timestamp"] = now
             data["status"] = "SENT"
+            topicId?.let { data["topicId"] = it }
             data["notified"] = false
             // НОВОЕ (секретная фича «тихие публикации»): silent-пост не триггерит push
             // (серверная функция уведомлений пропускает notified=true) и не «пикает».
@@ -114,13 +123,23 @@ class MessageRepositoryImpl @Inject constructor(
                 unreadUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
             }
             chatRef.update(unreadUpdates).await()
+            if (topicId != null) {
+                chatRef.collection("topics").document(topicId).update(
+                    mapOf(
+                        "lastMessage" to previewText,
+                        "lastMessageTimestamp" to now,
+                        "lastMessageSenderId" to uid
+                    )
+                ).await()
+            }
             SendMessageResult.Success(messageId = newDocRef.id)
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не ��далось отправить сообщение")) }
     }
 
     override suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext?,
-        hasTtlOverride: Boolean, ttlOverrideSeconds: Long?, silent: Boolean
+        hasTtlOverride: Boolean, ttlOverrideSeconds: Long?, silent: Boolean,
+        topicId: String?
     ): SendMessageResult {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Сообщение не может быть пустым")
@@ -130,9 +149,10 @@ class MessageRepositoryImpl @Inject constructor(
             data["replyToSenderName"] = replyTo.senderName
             data["replyToText"] = replyTo.text
         }
+        topicId?.let { data["topicId"] = it }
         // НОВОЕ (сквозное шифрование): для личных чатов шифруем текст под ключи участников.
         tryEncryptTextData(chatId, data)
-        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent)
+        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent, topicId)
     }
 
     /**
@@ -162,27 +182,32 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun sendImageMessage(
-        chatId: String, imageBase64: String, caption: String, isViewOnce: Boolean
+        chatId: String, imageBase64: String, caption: String, isViewOnce: Boolean,
+        topicId: String?
     ): SendMessageResult {
         val data = mutableMapOf<String, Any?>("imageBase64" to imageBase64, "text" to caption.trim())
         if (isViewOnce) {
             data["isViewOnce"] = true
             data["viewOnceOpened"] = false
         }
-        return sendRawMessage(chatId, data)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     // НОВОЕ (несколько фото): все выбранные фото сохраняются одним массивом
     // imagesBase64 в одном документе — так они отображаются как единое сообщение-альбом,
     // а не несколько отдельных сообщений подряд.
     override suspend fun sendImagesMessage(
-        chatId: String, imagesBase64: List<String>, caption: String
+        chatId: String, imagesBase64: List<String>, caption: String, topicId: String?
     ): SendMessageResult {
         val images = imagesBase64.filter { it.isNotBlank() }
         if (images.isEmpty()) return SendMessageResult.Error("Нет фото для отправки")
         // Одно фото — отправляем как обычное imageBase64 (совместимость со старыми клиентами).
         if (images.size == 1) {
-            return sendRawMessage(chatId, mutableMapOf("imageBase64" to images.first(), "text" to caption.trim()))
+            return sendRawMessage(
+                chatId,
+                mutableMapOf("imageBase64" to images.first(), "text" to caption.trim()),
+                topicId = topicId
+            )
         }
         val data = mutableMapOf<String, Any?>(
             "imagesBase64" to images,
@@ -190,7 +215,7 @@ class MessageRepositoryImpl @Inject constructor(
             "imageBase64" to images.first(),
             "text" to caption.trim()
         )
-        return sendRawMessage(chatId, data)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     // НОВОЕ (одноразовые медиа): удаляем imageBase64 из документа в Firestore, как только
@@ -215,17 +240,18 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long): SendMessageResult {
+    override suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long, topicId: String?): SendMessageResult {
         val data = mutableMapOf<String, Any?>(
             "text" to "",
             "voiceBase64" to voiceBase64,
             "voiceDurationMs" to durationMs
         )
-        return sendRawMessage(chatId, data)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     override suspend fun sendFileMessage(
-        chatId: String, fileBase64: String, fileName: String, mimeType: String, sizeBytes: Long
+        chatId: String, fileBase64: String, fileName: String, mimeType: String, sizeBytes: Long,
+        topicId: String?
     ): SendMessageResult {
         val data = mutableMapOf<String, Any?>(
             "text" to "",
@@ -234,16 +260,16 @@ class MessageRepositoryImpl @Inject constructor(
             "fileMimeType" to mimeType,
             "fileSizeBytes" to sizeBytes
         )
-        return sendRawMessage(chatId, data)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
-    override suspend fun sendLocationMessage(chatId: String, lat: Double, lng: Double): SendMessageResult {
+    override suspend fun sendLocationMessage(chatId: String, lat: Double, lng: Double, topicId: String?): SendMessageResult {
         val data = mutableMapOf<String, Any?>(
             "text" to "",
             "locationLat" to lat,
             "locationLng" to lng
         )
-        return sendRawMessage(chatId, data)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     // НОВОЕ (расширенные опросы): опрос хранится как вложенная карта poll внутри документа
@@ -258,7 +284,8 @@ class MessageRepositoryImpl @Inject constructor(
         closesAtMillis: Long?,
         isQuiz: Boolean,
         correctOptionIndex: Int?,
-        explanation: String?
+        explanation: String?,
+        topicId: String?
     ): SendMessageResult {
         val trimmedQuestion = question.trim()
         val cleanOptions = options.map { it.trim() }.filter { it.isNotEmpty() }
@@ -288,7 +315,7 @@ class MessageRepositoryImpl @Inject constructor(
             "text" to "",
             "poll" to pollMap
         )
-        return sendRawMessage(chatId, data)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     // НОВОЕ (расширенные опросы): голосование хранится по индексам вариантов, чтобы
@@ -369,6 +396,8 @@ class MessageRepositoryImpl @Inject constructor(
                 val uids = (value as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                 optionIndex to uids
             }?.toMap() ?: emptyMap()
+            val correctOptionIndex = (pollRaw["correctOptionIndex"] as? Number)?.toInt()
+                ?.takeIf { it in options.indices }
             Poll(
                 question = question,
                 options = options,
@@ -376,7 +405,10 @@ class MessageRepositoryImpl @Inject constructor(
                 isAnonymous = pollRaw["isAnonymous"] as? Boolean ?: true,
                 allowMultipleAnswers = pollRaw["allowMultipleAnswers"] as? Boolean ?: false,
                 isClosed = pollRaw["isClosed"] as? Boolean ?: false,
-                closesAt = (pollRaw["closesAt"] as? Number)?.toLong()
+                closesAt = (pollRaw["closesAt"] as? Number)?.toLong(),
+                isQuiz = pollRaw["isQuiz"] as? Boolean ?: false,
+                correctOptionIndex = correctOptionIndex,
+                explanation = pollRaw["explanation"] as? String
             )
         } catch (e: Exception) { null }
     }
@@ -833,6 +865,7 @@ class MessageRepositoryImpl @Inject constructor(
             Message(
                 id = doc.id, chatId = chatId,
                 senderId = doc.getString("senderId") ?: return null,
+                topicId = doc.getString("topicId"),
                 text = decryptMessageText(doc),
                 timestamp = doc.getLong("timestamp") ?: 0L,
                 status = doc.getString("status")?.let { raw ->

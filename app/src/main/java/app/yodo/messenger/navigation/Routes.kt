@@ -82,13 +82,29 @@ sealed class Routes(val route: String) {
         fun createRoute(chatId: String) = "group_info/$chatId"
         const val ARG_CHAT_ID = "chatId"
     }
+    // НОВОЕ (форумные группы): список разделов (тем) форума.
+    data object ForumTopics : Routes("forum_topics/{chatId}") {
+        fun createRoute(chatId: String) = "forum_topics/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
     data object ChatStats : Routes("chat_stats/{chatId}") {
         fun createRoute(chatId: String) = "chat_stats/$chatId"
         const val ARG_CHAT_ID = "chatId"
     }
-    data object Chat : Routes("chat/{chatId}") {
-        fun createRoute(chatId: String) = "chat/$chatId"
+    // НОВОЕ (форумные группы): topicId/topicTitle — необязательные query-параметры.
+    // Если чат открыт из раздела форума, здесь передаётся id и название темы;
+    // при обычном открытии чата (из списка чатов) параметры отсутствуют — старое
+    // поведение полностью сохраняется.
+    data object Chat : Routes("chat/{chatId}?topicId={topicId}&topicTitle={topicTitle}") {
+        fun createRoute(chatId: String, topicId: String? = null, topicTitle: String? = null): String {
+            val base = "chat/$chatId"
+            if (topicId.isNullOrBlank()) return base
+            val encodedTitle = java.net.URLEncoder.encode(topicTitle.orEmpty(), "UTF-8")
+            return "$base?topicId=$topicId&topicTitle=$encodedTitle"
+        }
         const val ARG_CHAT_ID = "chatId"
+        const val ARG_TOPIC_ID = "topicId"
+        const val ARG_TOPIC_TITLE = "topicTitle"
     }
     data object Call : Routes("call/{userId}") {
         fun createRoute(userId: String) = "call/$userId"

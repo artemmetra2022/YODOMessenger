@@ -323,7 +323,20 @@ fun YodoNavGraph(
         }
         composable(
             route = Routes.Chat.route,
-            arguments = listOf(navArgument(Routes.Chat.ARG_CHAT_ID) { type = NavType.StringType })
+            arguments = listOf(
+                navArgument(Routes.Chat.ARG_CHAT_ID) { type = NavType.StringType },
+                // НОВОЕ (форумные группы): необязательные параметры темы форума.
+                navArgument(Routes.Chat.ARG_TOPIC_ID) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument(Routes.Chat.ARG_TOPIC_TITLE) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString(Routes.Chat.ARG_CHAT_ID) ?: ""
             ChatScreen(
@@ -450,6 +463,21 @@ fun YodoNavGraph(
                 },
                 onOpenManageRoles = { chatId ->
                     navController.navigate(Routes.ManageRoles.createRoute(chatId))
+                },
+                onOpenForumTopics = { chatId ->
+                    navController.navigate(Routes.ForumTopics.createRoute(chatId))
+                }
+            )
+        }
+        // НОВОЕ (форумные группы): список разделов (тем) форума.
+        composable(
+            route = Routes.ForumTopics.route,
+            arguments = listOf(navArgument(Routes.ForumTopics.ARG_CHAT_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.chats.ForumTopicsScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenTopic = { chatId, topicId, topicTitle ->
+                    navController.navigate(Routes.Chat.createRoute(chatId, topicId, topicTitle))
                 }
             )
         }

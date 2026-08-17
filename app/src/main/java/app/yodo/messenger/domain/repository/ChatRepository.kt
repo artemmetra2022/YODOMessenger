@@ -11,6 +11,7 @@ import app.yodo.messenger.domain.model.ChannelRestrictions
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.JoinRequest
 import app.yodo.messenger.domain.model.CustomRole
+import app.yodo.messenger.domain.model.ForumTopic
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.YodoUser
 import kotlinx.coroutines.flow.Flow
@@ -92,7 +93,8 @@ data class GroupInfo(
     // НОВОЕ (конфиденциальность групп): режим доступа (как у каналов).
     val accessMode: ChannelAccessMode = ChannelAccessMode.OPEN,
     // НОВОЕ (группы): описание группы.
-    val description: String = ""
+    val description: String = "",
+    val isForum: Boolean = false
 )
 
 interface ChatRepository {
@@ -117,7 +119,8 @@ interface ChatRepository {
     description: String = "",
     avatarBitmap: android.graphics.Bitmap? = null,
     // НОВОЕ (конфиденциальность групп): такой же режим доступа, как у каналов.
-    accessMode: ChannelAccessMode = ChannelAccessMode.OPEN
+    accessMode: ChannelAccessMode = ChannelAccessMode.OPEN,
+    isForum: Boolean = false
 ): CreateChatResult
 
     // НОВОЕ: создание канала с необязательной аватаркой (Bitmap после кропа).
@@ -179,6 +182,8 @@ interface ChatRepository {
 
     suspend fun getChatInfo(chatId: String): ChatInfo?
     suspend fun getGroupInfo(chatId: String): GroupInfo?
+    fun observeForumTopics(chatId: String): Flow<List<ForumTopic>>
+    suspend fun createForumTopic(chatId: String, title: String): ChannelUpdateResult
     suspend fun leaveGroup(chatId: String)
     suspend fun togglePinChat(chatId: String)
     suspend fun toggleMuteChat(chatId: String)

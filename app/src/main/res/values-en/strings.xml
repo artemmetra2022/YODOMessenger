@@ -179,7 +179,19 @@
     <string name="group_info_not_found">Group not found</string>
     <string name="group_info_members">Members (%1$d)</string>
     <string name="group_info_creator">Group creator</string>
+    <string name="group_info_forum_topics">Forum topics</string>
     <string name="group_info_leave">Leave group</string>
+
+    <!-- ForumTopics -->
+    <string name="forum_topics_title">Forum topics</string>
+    <string name="forum_topics_empty">No topics yet</string>
+    <string name="forum_topics_create_cd">Create topic</string>
+    <string name="forum_topics_new_title">New topic</string>
+    <string name="forum_topics_new_hint">Topic title</string>
+    <string name="forum_topics_create">Create</string>
+    <string name="forum_topics_cancel">Cancel</string>
+    <string name="forum_topics_closed">Closed</string>
+    <string name="forum_topics_no_messages">No messages yet</string>
 
     <!-- InviteToChannel -->
     <string name="invite_channel_title">Invite to channel</string>

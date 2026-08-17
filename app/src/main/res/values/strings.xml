@@ -170,7 +170,19 @@
     <string name="group_info_members">Участники (%1$d)</string>
     <string name="group_info_creator">Создатель группы</string>
     <string name="group_info_manage_roles">Роли и права</string>
+    <string name="group_info_forum_topics">Разделы форума</string>
     <string name="group_info_leave">Покинуть группу</string>
+
+    <!-- ForumTopics -->
+    <string name="forum_topics_title">Разделы форума</string>
+    <string name="forum_topics_empty">Пока нет разделов</string>
+    <string name="forum_topics_create_cd">Создать раздел</string>
+    <string name="forum_topics_new_title">Новый раздел</string>
+    <string name="forum_topics_new_hint">Название раздела</string>
+    <string name="forum_topics_create">Создать</string>
+    <string name="forum_topics_cancel">Отмена</string>
+    <string name="forum_topics_closed">Закрыт</string>
+    <string name="forum_topics_no_messages">Пока нет сообщений</string>
 
     <!-- InviteToChannel -->
     <string name="invite_channel_title">Пригласить в канал</string>

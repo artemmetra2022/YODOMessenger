@@ -87,7 +87,8 @@ class CreateGroupViewModel @Inject constructor(
         title: String,
         description: String,
         // НОВОЕ (конфиденциальность групп): режим доступа, как у каналов.
-        accessMode: app.yodo.messenger.domain.model.ChannelAccessMode = app.yodo.messenger.domain.model.ChannelAccessMode.OPEN
+        accessMode: app.yodo.messenger.domain.model.ChannelAccessMode = app.yodo.messenger.domain.model.ChannelAccessMode.OPEN,
+        isForum: Boolean = false
     ) {
         val members = _uiState.value.selectedUsers.map { it.uid }
         if (members.size < 2) {
@@ -106,7 +107,8 @@ class CreateGroupViewModel @Inject constructor(
                 memberIds = members,
                 description = description,
                 avatarBitmap = _avatarBitmap.value,
-                accessMode = accessMode
+                accessMode = accessMode,
+                isForum = isForum
             )) {
                 is CreateChatResult.Success -> {
                     _uiState.value = _uiState.value.copy(isCreating = false)

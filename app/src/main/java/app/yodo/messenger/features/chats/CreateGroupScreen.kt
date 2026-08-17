@@ -41,6 +41,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -85,6 +86,7 @@ fun CreateGroupScreen(
     var description by remember { mutableStateOf("") }
     // НОВОЕ (конфиденциальность групп): выбранный режим доступа (как у каналов).
     var accessMode by remember { mutableStateOf(app.yodo.messenger.domain.model.ChannelAccessMode.OPEN) }
+    var isForum by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -141,7 +143,7 @@ fun CreateGroupScreen(
         // Кнопка "Создать группу" в bottomBar — всегда видна, imePadding поднимает её над клавиатурой.
         bottomBar = {
             Button(
-                onClick = { viewModel.createGroup(groupName, description, accessMode) },
+                onClick = { viewModel.createGroup(groupName, description, accessMode, isForum) },
                 enabled = !uiState.isCreating && uiState.selectedUsers.size >= 2 && groupName.isNotBlank(),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
@@ -287,7 +289,25 @@ fun CreateGroupScreen(
                         maxLines = 4
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isForum = !isForum }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Форумная группа", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Обсуждения будут разделены по тематическим разделам",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = isForum, onCheckedChange = { isForum = it })
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     // НОВОЕ (конфиденциальность групп): выбор режима доступа — как у каналов.
                     Text(

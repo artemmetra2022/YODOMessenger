@@ -424,7 +424,8 @@ class ChatRepositoryImpl @Inject constructor(
         memberIds: List<String>,
         description: String,
         avatarBitmap: android.graphics.Bitmap?,
-        accessMode: app.yodo.messenger.domain.model.ChannelAccessMode
+        accessMode: app.yodo.messenger.domain.model.ChannelAccessMode,
+        isForum: Boolean
     ): CreateChatResult {
         val uid = firebaseAuth.currentUser?.uid ?: return CreateChatResult.Error("Вы не авторизованы")
         val trimmedTitle = title.trim()
@@ -452,10 +453,26 @@ class ChatRepositoryImpl @Inject constructor(
                 "createdAt" to System.currentTimeMillis(),
                 // НОВОЕ (конфиденциальность групп): режим доступа, как у каналов.
                 "accessMode" to accessMode.name,
-                "ownerId" to uid
+                "ownerId" to uid,
+                "isForum" to isForum
             )
             if (avatarBase64 != null) data["avatarBase64"] = avatarBase64
-            newChatRef.set(data).await()
+            val batch = firestore.batch()
+            batch.set(newChatRef, data)
+            if (isForum) {
+                batch.set(
+                    newChatRef.collection("topics").document("general"),
+                    mapOf(
+                        "title" to "Общее",
+                        "createdBy" to uid,
+                        "createdAt" to System.currentTimeMillis(),
+                        "isClosed" to false,
+                        "lastMessage" to "",
+                        "lastMessageTimestamp" to 0L
+                    )
+                )
+            }
+            batch.commit().await()
             CreateChatResult.Success(newChatRef.id)
         } catch (e: Exception) {
             CreateChatResult.Error(e.toUserMessage("Не удалось создать группу"))
@@ -1069,9 +1086,63 @@ class ChatRepositoryImpl @Inject constructor(
                 members = members,
                 createdBy = createdBy,
                 accessMode = groupAccessMode,
-                description = groupDescription
+                description = groupDescription,
+                isForum = doc.getBoolean("isForum") ?: false
             )
         } catch (e: Exception) { null }
+    }
+
+    override fun observeForumTopics(chatId: String): Flow<List<app.yodo.messenger.domain.model.ForumTopic>> = callbackFlow {
+        val listener = firestore.collection("chats").document(chatId).collection("topics")
+            .orderBy("lastMessageTimestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+                val topics = snapshot?.documents.orEmpty().mapNotNull { doc ->
+                    val title = doc.getString("title") ?: return@mapNotNull null
+                    app.yodo.messenger.domain.model.ForumTopic(
+                        id = doc.id,
+                        title = title,
+                        createdBy = doc.getString("createdBy") ?: "",
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        isClosed = doc.getBoolean("isClosed") ?: false,
+                        lastMessage = doc.getString("lastMessage") ?: "",
+                        lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L
+                    )
+                }
+                trySend(topics)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    override suspend fun createForumTopic(chatId: String, title: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Вы не авторизованы")
+        val trimmedTitle = title.trim().take(80)
+        if (trimmedTitle.isBlank()) return ChannelUpdateResult.Error("Введите название раздела")
+        return try {
+            val chat = firestore.collection("chats").document(chatId).get().await()
+            val ownerId = chat.getString("ownerId") ?: chat.getString("createdBy")
+            val admins = (chat.get("adminIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+            if (chat.getBoolean("isForum") != true || (uid != ownerId && uid !in admins)) {
+                return ChannelUpdateResult.Error("Недостаточно прав для создания раздела")
+            }
+            val now = System.currentTimeMillis()
+            firestore.collection("chats").document(chatId).collection("topics").document().set(
+                mapOf(
+                    "title" to trimmedTitle,
+                    "createdBy" to uid,
+                    "createdAt" to now,
+                    "isClosed" to false,
+                    "lastMessage" to "",
+                    "lastMessageTimestamp" to 0L
+                )
+            ).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось создать раздел"))
+        }
     }
 
     override suspend fun leaveGroup(chatId: String) {

@@ -45,6 +45,7 @@ fun GroupInfoScreen(
     onBackClick: () -> Unit,
     onLeftGroup: () -> Unit,
     onOpenManageRoles: (String) -> Unit = {},
+    onOpenForumTopics: (String) -> Unit = {},
     viewModel: GroupInfoViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -135,6 +136,29 @@ fun GroupInfoScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 stringResource(R.string.group_info_manage_roles),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    // НОВОЕ (форумные группы): пункт-переход к разделам форума, если группа — форум.
+                    if (state.info.isForum) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenForumTopics(viewModel.chatId) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Filled.Forum,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                stringResource(R.string.group_info_forum_topics),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.primary
                             )

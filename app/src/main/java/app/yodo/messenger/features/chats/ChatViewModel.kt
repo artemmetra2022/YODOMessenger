@@ -132,6 +132,13 @@ class ChatViewModel @Inject constructor(
     private var forwardUndoTimerJob: Job? = null
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
+    // НОВОЕ (форумные группы): если чат открыт из конкретного раздела форума, здесь
+    // будет id темы — тогда лента сообщений и все отправки ограничиваются этой темой.
+    // null — обычный чат/группа без выбранной темы (старое поведение без изменений).
+    val topicId: String? = savedStateHandle["topicId"]
+    // Заголовок темы, переданный при переходе (для отображения в шапке чата поверх
+    // названия группы), если чат открыт как раздел форума.
+    val topicTitle: String? = savedStateHandle["topicTitle"]
     val currentUserId: String? get() = firebaseAuth.currentUser?.uid
     // НОВОЕ (FAQ-бот поддержки): чтобы ChatScreen не показывал кнопочный FAQ оператору,
     // который зашёл в этот же support_<uid> чат из админ-панели, чтобы ответить пользователю.
@@ -337,8 +344,15 @@ class ChatViewModel @Inject constructor(
                 val isOwnerOrAdmin = myUid != null &&
                         (myUid == info.channelOwnerId || myUid in info.channelAdminIds)
                 val isAdmin = info.type == "CHANNEL" && (isOfficialChannelAdmin || isOwnerOrAdmin)
+                // НОВОЕ (форумные группы): если чат открыт как конкретный раздел форума,
+                // в шапке показываем название темы поверх названия группы (как в Telegram).
+                val displayTitle = if (topicId != null && !topicTitle.isNullOrBlank()) {
+                    "${info.title} · $topicTitle"
+                } else {
+                    info.title
+                }
                 _uiState.value = _uiState.value.copy(
-                    chatTitle = info.title, chatType = info.type,
+                    chatTitle = displayTitle, chatType = info.type,
                     otherUserId = info.otherUserId,
                     otherUserPhotoUrl = info.otherUserPhotoUrl,
                     otherUserAvatarBase64 = info.otherUserAvatarBase64,
@@ -432,7 +446,7 @@ class ChatViewModel @Inject constructor(
 
     private fun observeMessages() {
         viewModelScope.launch {
-            messageRepository.observeMessages(chatId).collect { messages ->
+            messageRepository.observeMessages(chatId, topicId).collect { messages ->
                 _uiState.value = _uiState.value.copy(messages = messages)
                 // ФИКС (бейдж непрочитанных): markAsRead() раньше вызывался только при
                 // открытии чата. Если сообщение (например одноразовое фото) приходило, пока
@@ -532,7 +546,7 @@ class ChatViewModel @Inject constructor(
             when (val result = messageRepository.sendMessage(
                 chatId, text, replyContext,
                 hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds,
-                silent = silent
+                silent = silent, topicId = topicId
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -560,7 +574,7 @@ class ChatViewModel @Inject constructor(
         if (blockGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce)) {
+            when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
@@ -573,7 +587,7 @@ class ChatViewModel @Inject constructor(
         if (blockGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption)) {
+            when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
@@ -602,7 +616,7 @@ class ChatViewModel @Inject constructor(
     fun sendVoice(base64: String, durationMs: Long) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendVoiceMessage(chatId, base64, durationMs)) {
+            when (val result = messageRepository.sendVoiceMessage(chatId, base64, durationMs, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
@@ -614,7 +628,7 @@ class ChatViewModel @Inject constructor(
     fun sendFile(base64: String, fileName: String, mimeType: String, sizeBytes: Long) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendFileMessage(chatId, base64, fileName, mimeType, sizeBytes)) {
+            when (val result = messageRepository.sendFileMessage(chatId, base64, fileName, mimeType, sizeBytes, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
@@ -625,7 +639,7 @@ class ChatViewModel @Inject constructor(
     fun sendLocation(lat: Double, lng: Double) {
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.sendLocationMessage(chatId, lat, lng)) {
+            when (val result = messageRepository.sendLocationMessage(chatId, lat, lng, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
             }
@@ -650,7 +664,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = messageRepository.sendPollMessage(
                 chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis,
-                isQuiz, correctOptionIndex, explanation
+                isQuiz, correctOptionIndex, explanation, topicId = topicId
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)

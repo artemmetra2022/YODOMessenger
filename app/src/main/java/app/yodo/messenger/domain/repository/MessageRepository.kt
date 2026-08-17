@@ -18,7 +18,7 @@ data class ReplyContext(
 
 interface MessageRepository {
 
-    fun observeMessages(chatId: String): Flow<List<Message>>
+    fun observeMessages(chatId: String, topicId: String? = null): Flow<List<Message>>
     // НОВОЕ (переработка каналов): одно сообщение (для превью поста в экране комментариев).
     fun observeMessage(chatId: String, messageId: String): Flow<Message?>
     // НОВОЕ (per-message исчезающие сообщения, как в Telegram): hasTtlOverride = true означает,
@@ -30,24 +30,27 @@ interface MessageRepository {
         chatId: String, text: String, replyTo: ReplyContext? = null,
         hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null,
         // НОВОЕ (секретная фича «тихие публикации»): не триггерит push-уведомление.
-        silent: Boolean = false
+        silent: Boolean = false,
+        topicId: String? = null
     ): SendMessageResult
     suspend fun sendImageMessage(
-        chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false
+        chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false,
+        topicId: String? = null
     ): SendMessageResult
     // НОВОЕ (несколько фото): отправляет несколько фото одним сообщением-альбомом.
     suspend fun sendImagesMessage(
-        chatId: String, imagesBase64: List<String>, caption: String = ""
+        chatId: String, imagesBase64: List<String>, caption: String = "", topicId: String? = null
     ): SendMessageResult
     // НОВОЕ (одноразовые медиа): вызывается получателем сразу после полноэкранного открытия
     // view-once фото. Стирает imageBase64 на сервере (в Firestore) и помечает viewOnceOpened,
     // чтобы фото нельзя было открыть повторно — ни на этом устройстве, ни на других.
     suspend fun markViewOnceImageOpened(chatId: String, messageId: String)
-    suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long): SendMessageResult
+    suspend fun sendVoiceMessage(chatId: String, voiceBase64: String, durationMs: Long, topicId: String? = null): SendMessageResult
     suspend fun sendFileMessage(
-        chatId: String, fileBase64: String, fileName: String, mimeType: String, sizeBytes: Long
+        chatId: String, fileBase64: String, fileName: String, mimeType: String, sizeBytes: Long,
+        topicId: String? = null
     ): SendMessageResult
-    suspend fun sendLocationMessage(chatId: String, lat: Double, lng: Double): SendMessageResult
+    suspend fun sendLocationMessage(chatId: String, lat: Double, lng: Double, topicId: String? = null): SendMessageResult
     // НОВОЕ (расширенные опросы): создание сообщения-опроса. closesAtMillis — необязательная
     // метка времени автозакрытия (для "расширенных" опросов); null означает бессрочный опрос.
     suspend fun sendPollMessage(
@@ -59,7 +62,8 @@ interface MessageRepository {
         closesAtMillis: Long? = null,
         isQuiz: Boolean = false,
         correctOptionIndex: Int? = null,
-        explanation: String? = null
+        explanation: String? = null,
+        topicId: String? = null
     ): SendMessageResult
     // НОВОЕ (расширенные опросы): голосование/переголосование по варианту опроса.
     // Повторный вызов по тому же варианту снимает голос (переключатель), как toggleReaction.
