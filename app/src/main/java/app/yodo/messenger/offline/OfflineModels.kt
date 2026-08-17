@@ -28,6 +28,9 @@ data class OfflineMessage(
     val text: String,
     val timestamp: Long,
     val isOutgoing: Boolean,
+    val mediaType: OfflineMediaType? = null,
+    val mediaItemsBase64: List<String> = emptyList(),
+    val audioDurationMs: Long = 0L,
     /** true, если сообщение ещё не доставлено. */
     val isPending: Boolean = false,
     // НОВОЕ (mesh-метаданные):

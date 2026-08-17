@@ -135,6 +135,27 @@ class OfflineChatViewModel @Inject constructor(
         }
     }
 
+    fun sendPhotos(imagesBase64: List<String>): Boolean {
+        if (imagesBase64.isEmpty()) return false
+        val type = if (imagesBase64.size == 1) OfflineMediaType.PHOTO else OfflineMediaType.ALBUM
+        return nearbyManager.sendMedia(
+            _selectedTargetNodeId.value,
+            OfflineMediaPayload(type = type, itemsBase64 = imagesBase64)
+        )
+    }
+
+    fun sendAudio(audioBase64: String, durationMs: Long): Boolean {
+        if (audioBase64.isBlank()) return false
+        return nearbyManager.sendMedia(
+            _selectedTargetNodeId.value,
+            OfflineMediaPayload(
+                type = OfflineMediaType.AUDIO,
+                itemsBase64 = listOf(audioBase64),
+                durationMs = durationMs
+            )
+        )
+    }
+
     /** Личное сообщение конкретному узлу mesh-сети (маршрутизация + ACK). */
     fun sendMessageTo(nodeId: String, text: String) {
         if (text.isBlank()) return

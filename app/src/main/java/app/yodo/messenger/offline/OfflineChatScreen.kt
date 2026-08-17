@@ -1,7 +1,10 @@
 package app.yodo.messenger.offline
 
 import android.Manifest
+import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import android.os.Build
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
@@ -10,6 +13,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +44,9 @@ import androidx.compose.material.icons.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -59,6 +66,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,7 +76,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
@@ -78,6 +89,12 @@ import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.ui.theme.YodoPrimary
+import app.yodo.messenger.util.AudioUtils
+import app.yodo.messenger.util.ChatImageQuality
+import app.yodo.messenger.util.ImageUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -414,7 +431,56 @@ private fun ConnectedChatContent(viewModel: OfflineChatViewModel) {
     val selectedTargetNodeId by viewModel.selectedTargetNodeId.collectAsState()
     val selectedNode = meshNodes.firstOrNull { it.nodeId == selectedTargetNodeId }
     var inputText by remember { mutableStateOf("") }
+    var mediaError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            val images = withContext(Dispatchers.Default) {
+                uris.take(6).mapNotNull {
+                    ImageUtils.compressChatImageToBase64(context, it, ChatImageQuality.DATA_SAVER)
+                }
+            }
+            mediaError = when {
+                images.isEmpty() -> "Не удалось обработать фото"
+                viewModel.sendPhotos(images) -> null
+                else -> "Медиа слишком большое для офлайн-сети (максимум 3 МБ)"
+            }
+        }
+    }
+    val audioPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching {
+                    val size = context.contentResolver.openFileDescriptor(uri, "r")?.use {
+                        it.statSize
+                    } ?: -1L
+                    if (size < 0 || size > MAX_OFFLINE_MEDIA_BYTES) return@runCatching null
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: return@runCatching null
+                    val retriever = MediaMetadataRetriever()
+                    retriever.setDataSource(context, uri)
+                    val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull() ?: 0L
+                    retriever.release()
+                    Base64.encodeToString(bytes, Base64.NO_WRAP) to duration
+                }.getOrNull()
+            }
+            mediaError = when {
+                prepared == null -> "Не удалось прочитать аудио"
+                viewModel.sendAudio(prepared.first, prepared.second) -> null
+                else -> "Аудио слишком большое для офлайн-сети (максимум 3 МБ)"
+            }
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -461,7 +527,22 @@ private fun ConnectedChatContent(viewModel: OfflineChatViewModel) {
             }
         }
 
+        mediaError?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+
         Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { photoPicker.launch("image/*") }) {
+                Icon(Icons.Filled.AttachFile, contentDescription = "Отправить фото или альбом", tint = YodoPrimary)
+            }
+            IconButton(onClick = { audioPicker.launch(arrayOf("audio/*")) }) {
+                Icon(Icons.Filled.Audiotrack, contentDescription = "Отправить аудио", tint = YodoPrimary)
+            }
             // НОВОЕ (батч 7): кнопка SOS — экстренный сигнал на всю mesh-сеть.
             IconButton(onClick = { viewModel.sendSos(inputText); inputText = "" }) {
                 Icon(Icons.Filled.Warning, contentDescription = "Отправить SOS", tint = Color(0xFFD32F2F))
@@ -525,7 +606,10 @@ private fun OfflineMessageBubble(message: OfflineMessage) {
                     style = MaterialTheme.typography.labelMedium
                 )
             }
-            Text(text = message.text, color = textColor, style = MaterialTheme.typography.bodyLarge)
+            OfflineMediaContent(message, textColor)
+            if (message.text.isNotBlank()) {
+                Text(text = message.text, color = textColor, style = MaterialTheme.typography.bodyLarge)
+            }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.End)) {
                 // Сколько прыжков прошло сообщение через сеть.
                 if (!message.isOutgoing && message.hops > 0) {
@@ -550,6 +634,78 @@ private fun OfflineMessageBubble(message: OfflineMessage) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OfflineMediaContent(message: OfflineMessage, contentColor: Color) {
+    when (message.mediaType) {
+        OfflineMediaType.PHOTO, OfflineMediaType.ALBUM -> {
+            val columns = if (message.mediaItemsBase64.size > 1) 2 else 1
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                message.mediaItemsBase64.chunked(columns).forEach { rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        rowItems.forEach { encoded ->
+                            val bitmap = remember(encoded) { ImageUtils.decodeBase64ToBitmap(encoded) }
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "Офлайн-фото",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .width(if (columns == 1) 240.dp else 116.dp)
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        OfflineMediaType.AUDIO -> OfflineAudioPlayer(message, contentColor)
+        null -> Unit
+    }
+}
+
+@Composable
+private fun OfflineAudioPlayer(message: OfflineMessage, contentColor: Color) {
+    val context = LocalContext.current
+    var player by remember(message.id) { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember(message.id) { mutableStateOf(false) }
+    DisposableEffect(message.id) {
+        onDispose { player?.release() }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = {
+            val active = player
+            if (active != null && active.isPlaying) {
+                active.pause()
+                isPlaying = false
+            } else {
+                val encoded = message.mediaItemsBase64.firstOrNull() ?: return@IconButton
+                val file = AudioUtils.base64ToTempFile(context, encoded, "offline_${message.id}")
+                    ?: return@IconButton
+                val mediaPlayer = active ?: MediaPlayer().also {
+                    it.setDataSource(file.absolutePath)
+                    it.prepare()
+                    it.setOnCompletionListener { completed ->
+                        isPlaying = false
+                        completed.seekTo(0)
+                    }
+                    player = it
+                }
+                mediaPlayer.start()
+                isPlaying = true
+            }
+        }) {
+            Icon(
+                if (isPlaying) Icons.Filled.Audiotrack else Icons.Filled.PlayArrow,
+                contentDescription = if (isPlaying) "Пауза" else "Воспроизвести аудио",
+                tint = contentColor
+            )
+        }
+        Text(AudioUtils.formatDuration(message.audioDurationMs), color = contentColor)
     }
 }
 
