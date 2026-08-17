@@ -256,6 +256,10 @@
     <string name="chat_msg_copy">Copy</string>
     <string name="chat_msg_forward">Forward</string>
     <string name="chat_photo_error">Failed to process photo</string>
+    <string name="chat_photo_quality">Photo quality</string>
+    <string name="chat_photo_quality_data_saver">Data saver</string>
+    <string name="chat_photo_quality_standard">Standard</string>
+    <string name="chat_photo_quality_high">High</string>
     <string name="chat_file_read_error">Failed to read file</string>
     <string name="chat_location_permission">Location access is needed to send your position</string>
     <string name="chat_cancel_btn">Cancel</string>

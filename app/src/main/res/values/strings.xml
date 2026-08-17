@@ -247,6 +247,10 @@
     <string name="chat_msg_copy">Копировать</string>
     <string name="chat_msg_forward">Переслать</string>
     <string name="chat_photo_error">Не удалось обработать фото</string>
+    <string name="chat_photo_quality">Качество фото</string>
+    <string name="chat_photo_quality_data_saver">Экономия</string>
+    <string name="chat_photo_quality_standard">Стандартное</string>
+    <string name="chat_photo_quality_high">Высокое</string>
     <string name="chat_file_read_error">Не удалось прочитать файл</string>
     <string name="chat_location_permission">Нужен доступ к геолокации, чтобы отправить точку на карте</string>
     <string name="chat_cancel_btn">Отменить</string>

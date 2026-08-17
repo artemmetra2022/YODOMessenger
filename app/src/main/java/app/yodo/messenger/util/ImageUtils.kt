@@ -7,6 +7,15 @@ import android.net.Uri
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 
+enum class ChatImageQuality(
+    val maxDimension: Int,
+    val startingQuality: Int
+) {
+    DATA_SAVER(maxDimension = 960, startingQuality = 72),
+    STANDARD(maxDimension = 1280, startingQuality = 84),
+    HIGH(maxDimension = 1600, startingQuality = 92)
+}
+
 object ImageUtils {
 
     // Аватарки: Firestore-документ пользователя ограничен 1 МБ суммарно по всем полям —
@@ -20,8 +29,6 @@ object ImageUtils {
     // Из-за этого часть фото либо не проходила (null → "не удалось обработать фото"),
     // либо сохранялась пограничным по размеру. Теперь: адаптивное сжатие — пробуем максимально
     // высокое качество и постепенно снижаем, пока base64 не влезет в реальный лимит документа.
-    private const val CHAT_MAX_DIMENSION = 1600
-    private const val CHAT_STARTING_QUALITY = 92
     private const val CHAT_MIN_QUALITY = 40
     private const val CHAT_MAX_BASE64 = 900_000 // с запасом под остальные поля сообщения
 
@@ -35,8 +42,19 @@ object ImageUtils {
         return compressAdaptive(bitmap, AVATAR_MAX_DIMENSION, AVATAR_STARTING_QUALITY, 60, AVATAR_MAX_BASE64)
     }
 
-    fun compressChatImageToBase64(context: Context, uri: Uri): String? {
-        return compressAdaptive(context, uri, CHAT_MAX_DIMENSION, CHAT_STARTING_QUALITY, CHAT_MIN_QUALITY, CHAT_MAX_BASE64)
+    fun compressChatImageToBase64(
+        context: Context,
+        uri: Uri,
+        quality: ChatImageQuality = ChatImageQuality.HIGH
+    ): String? {
+        return compressAdaptive(
+            context,
+            uri,
+            quality.maxDimension,
+            quality.startingQuality,
+            CHAT_MIN_QUALITY,
+            CHAT_MAX_BASE64
+        )
     }
 
     // Фото для постов профиля — та же адаптивная логика, что и для фото в чате

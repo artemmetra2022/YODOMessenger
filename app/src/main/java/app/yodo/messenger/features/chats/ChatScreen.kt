@@ -173,6 +173,7 @@ import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.components.swipeToGoBack
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.util.AudioUtils
+import app.yodo.messenger.util.ChatImageQuality
 import app.yodo.messenger.util.ChatScreenshotUtils
 import app.yodo.messenger.util.FileUtils
 import app.yodo.messenger.util.ImageUtils
@@ -265,6 +266,7 @@ fun ChatScreen(
     // "на один просмотр" — флаг выставляется перед запуском imagePicker в AttachMenuDialog
     // и сбрасывается сразу после отправки.
     var pendingImageIsViewOnce by remember { mutableStateOf(false) }
+    var selectedImageQuality by remember { mutableStateOf(ChatImageQuality.HIGH) }
     // НОВОЕ (одноразовые медиа): id сообщения, чьё view-once фото сейчас показано на весь
     // экран поверх чата. Null — оверлей закрыт.
     var viewOnceOverlayMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
@@ -277,7 +279,7 @@ fun ChatScreen(
             pendingImageIsViewOnce = false
             coroutineScope.launch {
                 val base64 = withContext(Dispatchers.Default) {
-                    ImageUtils.compressChatImageToBase64(context, it)
+                    ImageUtils.compressChatImageToBase64(context, it, selectedImageQuality)
                 }
                 if (base64 != null) viewModel.sendImage(base64, isViewOnce = asViewOnce)
                 else snackbarHostState.showSnackbar("Не удалось обработать фото")
@@ -293,7 +295,7 @@ fun ChatScreen(
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         coroutineScope.launch {
             val encoded = withContext(Dispatchers.Default) {
-                uris.mapNotNull { ImageUtils.compressChatImageToBase64(context, it) }
+                uris.mapNotNull { ImageUtils.compressChatImageToBase64(context, it, selectedImageQuality) }
             }
             when {
                 encoded.isEmpty() -> snackbarHostState.showSnackbar("Не удалось обработать фото")
@@ -342,7 +344,7 @@ fun ChatScreen(
         }
         coroutineScope.launch {
             val base64 = withContext(Dispatchers.Default) {
-                ImageUtils.compressChatImageToBase64(context, uri)
+                ImageUtils.compressChatImageToBase64(context, uri, selectedImageQuality)
             }
             if (base64 != null) pendingCaptionImageBase64 = base64
             else snackbarHostState.showSnackbar("Не удалось обработать изображение из буфера")
@@ -1103,6 +1105,8 @@ fun ChatScreen(
                     }
                     if (showAttachMenu) {
                         AttachMenuDialog(
+                            selectedImageQuality = selectedImageQuality,
+                            onImageQualitySelected = { selectedImageQuality = it },
                             onDismiss = { showAttachMenu = false },
                             onPickPhoto = {
                                 showAttachMenu = false
@@ -3518,6 +3522,8 @@ private fun formatLastSeen(millis: Long): String {
 
 @Composable
 private fun AttachMenuDialog(
+    selectedImageQuality: ChatImageQuality,
+    onImageQualitySelected: (ChatImageQuality) -> Unit,
     onDismiss: () -> Unit,
     onPickPhoto: () -> Unit,
     onPickViewOncePhoto: () -> Unit,
@@ -3539,6 +3545,33 @@ private fun AttachMenuDialog(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
                 AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото (можно несколько)", onClick = onPickPhoto)
+                Text(
+                    stringResource(R.string.chat_photo_quality),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+                ChatImageQuality.entries.forEach { quality ->
+                    val label = when (quality) {
+                        ChatImageQuality.DATA_SAVER -> stringResource(R.string.chat_photo_quality_data_saver)
+                        ChatImageQuality.STANDARD -> stringResource(R.string.chat_photo_quality_standard)
+                        ChatImageQuality.HIGH -> stringResource(R.string.chat_photo_quality_high)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onImageQualitySelected(quality) }
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedImageQuality == quality,
+                            onClick = { onImageQualitySelected(quality) }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(label, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
                 // НОВОЕ (картинки ��з буфера): вставить изображение из буфера обмена (с подписью).
                 AttachMenuRow(icon = Icons.Filled.ContentPaste, label = "Вставить из буфера", onClick = onPasteImage)
                 // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть

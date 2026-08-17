@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find *)",
+      "Bash(grep_count)",
+      "Bash(})",
+      "Bash(echo *)",
+      "Bash(xargs *)"
+    ]
+  },
+  "$version": 4
+}
