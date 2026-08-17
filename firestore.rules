@@ -221,6 +221,55 @@ service cloud.firestore {
       // НОВОЕ (модерируемые каналы): заявки на вступление хранятся в подколлекции
       // joinRequests/{userId}. Создать/удалить свою заявку может сам пользователь;
       // читать список и удалять (одобрять/отклонять) — владелец или админ канала.
+      // НОВОЕ (форумные группы: закрытие/удаление/закрепление/непрочитанные тем).
+      // Читать список тем может любой участник чата. Создавать/закрывать/удалять —
+      // только владелец или админ группы (та же проверка, что и раньше делалась
+      // только на клиенте в createForumTopic). Закреплять тему у себя и отмечать
+      // её прочитанной может любой участник, но ТОЛЬКО меняя свой собственный ключ
+      // в картах pinned/unreadCounts — иначе можно было бы сбросить непрочитанные
+      // у другого пользователя.
+      match /topics/{topicId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+
+        allow create: if isSignedIn() &&
+          (
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.createdBy ||
+            request.auth.uid in (get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds is list
+              ? get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds : [])
+          );
+
+        allow update: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds &&
+          (
+            // Владелец/админ может менять что угодно в теме (закрыть, переименовать,
+            // обновить превью последнего сообщения).
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.createdBy ||
+            request.auth.uid in (get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds is list
+              ? get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds : []) ||
+            // Обычный участник может менять ТОЛЬКО свой собственный ключ в pinned
+            // и/или unreadCounts — например, при отправке сообщения (инкремент чужих
+            // unreadCounts) это правило не подходит, для этого нужен отдельный кейс ниже.
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['pinned']) ||
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['unreadCounts']) ||
+            // Отправка сообщения в тему обновляет lastMessage/lastMessageTimestamp/
+            // lastMessageSenderId и инкрементирует unreadCounts всех остальных
+            // участников одновременно — это законное совместное обновление любым
+            // участником чата (не только владельцем/админом).
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['lastMessage', 'lastMessageTimestamp', 'lastMessageSenderId', 'unreadCounts'])
+          );
+
+        allow delete: if isSignedIn() &&
+          (
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.createdBy ||
+            request.auth.uid in (get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds is list
+              ? get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds : [])
+          );
+      }
+
       match /joinRequests/{userId} {
         allow read: if isSignedIn() &&
           (request.auth.uid == userId ||

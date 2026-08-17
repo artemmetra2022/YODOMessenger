@@ -88,6 +88,13 @@ class MessageRepositoryImpl @Inject constructor(
             val chatRef = firestore.collection("chats").document(chatId)
             val chatSnapshot = chatRef.get().await()
             val participantIds = (chatSnapshot.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList<String>()
+            // НОВОЕ (закрытие темы): владелец/админ закрыл раздел — писать в него больше нельзя.
+            if (topicId != null) {
+                val topicSnapshot = chatRef.collection("topics").document(topicId).get().await()
+                if (topicSnapshot.getBoolean("isClosed") == true) {
+                    return SendMessageResult.Error("Раздел закрыт для новых сообщений")
+                }
+            }
             val now = System.currentTimeMillis()
             data["senderId"] = uid
             data["timestamp"] = now
@@ -124,13 +131,17 @@ class MessageRepositoryImpl @Inject constructor(
             }
             chatRef.update(unreadUpdates).await()
             if (topicId != null) {
-                chatRef.collection("topics").document(topicId).update(
-                    mapOf(
-                        "lastMessage" to previewText,
-                        "lastMessageTimestamp" to now,
-                        "lastMessageSenderId" to uid
-                    )
-                ).await()
+                val topicUpdates = mutableMapOf<String, Any?>(
+                    "lastMessage" to previewText,
+                    "lastMessageTimestamp" to now,
+                    "lastMessageSenderId" to uid
+                )
+                // НОВОЕ (бейдж непрочитанных по темам): считаем непрочитанные отдельно
+                // внутри документа темы, а не только на весь чат целиком.
+                participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
+                    topicUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
+                }
+                chatRef.collection("topics").document(topicId).update(topicUpdates).await()
             }
             SendMessageResult.Success(messageId = newDocRef.id)
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не ��далось отправить сообщение")) }

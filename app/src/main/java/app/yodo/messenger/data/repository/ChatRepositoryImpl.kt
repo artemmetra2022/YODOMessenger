@@ -1093,8 +1093,8 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override fun observeForumTopics(chatId: String): Flow<List<app.yodo.messenger.domain.model.ForumTopic>> = callbackFlow {
+        val uid = firebaseAuth.currentUser?.uid
         val listener = firestore.collection("chats").document(chatId).collection("topics")
-            .orderBy("lastMessageTimestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     trySend(emptyList())
@@ -1102,16 +1102,25 @@ class ChatRepositoryImpl @Inject constructor(
                 }
                 val topics = snapshot?.documents.orEmpty().mapNotNull { doc ->
                     val title = doc.getString("title") ?: return@mapNotNull null
+                    val unreadMap = doc.get("unreadCounts") as? Map<*, *>
+                    val pinnedMap = doc.get("pinned") as? Map<*, *>
                     app.yodo.messenger.domain.model.ForumTopic(
                         id = doc.id,
                         title = title,
                         createdBy = doc.getString("createdBy") ?: "",
                         createdAt = doc.getLong("createdAt") ?: 0L,
                         isClosed = doc.getBoolean("isClosed") ?: false,
+                        isPinned = (uid != null && pinnedMap?.get(uid) as? Boolean == true),
                         lastMessage = doc.getString("lastMessage") ?: "",
-                        lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L
+                        lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
+                        unreadCount = (uid?.let { unreadMap?.get(it) as? Long } ?: 0L).toInt()
                     )
                 }
+                    // Закреплённые темы — сверху списка, дальше как раньше по свежести сообщений.
+                    .sortedWith(
+                        compareByDescending<app.yodo.messenger.domain.model.ForumTopic> { it.isPinned }
+                            .thenByDescending { it.lastMessageTimestamp }
+                    )
                 trySend(topics)
             }
         awaitClose { listener.remove() }
@@ -1143,6 +1152,77 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             ChannelUpdateResult.Error(e.toUserMessage("Не удалось создать раздел"))
         }
+    }
+
+    // Проверяет, что текущий пользователь — владелец/админ группы. Используется
+    // для закрытия/удаления тем (аналогично проверке в createForumTopic).
+    private suspend fun requireTopicManagePermission(chatId: String, uid: String?): ChannelUpdateResult? {
+        if (uid == null) return ChannelUpdateResult.Error("Вы не авторизованы")
+        val chat = firestore.collection("chats").document(chatId).get().await()
+        val ownerId = chat.getString("ownerId") ?: chat.getString("createdBy")
+        val admins = (chat.get("adminIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+        if (uid != ownerId && uid !in admins) {
+            return ChannelUpdateResult.Error("Недостаточно прав")
+        }
+        return null
+    }
+
+    override suspend fun toggleTopicClosed(chatId: String, topicId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid
+        requireTopicManagePermission(chatId, uid)?.let { return it }
+        return try {
+            val topicRef = firestore.collection("chats").document(chatId).collection("topics").document(topicId)
+            val snapshot = topicRef.get().await()
+            val currentlyClosed = snapshot.getBoolean("isClosed") ?: false
+            topicRef.update("isClosed", !currentlyClosed).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось изменить статус раздела"))
+        }
+    }
+
+    override suspend fun deleteForumTopic(chatId: String, topicId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid
+        requireTopicManagePermission(chatId, uid)?.let { return it }
+        return try {
+            val topicRef = firestore.collection("chats").document(chatId).collection("topics").document(topicId)
+            // Удаляем сообщения раздела вместе с самой темой, чтобы не оставлять
+            // висящих записей в подколлекции messages чата (topicId ссылается на
+            // уже несуществующий документ).
+            val messagesSnapshot = firestore.collection("chats").document(chatId).collection("messages")
+                .whereEqualTo("topicId", topicId).get().await()
+            messagesSnapshot.documents.chunked(500).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { batch.delete(it.reference) }
+                batch.commit().await()
+            }
+            topicRef.delete().await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось удалить раздел"))
+        }
+    }
+
+    override suspend fun togglePinTopic(chatId: String, topicId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Вы не авторизованы")
+        return try {
+            val topicRef = firestore.collection("chats").document(chatId).collection("topics").document(topicId)
+            val snapshot = topicRef.get().await()
+            val pinnedMap = snapshot.get("pinned") as? Map<*, *>
+            val currentlyPinned = pinnedMap?.get(uid) as? Boolean ?: false
+            topicRef.update("pinned.$uid", !currentlyPinned).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось закрепить раздел"))
+        }
+    }
+
+    override suspend fun markTopicAsRead(chatId: String, topicId: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        try {
+            firestore.collection("chats").document(chatId).collection("topics").document(topicId)
+                .update("unreadCounts.$uid", 0).await()
+        } catch (e: Exception) { }
     }
 
     override suspend fun leaveGroup(chatId: String) {

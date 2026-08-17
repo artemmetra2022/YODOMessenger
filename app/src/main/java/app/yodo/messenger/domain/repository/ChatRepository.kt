@@ -184,6 +184,14 @@ interface ChatRepository {
     suspend fun getGroupInfo(chatId: String): GroupInfo?
     fun observeForumTopics(chatId: String): Flow<List<ForumTopic>>
     suspend fun createForumTopic(chatId: String, title: String): ChannelUpdateResult
+    /** Закрыть/открыть тему (запретить/разрешить писать). Владелец/админ группы. */
+    suspend fun toggleTopicClosed(chatId: String, topicId: String): ChannelUpdateResult
+    /** Удалить тему целиком. Владелец/админ группы. */
+    suspend fun deleteForumTopic(chatId: String, topicId: String): ChannelUpdateResult
+    /** Закрепить/открепить тему сверху списка (персонально для текущего пользователя). */
+    suspend fun togglePinTopic(chatId: String, topicId: String): ChannelUpdateResult
+    /** Отметить тему прочитанной для текущего пользователя. */
+    suspend fun markTopicAsRead(chatId: String, topicId: String)
     suspend fun leaveGroup(chatId: String)
     suspend fun togglePinChat(chatId: String)
     suspend fun toggleMuteChat(chatId: String)

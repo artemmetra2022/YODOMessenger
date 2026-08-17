@@ -192,6 +192,15 @@
     <string name="forum_topics_cancel">Cancel</string>
     <string name="forum_topics_closed">Closed</string>
     <string name="forum_topics_no_messages">No messages yet</string>
+    <string name="forum_topics_pin">Pin</string>
+    <string name="forum_topics_unpin">Unpin</string>
+    <string name="forum_topics_pinned">Pinned</string>
+    <string name="forum_topics_close">Close topic</string>
+    <string name="forum_topics_reopen">Reopen topic</string>
+    <string name="forum_topics_delete">Delete topic</string>
+    <string name="forum_topics_delete_title">Delete topic?</string>
+    <string name="forum_topics_delete_message">The topic "%1$s" and all its messages will be permanently deleted.</string>
+    <string name="forum_topics_delete_confirm">Delete</string>
 
     <!-- InviteToChannel -->
     <string name="invite_channel_title">Invite to channel</string>

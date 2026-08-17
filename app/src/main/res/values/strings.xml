@@ -183,6 +183,15 @@
     <string name="forum_topics_cancel">Отмена</string>
     <string name="forum_topics_closed">Закрыт</string>
     <string name="forum_topics_no_messages">Пока нет сообщений</string>
+    <string name="forum_topics_pin">Закрепить</string>
+    <string name="forum_topics_unpin">Открепить</string>
+    <string name="forum_topics_pinned">Закреплено</string>
+    <string name="forum_topics_close">Закрыть раздел</string>
+    <string name="forum_topics_reopen">Открыть раздел</string>
+    <string name="forum_topics_delete">Удалить раздел</string>
+    <string name="forum_topics_delete_title">Удалить раздел?</string>
+    <string name="forum_topics_delete_message">Раздел «%1$s» и все сообщения в нём будут удалены безвозвратно.</string>
+    <string name="forum_topics_delete_confirm">Удалить</string>
 
     <!-- InviteToChannel -->
     <string name="invite_channel_title">Пригласить в канал</string>

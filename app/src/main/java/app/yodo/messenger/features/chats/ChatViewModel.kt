@@ -469,7 +469,13 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun markAsRead() {
-        viewModelScope.launch { messageRepository.markChatAsRead(chatId) }
+        // НОВОЕ (бейдж непрочитанных по темам): если открыт конкретный раздел форума,
+        // сбрасываем непрочитанные именно у него, а не у чата целиком.
+        if (topicId != null) {
+            viewModelScope.launch { chatRepository.markTopicAsRead(chatId, topicId) }
+        } else {
+            viewModelScope.launch { messageRepository.markChatAsRead(chatId) }
+        }
         // Пользователь открыл чат — накопленная для rich-уведомления история больше не нужна,
         // и само уведомление (если ещё висит в шторке) можно убрать.
         viewModelScope.launch { notificationMessageStore.clear(chatId) }

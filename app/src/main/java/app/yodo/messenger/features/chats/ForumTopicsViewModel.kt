@@ -72,6 +72,37 @@ class ForumTopicsViewModel @Inject constructor(
         }
     }
 
+    // НОВОЕ: закрыть/открыть тему — доступно владельцу/админу (canCreateTopics
+    // сейчас уже отражает ровно это право, переиспользуем его в UI для показа кнопок).
+    fun toggleTopicClosed(topicId: String) {
+        viewModelScope.launch {
+            when (val result = chatRepository.toggleTopicClosed(chatId, topicId)) {
+                is ChannelUpdateResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                is ChannelUpdateResult.Success -> Unit
+            }
+        }
+    }
+
+    // НОВОЕ: удаление темы.
+    fun deleteTopic(topicId: String) {
+        viewModelScope.launch {
+            when (val result = chatRepository.deleteForumTopic(chatId, topicId)) {
+                is ChannelUpdateResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                is ChannelUpdateResult.Success -> Unit
+            }
+        }
+    }
+
+    // НОВОЕ: закрепление важной темы сверху списка (персонально для пользователя).
+    fun togglePinTopic(topicId: String) {
+        viewModelScope.launch {
+            when (val result = chatRepository.togglePinTopic(chatId, topicId)) {
+                is ChannelUpdateResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                is ChannelUpdateResult.Success -> Unit
+            }
+        }
+    }
+
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
     }

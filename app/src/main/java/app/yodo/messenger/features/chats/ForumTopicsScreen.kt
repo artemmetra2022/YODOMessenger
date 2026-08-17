@@ -1,6 +1,7 @@
 package app.yodo.messenger.features.chats
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,13 +13,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -41,7 +48,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.domain.model.ForumTopic
@@ -55,6 +64,7 @@ fun ForumTopicsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var topicPendingDelete by remember { mutableStateOf<ForumTopic?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.errorMessage) {
@@ -105,7 +115,11 @@ fun ForumTopicsScreen(
                     items(uiState.topics, key = { it.id }) { topic ->
                         ForumTopicRow(
                             topic = topic,
-                            onClick = { onOpenTopic(viewModel.chatId, topic.id, topic.title) }
+                            canManage = uiState.canCreateTopics,
+                            onClick = { onOpenTopic(viewModel.chatId, topic.id, topic.title) },
+                            onTogglePin = { viewModel.togglePinTopic(topic.id) },
+                            onToggleClosed = { viewModel.toggleTopicClosed(topic.id) },
+                            onDeleteRequest = { topicPendingDelete = topic }
                         )
                     }
                 }
@@ -124,48 +138,136 @@ fun ForumTopicsScreen(
             }
         )
     }
+
+    topicPendingDelete?.let { topic ->
+        AlertDialog(
+            onDismissRequest = { topicPendingDelete = null },
+            title = { Text(stringResource(R.string.forum_topics_delete_title)) },
+            text = { Text(stringResource(R.string.forum_topics_delete_message, topic.title)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteTopic(topic.id)
+                    topicPendingDelete = null
+                }) {
+                    Text(stringResource(R.string.forum_topics_delete_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { topicPendingDelete = null }) {
+                    Text(stringResource(R.string.forum_topics_cancel))
+                }
+            }
+        )
+    }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ForumTopicRow(topic: ForumTopic, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.size(44.dp),
-            contentAlignment = Alignment.Center
+private fun ForumTopicRow(
+    topic: ForumTopic,
+    canManage: Boolean,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onToggleClosed: () -> Unit,
+    onDeleteRequest: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    if (topic.isPinned) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    else MaterialTheme.colorScheme.surface
+                )
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { showMenu = true }
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                Icons.Filled.Forum,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(topic.title, style = MaterialTheme.typography.bodyLarge)
-                if (topic.isClosed) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        Icons.Filled.Lock,
-                        contentDescription = stringResource(R.string.forum_topics_closed),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp)
+            Box(
+                modifier = Modifier.size(44.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Forum,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (topic.isPinned) {
+                        Icon(
+                            Icons.Filled.PushPin,
+                            contentDescription = stringResource(R.string.forum_topics_pinned),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Text(topic.title, style = MaterialTheme.typography.bodyLarge)
+                    if (topic.isClosed) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.Lock,
+                            contentDescription = stringResource(R.string.forum_topics_closed),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = topic.lastMessage.ifBlank { stringResource(R.string.forum_topics_no_messages) },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+            // НОВОЕ (бейдж непрочитанных по темам): отдельный счётчик для каждого
+            // раздела, а не общий бейдж на весь чат.
+            if (topic.unreadCount > 0) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (topic.unreadCount > 99) "99+" else topic.unreadCount.toString(),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
-            Text(
-                text = topic.lastMessage.ifBlank { stringResource(R.string.forum_topics_no_messages) },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+        }
+
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(if (topic.isPinned) R.string.forum_topics_unpin else R.string.forum_topics_pin)) },
+                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                onClick = { showMenu = false; onTogglePin() }
             )
+            if (canManage) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (topic.isClosed) R.string.forum_topics_reopen else R.string.forum_topics_close)) },
+                    leadingIcon = {
+                        Icon(if (topic.isClosed) Icons.Filled.LockOpen else Icons.Filled.Lock, contentDescription = null)
+                    },
+                    onClick = { showMenu = false; onToggleClosed() }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.forum_topics_delete)) },
+                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                    onClick = { showMenu = false; onDeleteRequest() }
+                )
+            }
         }
     }
 }
