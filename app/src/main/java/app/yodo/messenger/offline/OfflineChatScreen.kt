@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -56,6 +57,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -124,7 +126,9 @@ fun OfflineChatScreen(
     var permissionsGranted by remember { mutableStateOf(false) }
 
     val identityState by viewModel.identityState.collectAsState()
+    val offlineProfile by viewModel.offlineProfile.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    var showProfileEditor by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -152,6 +156,17 @@ fun OfflineChatScreen(
         onDispose { viewModel.disconnect() }
     }
 
+    if (showProfileEditor) {
+        OfflineProfileEditor(
+            profile = offlineProfile,
+            onDismiss = { showProfileEditor = false },
+            onSave = {
+                viewModel.updateOfflineProfile(it)
+                showProfileEditor = false
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -162,6 +177,9 @@ fun OfflineChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showProfileEditor = true }) {
+                        Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.offline_profile_edit))
+                    }
                     // НОВОЕ (батч 7): очистить историю чата.
                     IconButton(onClick = { viewModel.clearMessages() }) {
                         Icon(Icons.Filled.DeleteSweep, contentDescription = "Очистить чат")
@@ -197,7 +215,11 @@ fun OfflineChatScreen(
                 }
 
                 else -> {
-                    DeviceDiscoveryContent(viewModel, connectionState)
+                    DeviceDiscoveryContent(
+                        viewModel = viewModel,
+                        connectionState = connectionState,
+                        onEditProfile = { showProfileEditor = true }
+                    )
                 }
             }
         }
@@ -281,14 +303,123 @@ private fun NameEntryContent(
 }
 
 @Composable
-private fun DeviceDiscoveryContent(viewModel: OfflineChatViewModel, connectionState: ConnectionState) {
+private fun OfflineProfileEditor(
+    profile: OfflineProfile,
+    onDismiss: () -> Unit,
+    onSave: (OfflineProfile) -> Unit
+) {
+    var name by remember { mutableStateOf(profile.displayName) }
+    var bio by remember { mutableStateOf(profile.bio) }
+    var status by remember { mutableStateOf(profile.status) }
+    var emoji by remember { mutableStateOf(profile.emoji) }
+    var colorIndex by remember { mutableStateOf(profile.colorIndex) }
+    val colors = listOf(
+        Color(0xFF2F80ED), Color(0xFF00A884), Color(0xFFE66A2C),
+        Color(0xFF8E5BD9), Color(0xFFD14D72), Color(0xFF138A9B)
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.offline_profile_edit)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(40) },
+                    label = { Text(stringResource(R.string.offline_profile_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = emoji,
+                    onValueChange = { emoji = it.take(8) },
+                    label = { Text(stringResource(R.string.offline_profile_emoji)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = status,
+                    onValueChange = { status = it.take(40) },
+                    label = { Text(stringResource(R.string.offline_profile_status)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = bio,
+                    onValueChange = { bio = it.take(160) },
+                    label = { Text(stringResource(R.string.offline_profile_bio)) },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(stringResource(R.string.offline_profile_color), style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    colors.forEachIndexed { index, color ->
+                        Box(
+                            modifier = Modifier.size(30.dp).clip(CircleShape).background(color)
+                                .clickable { colorIndex = index },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (index == colorIndex) Text("✓", color = Color.White)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(OfflineProfile(name, bio, status, emoji, colorIndex)) },
+                enabled = name.isNotBlank()
+            ) { Text(stringResource(R.string.offline_profile_save)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.offline_profile_cancel)) } }
+    )
+}
+
+@Composable
+private fun OfflineProfileCard(
+    profile: OfflineProfile,
+    shortId: String,
+    onEdit: () -> Unit
+) {
+    val colors = listOf(
+        Color(0xFF2F80ED), Color(0xFF00A884), Color(0xFFE66A2C),
+        Color(0xFF8E5BD9), Color(0xFFD14D72), Color(0xFF138A9B)
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = colors[profile.colorIndex.coerceIn(colors.indices)]
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f)),
+                contentAlignment = Alignment.Center
+            ) { Text(profile.emoji.ifBlank { profile.initials }, color = Color.White, style = MaterialTheme.typography.titleLarge) }
+            Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
+                Text(profile.displayName.ifBlank { stringResource(R.string.offline_guest_default) }, color = Color.White, style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.offline_profile_id, shortId), color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.labelMedium)
+                Text(profile.status.ifBlank { stringResource(R.string.offline_profile_available) }, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall)
+                if (profile.bio.isNotBlank()) Text(profile.bio, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, maxLines = 2)
+            }
+            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = null, tint = Color.White) }
+        }
+    }
+}
+
+@Composable
+private fun DeviceDiscoveryContent(
+    viewModel: OfflineChatViewModel,
+    connectionState: ConnectionState,
+    onEditProfile: () -> Unit
+) {
     val devices by viewModel.discoveredDevices.collectAsState()
     val identityState by viewModel.identityState.collectAsState()
+    val offlineProfile by viewModel.offlineProfile.collectAsState()
     val myShortId by viewModel.myShortId.collectAsState()
     var showRadar by remember { mutableStateOf(true) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // Показываем под каким именем виден пользователь
+        OfflineProfileCard(profile = offlineProfile, shortId = myShortId, onEdit = onEditProfile)
         val myName = when (val s = identityState) {
             is OfflineIdentityState.Online -> s.displayName
             is OfflineIdentityState.NeedsName -> s.savedName.ifBlank { stringResource(R.string.offline_guest_default) }

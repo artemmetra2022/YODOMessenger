@@ -555,6 +555,16 @@
     <string name="offline_guest_default">Гость</string>
     <string name="offline_interlocutor">Собеседник</string>
     <string name="offline_yodo_user">Пользователь Yodo</string>
+    <string name="offline_profile_edit">Настроить офлайн-профиль</string>
+    <string name="offline_profile_name">Имя</string>
+    <string name="offline_profile_emoji">Эмодзи или символ</string>
+    <string name="offline_profile_status">Короткий статус</string>
+    <string name="offline_profile_bio">О себе</string>
+    <string name="offline_profile_color">Цвет профиля</string>
+    <string name="offline_profile_id">Офлайн-ID #%1$s</string>
+    <string name="offline_profile_available">На связи без интернета</string>
+    <string name="offline_profile_save">Сохранить</string>
+    <string name="offline_profile_cancel">Отмена</string>
 
     <!-- Main nav -->
     <string name="nav_chats">Чаты</string>

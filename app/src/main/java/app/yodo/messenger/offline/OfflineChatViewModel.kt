@@ -7,10 +7,8 @@ import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -27,7 +25,6 @@ sealed class OfflineIdentityState {
 }
 
 private const val PREFS_NAME = "offline_prefs"
-private const val KEY_OFFLINE_NAME = "offline_display_name"
 
 @HiltViewModel
 class OfflineChatViewModel @Inject constructor(
@@ -36,6 +33,9 @@ class OfflineChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
+    private val profileStore = OfflineProfileStore(context)
+    private val _offlineProfile = MutableStateFlow(profileStore.load())
+    val offlineProfile: StateFlow<OfflineProfile> = _offlineProfile.asStateFlow()
     val discoveredDevices: StateFlow<List<NearbyDevice>> = nearbyManager.discoveredDevices
     val connectionState: StateFlow<ConnectionState> = nearbyManager.connectionState
     val connectedDeviceName: StateFlow<String?> = nearbyManager.connectedDeviceName
@@ -56,6 +56,13 @@ class OfflineChatViewModel @Inject constructor(
     private val _identityState = MutableStateFlow<OfflineIdentityState>(resolveIdentity())
     val identityState: StateFlow<OfflineIdentityState> = _identityState.asStateFlow()
 
+    init {
+        val identity = _identityState.value
+        if (_offlineProfile.value.displayName.isBlank() && identity is OfflineIdentityState.Online) {
+            saveOfflineProfile(_offlineProfile.value.copy(displayName = identity.displayName))
+        }
+    }
+
     /**
      * Определяем начальное состояние:
      * - если пользователь залогинен → берём displayName + username из Firebase
@@ -74,8 +81,7 @@ class OfflineChatViewModel @Inject constructor(
             )
             OfflineIdentityState.Online(name)
         } else {
-            val saved = loadSavedOfflineName()
-            OfflineIdentityState.NeedsName(savedName = saved)
+            OfflineIdentityState.NeedsName(savedName = _offlineProfile.value.displayName)
         }
     }
 
@@ -86,14 +92,16 @@ class OfflineChatViewModel @Inject constructor(
         return name
     }
 
-    private fun loadSavedOfflineName(): String {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_OFFLINE_NAME, "") ?: ""
-    }
-
-    private fun saveOfflineName(name: String) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_OFFLINE_NAME, name).apply()
+    private fun saveOfflineProfile(profile: OfflineProfile) {
+        val normalized = profile.copy(
+            displayName = profile.displayName.trim().take(40),
+            bio = profile.bio.trim().take(160),
+            status = profile.status.trim().take(40),
+            emoji = profile.emoji.trim().take(8),
+            colorIndex = profile.colorIndex.coerceIn(0, 5)
+        )
+        profileStore.save(normalized)
+        _offlineProfile.value = normalized
     }
 
     /**
@@ -102,7 +110,7 @@ class OfflineChatViewModel @Inject constructor(
      */
     fun startSearchingWithCustomName(name: String) {
         val trimmed = name.trim().ifBlank { "Гость-${(1000..9999).random()}" }
-        saveOfflineName(trimmed)
+        saveOfflineProfile(_offlineProfile.value.copy(displayName = trimmed))
         _identityState.value = OfflineIdentityState.Searching(displayName = trimmed)
         nearbyManager.startAdvertisingAndDiscovery(trimmed)
     }
@@ -189,13 +197,22 @@ class OfflineChatViewModel @Inject constructor(
         nearbyManager.clearMessages()
     }
 
+    fun updateOfflineProfile(profile: OfflineProfile) {
+        if (profile.displayName.isBlank()) return
+        saveOfflineProfile(profile)
+        nearbyManager.updateDisplayName(_offlineProfile.value.displayName)
+        _identityState.value = when (val state = _identityState.value) {
+            is OfflineIdentityState.NeedsName -> OfflineIdentityState.NeedsName(_offlineProfile.value.displayName)
+            is OfflineIdentityState.Online -> OfflineIdentityState.Online(_offlineProfile.value.displayName)
+            is OfflineIdentityState.Searching -> OfflineIdentityState.Searching(_offlineProfile.value.displayName)
+        }
+    }
+
     /** НОВОЕ (батч 7): смена имени «на лету». */
     fun updateDisplayName(name: String) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) return
-        nearbyManager.updateDisplayName(trimmed)
-        saveOfflineName(trimmed)
-        _identityState.value = OfflineIdentityState.Searching(displayName = trimmed)
+        updateOfflineProfile(_offlineProfile.value.copy(displayName = trimmed))
     }
 
     fun disconnect() {

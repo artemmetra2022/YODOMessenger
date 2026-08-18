@@ -559,6 +559,16 @@ Try later — people appear when they open this screen.</string>
     <string name="offline_guest_default">Guest</string>
     <string name="offline_interlocutor">Interlocutor</string>
     <string name="offline_yodo_user">Yodo User</string>
+    <string name="offline_profile_edit">Customize offline profile</string>
+    <string name="offline_profile_name">Name</string>
+    <string name="offline_profile_emoji">Emoji or symbol</string>
+    <string name="offline_profile_status">Short status</string>
+    <string name="offline_profile_bio">About you</string>
+    <string name="offline_profile_color">Profile color</string>
+    <string name="offline_profile_id">Offline ID #%1$s</string>
+    <string name="offline_profile_available">Available without internet</string>
+    <string name="offline_profile_save">Save</string>
+    <string name="offline_profile_cancel">Cancel</string>
 
     <!-- Main nav -->
     <string name="nav_chats">Chats</string>
