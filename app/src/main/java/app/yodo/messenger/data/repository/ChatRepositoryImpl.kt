@@ -17,6 +17,9 @@ import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
 import app.yodo.messenger.domain.repository.ChannelDirectory
 import app.yodo.messenger.domain.repository.ChannelCategorySection
+import app.yodo.messenger.domain.repository.ChannelStats
+import app.yodo.messenger.domain.repository.ChannelSubscriberPoint
+import app.yodo.messenger.domain.repository.ChannelTopPost
 import app.yodo.messenger.domain.repository.ChannelUpdateResult
 import app.yodo.messenger.domain.repository.ChatInfo
 import app.yodo.messenger.domain.repository.ChatListResult
