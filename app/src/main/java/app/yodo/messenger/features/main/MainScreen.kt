@@ -34,7 +34,9 @@ fun MainScreen(
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
-    onOpenAdminPanel: () -> Unit = {}
+    onOpenAdminPanel: () -> Unit = {},
+    // НОВОЕ (каталог/рекомендации каналов): открытие витрины каналов.
+    onDiscoverChannels: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -79,7 +81,8 @@ fun MainScreen(
                 onCreateChannelClick = onCreateChannelClick,
                 onOpenContacts = onOpenContacts,
                 onOpenArchive = onOpenArchive,
-                onOpenAdminPanel = onOpenAdminPanel
+                onOpenAdminPanel = onOpenAdminPanel,
+                onDiscoverChannels = onDiscoverChannels
             )
         }
     }

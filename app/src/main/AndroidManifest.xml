@@ -86,7 +86,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Deep links (опционально, для ссылок типа yodo://chat/...) -->
+            <!-- Deep links: yodo://channel/<chatId> — ссылка-приглашение на канал (см. MainActivity.extractChannelIdFromIntent) -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

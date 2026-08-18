@@ -71,8 +71,6 @@ class NearbyMessagingManager @Inject constructor(
     private var shortSalt: Int = prefs.getInt(KEY_SHORT_SALT, 0)
 
     private val router = MeshRouter(myNodeId)
-    private val mediaAssembler = OfflineMediaAssembler()
-    private val mediaPacketOrigins = ConcurrentHashMap<String, MeshPacket>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var beaconJob: Job? = null
 
@@ -221,63 +219,6 @@ class NearbyMessagingManager @Inject constructor(
         )
     }
 
-    fun sendMedia(targetNodeId: String?, payload: OfflineMediaPayload): Boolean {
-        val encoded = OfflineMediaCodec.encode(payload)
-        if (encoded.length > MAX_OFFLINE_MEDIA_BASE64_LENGTH || payload.itemsBase64.isEmpty()) return false
-        val now = System.currentTimeMillis()
-        val destination = targetNodeId ?: MeshPacket.BROADCAST
-        val chunks = OfflineMediaCodec.chunks(encoded)
-        val meta = newPacket(
-            MeshPacketType.MEDIA_META,
-            destination,
-            "",
-            MeshPacket.DEFAULT_TTL,
-            now
-        ).let { packet ->
-            packet.copy(
-                text = OfflineMediaCodec.metaToJson(
-                    OfflineMediaMeta(packet.packetId, payload.type, chunks.size, payload.durationMs)
-                )
-            )
-        }
-        router.markSeen(meta.packetId)
-        routeOrBroadcast(meta)
-        chunks.forEachIndexed { index, chunk ->
-            val packet = newPacket(
-                MeshPacketType.MEDIA_CHUNK,
-                destination,
-                OfflineMediaCodec.chunkText(index, chunk),
-                MeshPacket.DEFAULT_TTL,
-                now,
-                refId = meta.packetId
-            )
-            router.markSeen(packet.packetId)
-            routeOrBroadcast(packet)
-        }
-        _messages.value = _messages.value + OfflineMessage(
-            id = meta.packetId,
-            text = "",
-            timestamp = now,
-            isOutgoing = true,
-            mediaType = payload.type,
-            mediaItemsBase64 = payload.itemsBase64,
-            audioDurationMs = payload.durationMs,
-            senderName = myDisplayName,
-            targetShort = targetNodeId?.let(router::shortOf),
-            delivered = false,
-            isBroadcast = targetNodeId == null
-        )
-        return true
-    }
-
-    private fun routeOrBroadcast(packet: MeshPacket) {
-        if (packet.dstId == MeshPacket.BROADCAST) {
-            broadcastToNeighbors(packet, exclude = null)
-        } else {
-            routeTowardsDestination(packet, exclude = null)
-        }
-    }
-
     /**
      * НОВОЕ (батч 7): экстренный SOS-сигнал. Широковещательное сообщение
      * с максимальным TTL и пометкой «🆘 SOS» — расходится по всей mesh-сети.
@@ -381,8 +322,6 @@ class NearbyMessagingManager @Inject constructor(
         _neighborCount.value = 0
         _meshNodes.value = emptyList()
         _discoveredDevices.value = emptyList()
-        mediaAssembler.clear()
-        mediaPacketOrigins.clear()
         isAdvertising = false
         isDiscovering = false
         startAdvertising()
@@ -407,8 +346,7 @@ class NearbyMessagingManager @Inject constructor(
         _connectionState.value = ConnectionState.DISCONNECTED
         _connectedDeviceName.value = null
         _neighborCount.value = 0
-        mediaAssembler.clear()
-        mediaPacketOrigins.clear()
+        _meshNodes.value = emptyList()
         _messages.value = emptyList()
     }
 
@@ -521,16 +459,6 @@ class NearbyMessagingManager @Inject constructor(
                 }
             }
 
-            MeshPacketType.MEDIA_META -> {
-                handleMediaPacket(packet, isMeta = true)
-                forwardMediaPacket(fromEndpointId, packet)
-            }
-
-            MeshPacketType.MEDIA_CHUNK -> {
-                handleMediaPacket(packet, isMeta = false)
-                forwardMediaPacket(fromEndpointId, packet)
-            }
-
             MeshPacketType.ACK -> {
                 if (packet.dstId == myNodeId) {
                     markDelivered(packet.refId)
@@ -538,45 +466,6 @@ class NearbyMessagingManager @Inject constructor(
                     forwardUnicast(fromEndpointId, packet)
                 }
             }
-        }
-    }
-
-    private fun handleMediaPacket(packet: MeshPacket, isMeta: Boolean) {
-        val isBroadcast = packet.dstId == MeshPacket.BROADCAST
-        if (!isBroadcast && packet.dstId != myNodeId) return
-        val transferId = if (isMeta) packet.packetId else packet.refId
-        if (transferId.isBlank()) return
-        mediaPacketOrigins.putIfAbsent(transferId, packet)
-        val payload = if (isMeta) {
-            OfflineMediaCodec.metaFromPacket(packet)?.let(mediaAssembler::addMeta)
-        } else {
-            OfflineMediaCodec.parseChunk(packet.text)?.let { (index, value) ->
-                mediaAssembler.addChunk(transferId, index, value)
-            }
-        } ?: return
-        val origin = mediaPacketOrigins.remove(transferId) ?: packet
-        _messages.value = _messages.value + OfflineMessage(
-            id = transferId,
-            text = "",
-            timestamp = origin.originTimestamp,
-            isOutgoing = false,
-            mediaType = payload.type,
-            mediaItemsBase64 = payload.itemsBase64,
-            audioDurationMs = payload.durationMs,
-            senderName = origin.srcName,
-            senderShort = origin.srcShort,
-            hops = origin.hops,
-            delivered = false,
-            isBroadcast = isBroadcast
-        )
-        if (!isBroadcast) sendAck(origin.copy(packetId = transferId))
-    }
-
-    private fun forwardMediaPacket(fromEndpointId: String, packet: MeshPacket) {
-        if (packet.dstId == MeshPacket.BROADCAST) {
-            forwardFlood(fromEndpointId, packet)
-        } else if (packet.dstId != myNodeId) {
-            forwardUnicast(fromEndpointId, packet)
         }
     }
 

@@ -236,6 +236,23 @@ fun YodoNavGraph(
                 // НОВОЕ (чат поддержки): открытие админ-панели поддержки (только для админов).
                 onOpenAdminPanel = {
                     navController.navigate(Routes.AdminPanel.route)
+                },
+                // НОВОЕ (каталог/рекомендации каналов): открытие витрины каналов.
+                onDiscoverChannels = {
+                    navController.navigate(Routes.DiscoverChannels.route)
+                }
+            )
+        }
+
+        // НОВОЕ (каталог/рекомендации каналов): витрина каналов без поискового запроса.
+        composable(Routes.DiscoverChannels.route) {
+            app.yodo.messenger.features.chats.DiscoverChannelsScreen(
+                onBackClick = { navController.popBackStack() },
+                onChatOpened = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId))
+                },
+                onOpenChannelProfile = { channelId ->
+                    navController.navigate(Routes.ChannelProfile.createRoute(channelId))
                 }
             )
         }
@@ -411,12 +428,25 @@ fun YodoNavGraph(
                 onManageRoles = { chatId ->
                     navController.navigate(Routes.ManageRoles.createRoute(chatId))
                 },
+                // НОВОЕ (статистика для владельца канала): переход к расширенной аналитике канала.
+                onOpenChannelStats = { chatId ->
+                    navController.navigate(Routes.ChannelStats.createRoute(chatId))
+                },
                 // НОВОЕ: после удаления канала владельцем — назад в список чатов.
                 onChannelDeleted = {
                     navController.navigate(Routes.ChatList.route) {
                         popUpTo(Routes.ChatList.route) { inclusive = true }
                     }
                 }
+            )
+        }
+        // НОВОЕ (статистика для владельца канала): расширенная аналитика канала.
+        composable(
+            route = Routes.ChannelStats.route,
+            arguments = listOf(navArgument(Routes.ChannelStats.ARG_CHAT_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.chats.ChannelStatsScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
         // НОВОЕ (переработка каналов): редактирование канала (владелец).

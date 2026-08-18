@@ -280,15 +280,21 @@
     <string name="chat_filter_all">Все</string>
     <string name="chat_filter_private">Личные</string>
     <string name="chat_filter_groups">Группы</string>
+    <!-- НОВОЕ (расширение интерфейса каналов): таб «Каналы» в своем статусе владельца/подписчика. -->
+    <string name="chat_filter_channels">Каналы</string>
     <string name="chat_filter_unread">Непрочитанные</string>
     <string name="chat_list_new_chat">Новый чат</string>
     <string name="chat_list_new_group">Новая группа</string>
     <string name="chat_list_new_channel">Новый канал</string>
+    <!-- НОВОЕ (расширение интерфейса каналов): пункт FAB-меню — каталог/рекомендации каналов. -->
+    <string name="chat_list_discover_channels">Каталог каналов</string>
     <string name="chat_list_contacts">Контакты</string>
     <string name="chat_list_empty_all">У вас пока нет чатов.
 Начните новый разговор!</string>
     <string name="chat_list_empty_private">Нет личных чатов</string>
     <string name="chat_list_empty_groups">Нет групп и каналов</string>
+    <!-- НОВОЕ (расширение интерфейса каналов): пустое состояние для таба «Каналы». -->
+    <string name="chat_list_empty_channels">Вы пока не владеете и не подписаны ни на один канал</string>
     <string name="chat_list_empty_unread">Нет непрочитанных сообщений</string>
     <string name="chat_list_load_error">Не удалось загрузить чаты</string>
     <string name="chat_list_archive">Архив</string>
@@ -555,16 +561,6 @@
     <string name="offline_guest_default">Гость</string>
     <string name="offline_interlocutor">Собеседник</string>
     <string name="offline_yodo_user">Пользователь Yodo</string>
-    <string name="offline_profile_edit">Настроить офлайн-профиль</string>
-    <string name="offline_profile_name">Имя</string>
-    <string name="offline_profile_emoji">Эмодзи или символ</string>
-    <string name="offline_profile_status">Короткий статус</string>
-    <string name="offline_profile_bio">О себе</string>
-    <string name="offline_profile_color">Цвет профиля</string>
-    <string name="offline_profile_id">Офлайн-ID #%1$s</string>
-    <string name="offline_profile_available">На связи без интернета</string>
-    <string name="offline_profile_save">Сохранить</string>
-    <string name="offline_profile_cancel">Отмена</string>
 
     <!-- Main nav -->
     <string name="nav_chats">Чаты</string>

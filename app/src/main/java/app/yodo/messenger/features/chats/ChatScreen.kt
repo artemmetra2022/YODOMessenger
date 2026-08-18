@@ -137,7 +137,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -181,8 +180,6 @@ import app.yodo.messenger.util.ImageUtils
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -246,20 +243,9 @@ fun ChatScreen(
     LaunchedEffect(uiState.editingMessage) {
         uiState.editingMessage?.let { inputText = it.text }
     }
-    var hasScrolledToInitialMessages by remember(chatId) { mutableStateOf(false) }
-    LaunchedEffect(chatId, uiState.messages.size, uiState.isSearchActive, uiState.searchQuery) {
-        if (uiState.messages.isEmpty() || uiState.isSearchActive) return@LaunchedEffect
-
-        val expectedItemCount = chatTimelineItemCount(uiState.messages)
-        snapshotFlow { listState.layoutInfo.totalItemsCount }
-            .filter { it == expectedItemCount }
-            .first()
-        val lastItemIndex = expectedItemCount - 1
-        if (hasScrolledToInitialMessages) {
-            listState.animateScrollToItem(lastItemIndex)
-        } else {
-            listState.scrollToItem(lastItemIndex)
-            hasScrolledToInitialMessages = true
+    LaunchedEffect(uiState.messages.size) {
+        if (uiState.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.size - 1)
         }
     }
     LaunchedEffect(uiState.errorMessage) {
@@ -3500,19 +3486,6 @@ private fun VoicePlayerBubble(
 private fun formatMessageTime(millis: Long): String {
     if (millis == 0L) return ""
     return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
-}
-
-internal fun chatTimelineItemCount(messages: List<Message>): Int {
-    var itemCount = messages.size
-    var previousDateLabel: String? = null
-    messages.forEach { message ->
-        val dateLabel = formatDateSeparator(message.timestamp)
-        if (dateLabel != previousDateLabel) {
-            itemCount++
-            previousDateLabel = dateLabel
-        }
-    }
-    return itemCount
 }
 
 private fun formatDateSeparator(millis: Long): String {

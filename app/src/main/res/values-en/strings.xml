@@ -289,15 +289,18 @@
     <string name="chat_filter_all">All</string>
     <string name="chat_filter_private">Personal</string>
     <string name="chat_filter_groups">Groups</string>
+    <string name="chat_filter_channels">Channels</string>
     <string name="chat_filter_unread">Unread</string>
     <string name="chat_list_new_chat">New chat</string>
     <string name="chat_list_new_group">New group</string>
     <string name="chat_list_new_channel">New channel</string>
+    <string name="chat_list_discover_channels">Discover channels</string>
     <string name="chat_list_contacts">Contacts</string>
     <string name="chat_list_empty_all">You have no chats yet.
 Start a new conversation!</string>
     <string name="chat_list_empty_private">No personal chats</string>
     <string name="chat_list_empty_groups">No groups or channels</string>
+    <string name="chat_list_empty_channels">You don’t own or follow any channel yet</string>
     <string name="chat_list_empty_unread">No unread messages</string>
     <string name="chat_list_load_error">Failed to load chats</string>
     <string name="chat_list_archive">Archive</string>
@@ -559,16 +562,6 @@ Try later — people appear when they open this screen.</string>
     <string name="offline_guest_default">Guest</string>
     <string name="offline_interlocutor">Interlocutor</string>
     <string name="offline_yodo_user">Yodo User</string>
-    <string name="offline_profile_edit">Customize offline profile</string>
-    <string name="offline_profile_name">Name</string>
-    <string name="offline_profile_emoji">Emoji or symbol</string>
-    <string name="offline_profile_status">Short status</string>
-    <string name="offline_profile_bio">About you</string>
-    <string name="offline_profile_color">Profile color</string>
-    <string name="offline_profile_id">Offline ID #%1$s</string>
-    <string name="offline_profile_available">Available without internet</string>
-    <string name="offline_profile_save">Save</string>
-    <string name="offline_profile_cancel">Cancel</string>
 
     <!-- Main nav -->
     <string name="nav_chats">Chats</string>

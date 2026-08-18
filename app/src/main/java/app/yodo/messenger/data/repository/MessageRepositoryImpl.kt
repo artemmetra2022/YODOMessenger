@@ -16,9 +16,7 @@ import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.Source
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -29,13 +27,6 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
-
-internal fun resolveMessageStatus(storedStatus: String?, hasPendingWrites: Boolean): MessageStatus {
-    if (hasPendingWrites) return MessageStatus.SENDING
-    return storedStatus?.let { raw ->
-        runCatching { MessageStatus.valueOf(raw) }.getOrDefault(MessageStatus.SENT)
-    } ?: MessageStatus.SENT
-}
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -56,7 +47,7 @@ class MessageRepositoryImpl @Inject constructor(
         }
         val listener = query
             .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+            .addSnapshotListener { snapshot, error ->
                 if (error != null) { trySend(emptyList<Message>()); return@addSnapshotListener }
                 val messages = snapshot?.documents.orEmpty()
                     .mapNotNull { doc -> mapDocToMessage(doc, chatId) }
@@ -71,7 +62,7 @@ class MessageRepositoryImpl @Inject constructor(
     override fun observeMessage(chatId: String, messageId: String): Flow<Message?> = callbackFlow {
         val listener = firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
-            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+            .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null || !snapshot.exists()) {
                     trySend(null); return@addSnapshotListener
                 }
@@ -201,73 +192,6 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun enqueueOfflineMediaMessage(
-        chatId: String,
-        data: MutableMap<String, Any?>,
-        topicId: String? = null
-    ): SendMessageResult {
-        val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
-        return try {
-            val chatRef = firestore.collection("chats").document(chatId)
-            val chatSnapshot = runCatching { chatRef.get(Source.CACHE).await() }.getOrNull()
-            val participantIds = (chatSnapshot?.get("participantIds") as? List<*>)
-                ?.filterIsInstance<String>().orEmpty()
-            if (topicId != null) {
-                val topicSnapshot = runCatching {
-                    chatRef.collection("topics").document(topicId).get(Source.CACHE).await()
-                }.getOrNull()
-                if (topicSnapshot?.getBoolean("isClosed") == true) {
-                    return SendMessageResult.Error("Раздел закрыт для новых сообщений")
-                }
-            }
-
-            val now = System.currentTimeMillis()
-            data["senderId"] = uid
-            data["timestamp"] = now
-            data["status"] = "SENT"
-            data["notified"] = false
-            topicId?.let { data["topicId"] = it }
-            chatSnapshot?.getLong("disappearingTtlSeconds")?.takeIf { it > 0 }?.let {
-                data["expiresAt"] = now + it * 1000L
-            }
-
-            val previewText = (data["text"] as? String)?.takeIf { it.isNotBlank() }
-                ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
-                else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
-                else if (data.containsKey("imagesBase64")) "📷 Фото (${(data["imagesBase64"] as? List<*>)?.size ?: 1})"
-                else "📷 Фото"
-            val unreadUpdates = mutableMapOf<String, Any?>(
-                "lastMessage" to previewText,
-                "lastMessageTimestamp" to now,
-                "lastMessageSenderId" to uid,
-                "lastMessageStatus" to "SENT"
-            )
-            participantIds.filter { it != uid }.forEach { otherUid ->
-                unreadUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
-            }
-
-            val messageRef = chatRef.collection("messages").document()
-            val batch = firestore.batch()
-                .set(messageRef, data)
-                .update(chatRef, unreadUpdates)
-            if (topicId != null) {
-                val topicUpdates = mutableMapOf<String, Any?>(
-                    "lastMessage" to previewText,
-                    "lastMessageTimestamp" to now,
-                    "lastMessageSenderId" to uid
-                )
-                participantIds.filter { it != uid }.forEach { otherUid ->
-                    topicUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
-                }
-                batch.update(chatRef.collection("topics").document(topicId), topicUpdates)
-            }
-            batch.commit()
-            SendMessageResult.Success(messageRef.id)
-        } catch (e: Exception) {
-            SendMessageResult.Error(e.toUserMessage("Не удалось добавить медиа в очередь"))
-        }
-    }
-
     override suspend fun sendImageMessage(
         chatId: String, imageBase64: String, caption: String, isViewOnce: Boolean,
         topicId: String?
@@ -277,7 +201,7 @@ class MessageRepositoryImpl @Inject constructor(
             data["isViewOnce"] = true
             data["viewOnceOpened"] = false
         }
-        return enqueueOfflineMediaMessage(chatId, data, topicId)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     // НОВОЕ (несколько фото): все выбранные фото сохраняются одним массивом
@@ -290,10 +214,10 @@ class MessageRepositoryImpl @Inject constructor(
         if (images.isEmpty()) return SendMessageResult.Error("Нет фото для отправки")
         // Одно фото — отправляем как обычное imageBase64 (совместимость со старыми клиентами).
         if (images.size == 1) {
-            return enqueueOfflineMediaMessage(
+            return sendRawMessage(
                 chatId,
                 mutableMapOf("imageBase64" to images.first(), "text" to caption.trim()),
-                topicId
+                topicId = topicId
             )
         }
         val data = mutableMapOf<String, Any?>(
@@ -302,7 +226,7 @@ class MessageRepositoryImpl @Inject constructor(
             "imageBase64" to images.first(),
             "text" to caption.trim()
         )
-        return enqueueOfflineMediaMessage(chatId, data, topicId)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     // НОВОЕ (одноразовые медиа): удаляем imageBase64 из документа в Firestore, как только
@@ -333,7 +257,7 @@ class MessageRepositoryImpl @Inject constructor(
             "voiceBase64" to voiceBase64,
             "voiceDurationMs" to durationMs
         )
-        return enqueueOfflineMediaMessage(chatId, data, topicId)
+        return sendRawMessage(chatId, data, topicId = topicId)
     }
 
     override suspend fun sendFileMessage(
@@ -955,10 +879,9 @@ class MessageRepositoryImpl @Inject constructor(
                 topicId = doc.getString("topicId"),
                 text = decryptMessageText(doc),
                 timestamp = doc.getLong("timestamp") ?: 0L,
-                status = resolveMessageStatus(
-                    storedStatus = doc.getString("status"),
-                    hasPendingWrites = doc.metadata.hasPendingWrites()
-                ),
+                status = doc.getString("status")?.let { raw ->
+                    runCatching { MessageStatus.valueOf(raw) }.getOrDefault(MessageStatus.SENT)
+                } ?: MessageStatus.SENT,
                 replyToMessageId = doc.getString("replyToMessageId"),
                 replyToSenderName = doc.getString("replyToSenderName"),
                 replyToText = doc.getString("replyToText"),

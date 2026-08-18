@@ -32,6 +32,9 @@ sealed class ChatFilter {
     data object PRIVATE : ChatFilter()
     data object GROUPS : ChatFilter()
     data object UNREAD : ChatFilter()
+    // НОВОЕ (расширение интерфейса каналов): отдельный таб «Каналы» — только чаты
+    // типа CHANNEL (в отличие от GROUPS, который смешивает группы и каналы).
+    data object CHANNELS : ChatFilter()
     // НОВОЕ (п.4): пользовательская папка чатов
     data class Folder(val folderId: String) : ChatFilter()
 }
@@ -192,10 +195,13 @@ class ChatListViewModel @Inject constructor(
                         
                         // Применяем фильтр
                         val filtered = when (filter) {
-                            ChatFilter.ALL     -> active
-                            ChatFilter.PRIVATE -> active.filter { it.type == ChatType.PRIVATE }
-                            ChatFilter.GROUPS  -> active.filter { it.type == ChatType.GROUP || it.type == ChatType.CHANNEL }
-                            ChatFilter.UNREAD  -> active.filter { it.unreadCount > 0 }
+                            ChatFilter.ALL      -> active
+                            ChatFilter.PRIVATE  -> active.filter { it.type == ChatType.PRIVATE }
+                            ChatFilter.GROUPS   -> active.filter { it.type == ChatType.GROUP || it.type == ChatType.CHANNEL }
+                            // НОВОЕ (расширение интерфейса каналов): таб «Мои каналы» — только CHANNEL,
+                            // включая владельца/админа и просто подписанта.
+                            ChatFilter.CHANNELS -> active.filter { it.type == ChatType.CHANNEL }
+                            ChatFilter.UNREAD   -> active.filter { it.unreadCount > 0 }
                             is ChatFilter.Folder -> {
                                 // НОВОЕ (п.4): фильтрация по пользовательской папке
                                 val folder = folders.find { it.id == filter.folderId }

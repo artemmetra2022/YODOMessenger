@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -69,6 +71,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -100,6 +103,8 @@ fun ChannelProfileScreen(
     onOpenUserProfile: (String) -> Unit,
     // НОВОЕ (система ролей + журнал администраторов): переход к экрану управления ролями.
     onManageRoles: (String) -> Unit = {},
+    // НОВОЕ (статистика для владельца канала): переход к расширенной аналитике (охваты, рост аудитории).
+    onOpenChannelStats: (String) -> Unit = {},
     // НОВОЕ: канал удалён владельцем — экран должен закрыться в список чатов.
     onChannelDeleted: () -> Unit = onBackClick,
     viewModel: ChannelProfileViewModel = hiltViewModel()
@@ -109,6 +114,7 @@ fun ChannelProfileScreen(
     val channelDeleted by viewModel.channelDeleted.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val colorTheme = LocalColorTheme.current
+    val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -146,6 +152,16 @@ fun ChannelProfileScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    // НОВОЕ (ссылка-приглашение и шаринг): кнопка «Поделиться каналом» —
+                    // генерирует ссылку вида yodo://channel/<chatId> и открывает системное
+                    // окно «поделиться». Видна только когда профиль канала уже загружен.
+                    if (uiState.profile != null) {
+                        IconButton(onClick = { shareChannelInviteLink(context, uiState.profile!!) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Поделиться каналом")
+                        }
                     }
                 }
             )
@@ -273,6 +289,16 @@ fun ChannelProfileScreen(
                                 Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Роли и права")
+                            }
+                            // НОВОЕ (статистика для владельца канала): кнопка перехода к расширенной аналитике
+                            // канала — охваты постов, рост/отток аудитории, топ постов.
+                            OutlinedButton(
+                                onClick = { onOpenChannelStats(viewModel.chatId) },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Filled.TrendingUp, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Статистика канала")
                             }
                             // НОВОЕ: удаление канала владельцем — необратимое действие,
                             // требует явного подтверждения в диалоге.
@@ -690,4 +716,21 @@ private fun pluralRu(n: Int, one: String, few: String, many: String): String {
         mod10 in 2..4 -> few
         else -> many
     }
+}
+
+// НОВОЕ (ссылка-приглашение и шаринг): ссылка вида yodo://channel/<chatId> — тот же
+// паттерн, что и у контактного QR (yodo://c/...), чтобы MainActivity распознавала ссылку
+// по одной схеме и открывала приложение на нужном экране, даже если отправитель
+// и получатель — разные люди (в отличие от QR-контакта, где весь JSON закодирован в URL,
+// здесь достаточно chatId — канал уже и так публичный документ в Firestore).
+private fun buildChannelInviteLink(chatId: String): String = "yodo://channel/$chatId"
+
+private fun shareChannelInviteLink(context: android.content.Context, profile: app.yodo.messenger.domain.model.ChannelProfile) {
+    val link = buildChannelInviteLink(profile.chatId)
+    val message = "Присоединяйтесь к каналу «${profile.title}» в YODO Messenger:\n$link"
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, message)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Поделиться каналом"))
 }

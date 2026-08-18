@@ -45,9 +45,14 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var userSettingsPreferences: UserSettingsPreferences
     @Inject lateinit var languagePreferences: LanguagePreferences
 
+    // НОВОЕ (ссылка-приглашение и шаринг): chatId канала из входящей ссылки
+    // yodo://channel/<chatId> — проверяется в Compose-дереве и открывает профиль канала.
+    private val pendingChannelDeepLink = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        pendingChannelDeepLink.value = extractChannelIdFromIntent(intent)
 
         val startDestination = if (authRepository.isLoggedIn()) {
             Routes.ChatList.route
@@ -169,10 +174,37 @@ class MainActivity : ComponentActivity() {
                                 navController = navController,
                                 startDestination = startDestination
                             )
+
+                            // НОВОЕ (ссылка-приглашение и шаринг): при открытии приложения по ссылке-
+                            // приглашению (yodo://channel/<chatId>) — сразу переходит к профилю канала.
+                            // Авторизованный и неавторизованный пользователь попадает сразу в обычный
+                            // поток: если не вошёл — сначала увидит Welcome/Login и вернётся к каналу уже после входа.
+                            LaunchedEffect(pendingChannelDeepLink.value, authRepository.isLoggedIn()) {
+                                val channelId = pendingChannelDeepLink.value
+                                if (channelId != null && authRepository.isLoggedIn()) {
+                                    navController.navigate(app.yodo.messenger.navigation.Routes.ChannelProfile.createRoute(channelId))
+                                    pendingChannelDeepLink.value = null
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // НОВОЕ: launchMode="singleTask" — при повторном открытии ссылки, когда активити
+        // уже запущена, новый intent приходит сюда, а не в onCreate.
+        extractChannelIdFromIntent(intent)?.let { pendingChannelDeepLink.value = it }
+    }
+
+    /** Извлекает chatId канала из ссылки вида yodo://channel/<chatId>, если она есть в intent. */
+    private fun extractChannelIdFromIntent(intent: android.content.Intent?): String? {
+        val data = intent?.data ?: return null
+        if (data.scheme != "yodo" || data.host != "channel") return null
+        return data.pathSegments?.firstOrNull()?.takeIf { it.isNotBlank() }
     }
 }

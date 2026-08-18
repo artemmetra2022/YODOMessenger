@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -126,6 +127,8 @@ fun ChatListScreen(
     onOpenArchive: () -> Unit = {},
     // НОВОЕ (чат поддержки): открытие админ-панели поддержки.
     onOpenAdminPanel: () -> Unit = {},
+    // НОВОЕ (расширение интерфейса каналов): открытие каталога/рекомендаций каналов.
+    onDiscoverChannels: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -214,6 +217,10 @@ fun ChatListScreen(
                         badge = allActive.count { it.unreadCount > 0 }))
                     add(FilterTab(ChatFilter.PRIVATE, stringResource(R.string.chat_filter_private)))
                     add(FilterTab(ChatFilter.GROUPS, stringResource(R.string.chat_filter_groups)))
+                    // НОВОЕ (расширение интерфейса каналов): отдельный таб «Каналы» —
+                    // только чаты типа CHANNEL, где пользователь владелец/админ/подписчик.
+                    add(FilterTab(ChatFilter.CHANNELS, stringResource(R.string.chat_filter_channels),
+                        badge = allActive.count { it.type == ChatType.CHANNEL }))
                     
                     // НОВОЕ (п.4): добавляем пользовательские папки
                     chatFolders.sortedBy { it.order }.forEach { folder ->
@@ -259,6 +266,13 @@ fun ChatListScreen(
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_list_new_channel)) },
                         onClick = { showFabMenu = false; onCreateChannelClick() }
+                    )
+                    // НОВОЕ (расширение интерфейса каналов): пункт «Каталог каналов» в FAB-меню —
+                    // рекомендации и подборки каналов по категориям.
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_list_discover_channels)) },
+                        leadingIcon = { Icon(Icons.Filled.Campaign, contentDescription = null) },
+                        onClick = { showFabMenu = false; onDiscoverChannels() }
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_list_contacts)) },
@@ -892,10 +906,12 @@ private fun ManageFolderDialog(
 
 @Composable
 private fun emptyFilterMessage(filter: ChatFilter): String = when (filter) {
-    ChatFilter.ALL     -> stringResource(R.string.chat_list_empty_all)
-    ChatFilter.PRIVATE -> stringResource(R.string.chat_list_empty_private)
-    ChatFilter.GROUPS  -> stringResource(R.string.chat_list_empty_groups)
-    ChatFilter.UNREAD  -> stringResource(R.string.chat_list_empty_unread)
+    ChatFilter.ALL      -> stringResource(R.string.chat_list_empty_all)
+    ChatFilter.PRIVATE  -> stringResource(R.string.chat_list_empty_private)
+    ChatFilter.GROUPS   -> stringResource(R.string.chat_list_empty_groups)
+    // НОВОЕ (расширение интерфейса каналов): пустое состояние для таба «Каналы».
+    ChatFilter.CHANNELS -> stringResource(R.string.chat_list_empty_channels)
+    ChatFilter.UNREAD   -> stringResource(R.string.chat_list_empty_unread)
     is ChatFilter.Folder -> "В этой папке пока нет чатов"
 }
 

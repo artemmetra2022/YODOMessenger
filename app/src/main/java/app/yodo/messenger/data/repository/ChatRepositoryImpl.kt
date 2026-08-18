@@ -15,6 +15,8 @@ import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.Permission
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
+import app.yodo.messenger.domain.repository.ChannelDirectory
+import app.yodo.messenger.domain.repository.ChannelCategorySection
 import app.yodo.messenger.domain.repository.ChannelUpdateResult
 import app.yodo.messenger.domain.repository.ChatInfo
 import app.yodo.messenger.domain.repository.ChatListResult
@@ -586,6 +588,14 @@ class ChatRepositoryImpl @Inject constructor(
                         "unreadCounts.$uid" to 0
                     )
                 ).await()
+            // НОВОЕ (статистика для владельца): фиксируем событие подписки с таймстампом —
+            // нужно для графика роста подписчиков в ChannelStatsScreen. Не критично, если не записалось —
+            // основная подска (participantIds) уже обновлена выше.
+            runCatching {
+                firestore.collection("chats").document(chatId)
+                    .collection("subscriberEvents").document(uid)
+                    .set(mapOf("subscribedAt" to System.currentTimeMillis(), "type" to "SUBSCRIBE")).await()
+            }
         } catch (e: Exception) { }
     }
 
@@ -598,6 +608,12 @@ class ChatRepositoryImpl @Inject constructor(
             if (doc.getString("createdBy") == uid) return
             firestore.collection("chats").document(chatId)
                 .update("participantIds", FieldValue.arrayRemove(uid)).await()
+            // НОВОЕ (статистика для владельца): фиксируем отток для графика динамики.
+            runCatching {
+                firestore.collection("chats").document(chatId)
+                    .collection("subscriberEvents").document("${uid}_unsub_${System.currentTimeMillis()}")
+                    .set(mapOf("subscribedAt" to System.currentTimeMillis(), "type" to "UNSUBSCRIBE", "uid" to uid)).await()
+            }
         } catch (e: Exception) { }
     }
 
@@ -709,6 +725,138 @@ class ChatRepositoryImpl @Inject constructor(
                 .sortedWith(compareByDescending<ChannelSearchItem> { it.isVerified }.thenByDescending { it.subscriberCount })
                 .take(30)
         } catch (e: Exception) { emptyList() }
+    }
+
+    // НОВОЕ (каталог/рекомендации каналов): подборка без поискового запроса — топ
+    // по подпискам сверху экрана + группировка остальных каналов по категориям.
+    // Скрытые каналы (HIDDEN), на которые пользователь не подписан, не показываем —
+    // та же логика приватности, что и в searchChannels.
+    override suspend fun getChannelDirectory(): ChannelDirectory {
+        val uid = firebaseAuth.currentUser?.uid
+        return try {
+            val snapshot = firestore.collection("chats")
+                .whereEqualTo("type", "CHANNEL")
+                .limit(300)
+                .get().await()
+            val items = snapshot.documents.mapNotNull { doc ->
+                val accessMode = app.yodo.messenger.domain.model.ChannelAccessMode.fromRaw(doc.getString("accessMode"))
+                val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                val isSub = uid != null && uid in participantIds
+                if (accessMode == app.yodo.messenger.domain.model.ChannelAccessMode.HIDDEN && !isSub) return@mapNotNull null
+                ChannelSearchItem(
+                    chatId = doc.id,
+                    title = doc.getString("title") ?: "Без названия",
+                    description = doc.getString("description").orEmpty(),
+                    avatarBase64 = doc.getString("avatarBase64"),
+                    subscriberCount = participantIds.size,
+                    isVerified = doc.getBoolean("isVerified") ?: false,
+                    isSubscribed = isSub,
+                    category = doc.getString("category")?.trim()?.takeIf { it.isNotBlank() },
+                    accessMode = accessMode
+                )
+            }
+            // Топ-подборка: самые популярные каналы, на которые пользователь ещё не подписан
+            // (подписанные ему рекомендовать незачем), верифицированные — выше остальных.
+            val trending = items
+                .filter { !it.isSubscribed }
+                .sortedWith(compareByDescending<ChannelSearchItem> { it.isVerified }.thenByDescending { it.subscriberCount })
+                .take(10)
+            val trendingIds = trending.map { it.chatId }.toSet()
+            val byCategory = items
+                .filter { it.chatId !in trendingIds && !it.category.isNullOrBlank() }
+                .groupBy { it.category!! }
+                .map { (category, channels) ->
+                    ChannelCategorySection(
+                        category = category,
+                        channels = channels.sortedByDescending { it.subscriberCount }.take(20)
+                    )
+                }
+                .sortedByDescending { it.channels.sumOf { ch -> ch.subscriberCount } }
+            ChannelDirectory(trending = trending, byCategory = byCategory)
+        } catch (e: Exception) {
+            ChannelDirectory(trending = emptyList(), byCategory = emptyList())
+        }
+    }
+
+    // НОВОЕ (статистика для владельца): расширенная аналитика канала —
+    // рост аудитории (из subscriberEvents), охваты и вовлечённость постов
+    // (из viewCount/commentsCount каждого сообщения-поста). Доступно только
+    // владельцу/админам канала — вызывается из ChannelStatsScreen.
+    override suspend fun getChannelStats(chatId: String): ChannelStats? {
+        val uid = firebaseAuth.currentUser?.uid ?: return null
+        return try {
+            val chatDoc = firestore.collection("chats").document(chatId).get().await()
+            if (!chatDoc.exists() || chatDoc.getString("type") != "CHANNEL") return null
+            val ownerId = chatDoc.getString("createdBy")
+            val adminIds = (chatDoc.get("adminIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            if (uid != ownerId && uid !in adminIds) return null
+
+            val participantIds = (chatDoc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+
+            // Посты канала — все сообщения в его подколлекции messages (у каналов нет тем-форума,
+            // все topicId отсутствуют, поэтому без дополнительного фильтра — whereEqualTo("topicId", null)
+            // не нашёл бы документы, где поле вовсе отсутствует, а не равно null).
+            val messagesSnapshot = firestore.collection("chats").document(chatId)
+                .collection("messages")
+                .get().await()
+            val posts = messagesSnapshot.documents.filter { it.getBoolean("isDeleted") != true }
+            val postsCount = posts.size
+            val totalViews = posts.sumOf { (it.getLong("viewCount") ?: 0L).toInt() }
+            val totalComments = posts.sumOf { (it.getLong("commentsCount") ?: 0L).toInt() }
+            val avgViews = if (postsCount > 0) totalViews / postsCount else 0
+
+            val topPosts = posts
+                .sortedByDescending { (it.getLong("viewCount") ?: 0L) }
+                .take(5)
+                .map { doc ->
+                    ChannelTopPost(
+                        messageId = doc.id,
+                        previewText = (doc.getString("text").orEmpty()).ifBlank { "📎 Медиа-пост" }.take(140),
+                        timestamp = doc.getLong("timestamp") ?: 0L,
+                        viewCount = (doc.getLong("viewCount") ?: 0L).toInt(),
+                        commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt()
+                    )
+                }
+
+            // История подписок/отписок за последние 30 дней. Каналы, созданные до введения
+            // subscriberEvents, просто не имеют истории за старый период — это ожидаемо, график
+            // просто начинает накапливаться с момента выкатки этой версии.
+            val since30d = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+            val eventsSnapshot = runCatching {
+                firestore.collection("chats").document(chatId)
+                    .collection("subscriberEvents")
+                    .whereGreaterThan("subscribedAt", since30d)
+                    .get().await()
+            }.getOrNull()
+
+            val dayFormat = java.text.SimpleDateFormat("dd.MM", java.util.Locale("ru"))
+            var gained = 0
+            var lost = 0
+            val byDay = linkedMapOf<String, Int>()
+            eventsSnapshot?.documents?.forEach { doc ->
+                val ts = doc.getLong("subscribedAt") ?: return@forEach
+                val type = doc.getString("type") ?: "SUBSCRIBE"
+                val delta = if (type == "UNSUBSCRIBE") -1 else 1
+                if (delta > 0) gained++ else lost++
+                val label = dayFormat.format(java.util.Date(ts))
+                byDay[label] = (byDay[label] ?: 0) + delta
+            }
+            val history = byDay.map { (label, delta) -> ChannelSubscriberPoint(label, delta) }
+
+            ChannelStats(
+                subscriberCount = participantIds.size,
+                postsCount = postsCount,
+                totalViews = totalViews,
+                totalComments = totalComments,
+                avgViewsPerPost = avgViews,
+                subscribersGained30d = gained,
+                subscribersLost30d = lost,
+                subscriberHistory = history,
+                topPosts = topPosts
+            )
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // НОВОЕ (переработка каналов): полный профиль канала для ChannelProfileScreen.

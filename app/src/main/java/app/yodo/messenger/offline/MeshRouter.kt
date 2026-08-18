@@ -15,7 +15,7 @@ import org.json.JSONObject
  */
 
 /** Тип mesh-пакета. */
-enum class MeshPacketType { HELLO, MSG, ACK, MEDIA_META, MEDIA_CHUNK }
+enum class MeshPacketType { HELLO, MSG, ACK }
 
 /**
  * Пакет mesh-сети. Сериализуется в компактный JSON.

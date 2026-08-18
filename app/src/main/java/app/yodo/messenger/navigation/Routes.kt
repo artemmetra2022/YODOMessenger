@@ -21,6 +21,8 @@ sealed class Routes(val route: String) {
         const val ARG_EMAIL = "email"
     }
     data object ChatList : Routes("chat_list")
+    // НОВОЕ (каталог/рекомендации каналов): витрина каналов без поискового запроса.
+    data object DiscoverChannels : Routes("discover_channels")
     data object Search : Routes("search")
     data object CreateGroup : Routes("create_group")
     data object CreateChannel : Routes("create_channel")
@@ -119,6 +121,11 @@ sealed class Routes(val route: String) {
     // НОВОЕ (система ролей + журнал администраторов):
     data object ManageRoles : Routes("manage_roles/{chatId}") {
         fun createRoute(chatId: String) = "manage_roles/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
+    // НОВОЕ (статистика для владельца канала): расширенная аналитика канала.
+    data object ChannelStats : Routes("channel_stats/{chatId}") {
+        fun createRoute(chatId: String) = "channel_stats/$chatId"
         const val ARG_CHAT_ID = "chatId"
     }
     data object AdminLog : Routes("admin_log/{chatId}") {

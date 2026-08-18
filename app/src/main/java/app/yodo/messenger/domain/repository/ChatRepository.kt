@@ -44,6 +44,52 @@ data class ChannelSearchItem(
     val hasPendingJoinRequest: Boolean = false
 )
 
+// НОВОЕ (каталог/рекомендации каналов): подборка каналов по категориям для экрана
+// «Каталог каналов» — открывается из списка чатов, без необходимости вводить запрос.
+data class ChannelCategorySection(
+    val category: String,
+    val channels: List<ChannelSearchItem>
+)
+
+data class ChannelDirectory(
+    // Каналы с наибольшим числом подписчиков (топ-подборка сверху экрана).
+    val trending: List<ChannelSearchItem>,
+    // Остальные каналы, сгруппированные по категории (без категории — не включаются).
+    val byCategory: List<ChannelCategorySection>
+)
+
+// НОВОЕ (статистика для владельца): точка графика роста/убыли подписчиков за день.
+data class ChannelSubscriberPoint(
+    val dateLabel: String,
+    val delta: Int
+)
+
+// НОВОЕ (статистика для владельца): краткая карточка лучших постов канала (по охвату/комментариям).
+data class ChannelTopPost(
+    val messageId: String,
+    val previewText: String,
+    val timestamp: Long,
+    val viewCount: Int,
+    val commentsCount: Int
+)
+
+// НОВОЕ (статистика для владельца): расширенная аналитика канала — в отличие от
+// общей ChatStatsScreen (любой чат), здесь акцент именно на метриках канала как
+// медиаресурса (рост аудитории, охват и вовлечённость постов).
+data class ChannelStats(
+    val subscriberCount: Int,
+    val postsCount: Int,
+    val totalViews: Int,
+    val totalComments: Int,
+    // Среднее число просмотров на пост — ключевая метрика «охвата».
+    val avgViewsPerPost: Int,
+    // Самые активные за последние 30 дней (чистый прирост за период).
+    val subscribersGained30d: Int,
+    val subscribersLost30d: Int,
+    val subscriberHistory: List<ChannelSubscriberPoint>,
+    val topPosts: List<ChannelTopPost>
+)
+
 data class ChatInfo(
     val title: String,
     val otherUserId: String?,
@@ -145,6 +191,14 @@ interface ChatRepository {
     // НОВОЕ (переработка каналов):
     /** Поиск каналов по префиксу названия (без учёта регистра). */
     suspend fun searchChannels(query: String): List<ChannelSearchItem>
+    // НОВОЕ (каталог/рекомендации каналов): подборка без поискового запроса —
+    // топ по подписчикам + группировка по категориям, для отдельного экрана каталога.
+    // НОВОЕ (каталог/рекомендации каналов): подборка без поискового запроса —
+    // топ по подписчикам + группировка остальных каналов по категориям, для отдельного экрана каталога.
+    suspend fun getChannelDirectory(): ChannelDirectory
+    // НОВОЕ (статистика для владельца): расширенная аналитика канала — рост аудитории,
+    // охват и вовлечённость постов, топ постов. Доступно только владельцу/админам.
+    suspend fun getChannelStats(chatId: String): ChannelStats?
     /** Полный профиль канала (экран ChannelProfileScreen). */
     suspend fun getChannelProfile(chatId: String): ChannelProfile?
     /** Обновление названия и описания канала (владелец/админ). */
