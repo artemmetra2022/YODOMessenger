@@ -152,7 +152,7 @@ fun GroupInfoScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                androidx.compose.material.icons.Icons.AutoMirrored.Filled.Forum,
+                                androidx.compose.material.icons.Icons.Filled.Forum,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
