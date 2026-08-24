@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -152,7 +153,7 @@ fun GroupInfoScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                androidx.compose.material.icons.Icons.AutoMirrored.Filled.Forum,
+                                Icons.Filled.Forum,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
