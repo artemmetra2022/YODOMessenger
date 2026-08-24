@@ -2,6 +2,21 @@ package app.yodo.messenger.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
+object TelegramColors {
+    val lightOutgoing = Color(0xFFEEFFDE)
+    val lightIncoming = Color(0xFFFFFFFF)
+    val lightOutgoingTime = Color(0xFF66847C)
+    val lightIncomingTime = Color(0xFF8A8A8A)
+    val lightOutgoingLink = Color(0xFF2F8243)
+    val lightIncomingLink = Color(0xFF2478C7)
+    val lightBackground = Color(0xFFFFFFFF)
+    val darkOutgoing = Color(0xFF2B5278)
+    val darkIncoming = Color(0xFF182533)
+    val darkOutgoingTime = Color(0xFF82A6C8)
+    val darkIncomingTime = Color(0xFF6D7D8E)
+    val darkBackground = Color(0xFF0E1621)
+}
+
 enum class ColorThemeName(val displayName: String) {
     BLUE("Синяя"), GREEN("Зелёная"), RED("Красная"), PURPLE("Фиолетовая"),
     ORANGE("Оранжевая"), PINK("Розовая"), TEAL("Бирюзовая"), BEIGE("Бежевая"),

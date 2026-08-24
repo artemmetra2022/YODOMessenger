@@ -29,9 +29,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -155,12 +157,15 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -172,6 +177,7 @@ import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.components.swipeToGoBack
 import app.yodo.messenger.ui.theme.LocalColorTheme
+import app.yodo.messenger.ui.theme.TelegramColors
 import app.yodo.messenger.util.AudioUtils
 import app.yodo.messenger.util.ChatImageQuality
 import app.yodo.messenger.util.ChatScreenshotUtils
@@ -408,6 +414,10 @@ fun ChatScreen(
     // НОВОЕ (FAQ-бот поддержки): бот показывается только пользователю, не оператору,
     // который отвечает в этом же чате из своего аккаунта поддержки.
     val isSupportAdmin = viewModel.isSupportAdmin
+
+    val isDarkTheme = isSystemInDarkTheme()
+    val telegramBackground = if (isDarkTheme) TelegramColors.darkBackground else TelegramColors.lightBackground
+    val telegramBar = if (isDarkTheme) Color(0xFF17212B) else Color.White
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -662,7 +672,14 @@ fun ChatScreen(
                                 )
                             }
                         }
-                    }
+                    },
+                    colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                        containerColor = telegramBar,
+                        scrolledContainerColor = telegramBar,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                    )
                 )
                 if (uiState.disappearingTtlSeconds != null) {
                     // ИСПРАВЛЕНО (AH): индикатор таймера в прямоугольнике со скруглёнными углами.
@@ -1193,7 +1210,21 @@ fun ChatScreen(
                 }
                 .then(
                     if (chatBackgroundType != app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE) {
-                        Modifier.background(chatBackgroundBrush(chatBackgroundType, colorTheme))
+                        Modifier
+                            .background(telegramBackground)
+                            .drawBehind {
+                                val patternColor = if (isDarkTheme) Color.White.copy(alpha = 0.018f) else Color(0xFF2F8243).copy(alpha = 0.035f)
+                                val step = 96.dp.toPx()
+                                var x = step / 2f
+                                while (x < size.width) {
+                                    var y = step / 2f
+                                    while (y < size.height) {
+                                        drawCircle(patternColor, radius = 1.5.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                                        y += step
+                                    }
+                                    x += step
+                                }
+                            }
                     } else Modifier
                 )
                 .swipeToGoBack(onBack = onBackClick)
@@ -1227,10 +1258,10 @@ fun ChatScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     var previousDateLabel: String? = null
-                    displayedMessages.forEach { message ->
+                    displayedMessages.forEachIndexed { messageIndex, message ->
                         val dateLabel = formatDateSeparator(message.timestamp)
                         if (dateLabel != previousDateLabel) {
                             item(key = "date_${message.id}") {
@@ -1239,7 +1270,9 @@ fun ChatScreen(
                             previousDateLabel = dateLabel
                         }
                         item(key = message.id) {
-                            // НОВОЕ (F3): отмечаем просмотр поста канала при появлени�� на экране.
+                            val groupPosition = messageGroupPosition(displayedMessages, messageIndex)
+                            val spacing = messageItemSpacing(displayedMessages, messageIndex)
+                            Spacer(modifier = Modifier.height(spacing.dp))
                             if (isChannel && !uiState.isOfficialChannel) {
                                 LaunchedEffect(message.id) { viewModel.registerPostView(message.id) }
                             }
@@ -1251,6 +1284,12 @@ fun ChatScreen(
                                 colorTheme = colorTheme,
                                 isChannel = isChannel,
                                 isOfficialChannel = uiState.isOfficialChannel,
+                                groupPosition = groupPosition,
+                                showAvatar = !message.senderId.equals(viewModel.currentUserId) &&
+                                    (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST),
+                                avatarName = uiState.chatTitle,
+                                avatarPhotoUrl = uiState.otherUserPhotoUrl,
+                                avatarBase64 = uiState.otherUserAvatarBase64,
                                 onCommentsClick = { onOpenComments(chatId, message.id) },
                                 onReply = { viewModel.setReplyingTo(message) },
                                 onEdit = { viewModel.setEditingMessage(message) },
@@ -1262,22 +1301,11 @@ fun ChatScreen(
                                 onSaveToFavorite = { viewModel.saveToFavorite(message) },
                                 onVotePoll = { optionIndex -> viewModel.voteOnPoll(message.id, optionIndex) },
                                 onClosePoll = { viewModel.closePoll(message.id) },
-                                onImageClick = { base64 ->
-                                    onOpenImageViewer(base64, uiState.chatTitle, message.timestamp)
-                                },
-                                // НОВОЕ (одноразовые медиа): открываем фото в оверлее ПОВЕРХ
-                                // чата (не через onOpenImageViewer/н��������вигацию — там есть общий
-                                // держатель картинки и повторные открытия), и только для чужих
-                                // сообщений своей же отправки не помечаем "открыто", т.к. это
-                                // сделает получатель на своём устройстве.
-                                onViewOnceClick = { msg ->
-                                    if (msg.imageBase64 != null) viewOnceOverlayMessage = msg
-                                },
+                                onImageClick = { base64 -> onOpenImageViewer(base64, uiState.chatTitle, message.timestamp) },
+                                onViewOnceClick = { msg -> if (msg.imageBase64 != null) viewOnceOverlayMessage = msg },
                                 onReplyQuoteClick = { targetMessageId ->
                                     val targetIndex = displayedMessages.indexOfFirst { it.id == targetMessageId }
-                                    if (targetIndex >= 0) {
-                                        coroutineScope.launch { listState.animateScrollToItem(targetIndex) }
-                                    }
+                                    if (targetIndex >= 0) coroutineScope.launch { listState.animateScrollToItem(targetIndex) }
                                 },
                                 onForwardedSenderClick = { senderId -> onOpenUserProfile(senderId) },
                                 onSwipeBack = onBackClick
@@ -1540,7 +1568,12 @@ private fun SwipeableMessageBubble(
     onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit,
-    onSwipeBack: () -> Unit
+    onSwipeBack: () -> Unit,
+    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
+    showAvatar: Boolean = false,
+    avatarName: String = "",
+    avatarPhotoUrl: String? = null,
+    avatarBase64: String? = null
 ) {
     var offsetX by remember { mutableFloatStateOf(0f) }
     val dpPerCm = 160f / 2.54f
@@ -1604,7 +1637,12 @@ private fun SwipeableMessageBubble(
                 onClosePoll = onClosePoll,
                 onImageClick = onImageClick, onViewOnceClick = onViewOnceClick,
                 onReplyQuoteClick = onReplyQuoteClick,
-                onForwardedSenderClick = onForwardedSenderClick
+                onForwardedSenderClick = onForwardedSenderClick,
+                groupPosition = groupPosition,
+                showAvatar = showAvatar,
+                avatarName = avatarName,
+                avatarPhotoUrl = avatarPhotoUrl,
+                avatarBase64 = avatarBase64
             )
         }
     }
@@ -1633,11 +1671,26 @@ private fun MessageBubble(
     onImageClick: (String) -> Unit,
     onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
-    onForwardedSenderClick: (String) -> Unit
+    onForwardedSenderClick: (String) -> Unit,
+    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
+    showAvatar: Boolean = false,
+    avatarName: String = "",
+    avatarPhotoUrl: String? = null,
+    avatarBase64: String? = null
 ) {
-    val bubbleColor = if (isOwnMessage) colorTheme.bubbleOwn else colorTheme.bubbleOther
-    val textColor = if (isOwnMessage) colorTheme.bubbleOwnText else colorTheme.bubbleOtherText
+    val bubbleColor = if (isOwnMessage) {
+        if (isSystemInDarkTheme()) TelegramColors.darkOutgoing else TelegramColors.lightOutgoing
+    } else {
+        if (isSystemInDarkTheme()) TelegramColors.darkIncoming else TelegramColors.lightIncoming
+    }
+    val textColor = if (isSystemInDarkTheme()) Color.White else Color(0xFF17212B)
+    val timeColor = if (isOwnMessage) {
+        if (isSystemInDarkTheme()) TelegramColors.darkOutgoingTime else TelegramColors.lightOutgoingTime
+    } else {
+        if (isSystemInDarkTheme()) TelegramColors.darkIncomingTime else TelegramColors.lightIncomingTime
+    }
     val alignment = if (isOwnMessage) Alignment.CenterEnd else Alignment.CenterStart
+    val bubbleShape = telegramBubbleShape(isOwnMessage, groupPosition)
     val clipboardManager = LocalClipboardManager.current
     var showMenu by remember { mutableStateOf(false) }
     var revealImage by remember { mutableStateOf(autoDownloadImages) }
@@ -1648,7 +1701,21 @@ private fun MessageBubble(
         return
     }
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Column(horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            if (!isOwnMessage) {
+                if (showAvatar) {
+                    UserAvatar(
+                        displayName = avatarName,
+                        photoUrl = avatarPhotoUrl,
+                        avatarBase64 = avatarBase64,
+                        size = 40.dp,
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.width(46.dp))
+                }
+            }
+            Column(horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start) {
             if (message.isPinned) {
                 Row(modifier = Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", tint = colorTheme.primary, modifier = Modifier.size(12.dp))
@@ -1661,18 +1728,15 @@ private fun MessageBubble(
                         .widthIn(max = 280.dp)
                         .shadow(
                             elevation = 1.dp,
-                            shape = RoundedCornerShape(
-                                topStart = 16.dp, topEnd = 16.dp,
-                                bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                                bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                            )
+                            shape = bubbleShape,
+                            ambientColor = Color.Black.copy(alpha = 0.06f),
+                            spotColor = Color.Black.copy(alpha = 0.06f)
                         )
-                        .clip(RoundedCornerShape(
-                            topStart = 16.dp, topEnd = 16.dp,
-                            bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                            bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                        ))
+                        .clip(bubbleShape)
                         .background(bubbleColor)
+                        .then(if (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST) {
+                            Modifier.drawBehind { drawTelegramTail(bubbleColor, isOwnMessage) }
+                        } else Modifier)
                         .combinedClickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -1702,7 +1766,13 @@ private fun MessageBubble(
                         Column(
                             modifier = Modifier.fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 4.dp)
-                                .background(textColor.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                .drawBehind {
+                                    drawRect(
+                                        color = if (message.replyToSenderName == "Вы") TelegramColors.lightOutgoingLink else TelegramColors.lightIncomingLink,
+                                        size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height)
+                                    )
+                                }
                                 .clickable(enabled = message.replyToMessageId != null) {
                                     message.replyToMessageId?.let { onReplyQuoteClick(it) }
                                 }
@@ -1857,9 +1927,21 @@ private fun MessageBubble(
                         val isLongPost = newsBody.length >= 220 || newsBody.count { it == '\n' } >= 4
                         val displayBody = if (isLongPost) truncatePostPreview(newsBody) else newsBody
                         SelectionContainer {
+                            val inlineText = buildAnnotatedString {
+                                append(displayBody)
+                                append("  ")
+                                pushStyle(SpanStyle(color = timeColor, fontSize = 11.sp))
+                                append(formatMessageTime(message.timestamp))
+                                if (isOwnMessage) {
+                                    append("  ")
+                                    append(if (message.status == MessageStatus.READ) "✓✓" else "✓")
+                                }
+                                pop()
+                            }
                             Text(
-                                text = displayBody, color = textColor,
-                                style = MaterialTheme.typography.bodyLarge,
+                                text = inlineText,
+                                color = textColor,
+                                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 20.sp),
                                 modifier = Modifier.padding(horizontal = 12.dp)
                                     .padding(top = if (message.replyToText != null || message.imageBase64 != null) 4.dp else 8.dp)
                             )
@@ -1924,7 +2006,14 @@ private fun MessageBubble(
                                 modifier = Modifier.size(12.dp).padding(end = 3.dp)
                             )
                         }
-                        Text(formatMessageTime(message.timestamp), color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                        if (message.text.isBlank()) {
+                            Text(
+                                formatMessageTime(message.timestamp),
+                                color = timeColor,
+                                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
                         // НОВОЕ: число просмотров канала теперь рядом со временем.
                         if (isChannel && !isOfficialChannel) {
                             Spacer(modifier = Modifier.width(6.dp))
@@ -1935,7 +2024,7 @@ private fun MessageBubble(
                             )
                             Text("${message.viewCount}", color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
                         }
-                        if (isOwnMessage) {
+                        if (isOwnMessage && message.text.isBlank()) {
                             val statusIcon = if (message.status == MessageStatus.READ) Icons.Filled.DoneAll else Icons.Filled.Done
                             Icon(
                                 imageVector = statusIcon,
@@ -1946,7 +2035,9 @@ private fun MessageBubble(
                         }
                     }
                 }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            }
+        }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     // НОВОЕ (лента новостей): в оф.канале нет реакций.
                     if (!isOfficialChannel) {
                         Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -2403,8 +2494,8 @@ private fun MessageInputBar(
     val canSend = !isSending && text.isNotBlank()
     var showEmojiPicker by remember { mutableStateOf(false) }
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 6.dp
+        color = Color.Transparent,
+        shadowElevation = 0.dp
     ) {
         Column {
             if (showEmojiPicker) {
@@ -2440,7 +2531,7 @@ private fun MessageInputBar(
                     Icon(Icons.Filled.AttachFile, contentDescription = "Прикрепить фото", tint = colorTheme.primary, modifier = Modifier.size(24.dp))
                 }
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (isSystemInDarkTheme()) TelegramColors.darkIncoming else Color(0xFFF0F0F0),
                     shape = RoundedCornerShape(22.dp),
                     modifier = Modifier.weight(1f).heightIn(min = 42.dp)
                 ) {
