@@ -27,15 +27,18 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -87,6 +90,7 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
@@ -225,6 +229,7 @@ fun ChatScreen(
     val autoDownloadImages by viewModel.autoDownloadImages.collectAsState()
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
     val hideKeyboardOnSend by viewModel.hideKeyboardOnSend.collectAsState()
+    val hideKeyboardOnScroll by viewModel.hideKeyboardOnScroll.collectAsState()
     val chatBackgroundType by viewModel.chatBackgroundType.collectAsState()
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
@@ -236,8 +241,10 @@ fun ChatScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-
+    val selectedMessageIds = remember { mutableStateOf<Set<String>>(emptySet()) }
+    var infoMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
+    val quickReaction = viewModel.quickReaction.collectAsState().value
+    val isSelectionMode = selectedMessageIds.value.isNotEmpty()
     var showScheduledList by remember { mutableStateOf(false) }
     // НОВОЕ: диалог «Быстрые ответы» (шаблоны из «Фишки и инструменты»).
     var showQuickReplies by remember { mutableStateOf(false) }
@@ -284,11 +291,15 @@ fun ChatScreen(
             val asViewOnce = pendingImageIsViewOnce
             pendingImageIsViewOnce = false
             coroutineScope.launch {
+                isProcessingMedia = true
                 val base64 = withContext(Dispatchers.Default) {
                     ImageUtils.compressChatImageToBase64(context, it, selectedImageQuality)
                 }
-                if (base64 != null) viewModel.sendImage(base64, isViewOnce = asViewOnce)
-                else snackbarHostState.showSnackbar("Не удалось обработать фото")
+                isProcessingMedia = false
+                if (base64 != null) {
+                    if (asViewOnce) viewModel.sendImage(base64, isViewOnce = true)
+                    else pendingCaptionImageBase64 = base64
+                } else snackbarHostState.showSnackbar("Не удалось обработать фото")
             }
         }
     }
@@ -300,13 +311,15 @@ fun ChatScreen(
     ) { uris: List<Uri> ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         coroutineScope.launch {
+            isProcessingMedia = true
             val encoded = withContext(Dispatchers.Default) {
                 uris.mapNotNull { ImageUtils.compressChatImageToBase64(context, it, selectedImageQuality) }
             }
+            isProcessingMedia = false
             when {
                 encoded.isEmpty() -> snackbarHostState.showSnackbar("Не удалось обработать фото")
-                encoded.size == 1 -> viewModel.sendImage(encoded.first())
-                else -> viewModel.sendImages(encoded)
+                encoded.size == 1 -> pendingCaptionImageBase64 = encoded.first()
+                else -> pendingCaptionImagesBase64 = encoded
             }
         }
     }
@@ -316,9 +329,11 @@ fun ChatScreen(
     ) { uri: Uri? ->
         uri?.let {
             coroutineScope.launch {
+                isProcessingMedia = true
                 val result = withContext(Dispatchers.Default) {
                     FileUtils.prepareFileForSending(context, it)
                 }
+                isProcessingMedia = false
                 when (result) {
                     is FileUtils.PickResult.Success -> viewModel.sendFile(
                         result.file.base64, result.file.fileName, result.file.mimeType, result.file.sizeBytes
@@ -338,6 +353,8 @@ fun ChatScreen(
     // НОВОЕ (кар��и��ки и�� буфера + подпись): base64 картинки, ожидаю��ей подписью
     // и подтверждения отправки (не моментальная отправка).
     var pendingCaptionImageBase64 by remember { mutableStateOf<String?>(null) }
+    var pendingCaptionImagesBase64 by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isProcessingMedia by remember { mutableStateOf(false) }
 
     // НОВОЕ (картинки из буф����ра): читаем изображение из системного буфера обмена.
     fun pasteImageFromClipboard() {
@@ -410,6 +427,7 @@ fun ChatScreen(
     } else {
         uiState.messages
     }
+    val selectedMessages = displayedMessages.filter { it.id in selectedMessageIds.value }
     val isChannel = uiState.chatType == "CHANNEL"
     // НОВОЕ (FAQ-бот поддержки): бот показывается только пользователю, не оператору,
     // который отвечает в этом же чате из своего аккаунта поддержки.
@@ -424,6 +442,28 @@ fun ChatScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {
+                if (isSelectionMode) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { selectedMessageIds.value = emptySet() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Отменить выбор")
+                        }
+                        Text("Выбрано: ${selectedMessages.size}", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        IconButton(
+                            onClick = { viewModel.deleteMessages(selectedMessages); selectedMessageIds.value = emptySet() },
+                            enabled = selectedMessages.any { it.senderId == viewModel.currentUserId }
+                        ) { Icon(Icons.Filled.Delete, contentDescription = "Удалить выбранные") }
+                        IconButton(
+                            onClick = {
+                                selectedMessages.forEach { viewModel.togglePinMessage(it.id) }
+                                selectedMessageIds.value = emptySet()
+                            }
+                        ) { Icon(Icons.Filled.PushPin, contentDescription = "Закрепить выбранные") }
+                    }
+                }
+
                 TopAppBar(
                     title = {
                         if (uiState.isSearchActive) {
@@ -1171,6 +1211,16 @@ fun ChatScreen(
                             }
                         )
                     }
+                    pendingCaptionImagesBase64.takeIf { it.isNotEmpty() }?.let { images ->
+                        ImageAlbumCaptionDialog(
+                            imagesBase64 = images,
+                            onDismiss = { pendingCaptionImagesBase64 = emptyList() },
+                            onSend = { caption ->
+                                viewModel.sendImages(images, caption = caption)
+                                pendingCaptionImagesBase64 = emptyList()
+                            }
+                        )
+                    }
                     if (showLocationPicker) {
                         LocationPickerDialog(
                             onDismiss = { showLocationPicker = false },
@@ -1241,6 +1291,22 @@ fun ChatScreen(
                         .background(MaterialTheme.colorScheme.background)
                 )
             }
+            if (isProcessingMedia) {
+                Surface(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        Text("Подготавливаем медиа...", modifier = Modifier.padding(start = 12.dp))
+                    }
+                }
+            }
             if (displayedMessages.isEmpty()) {
                 val emptyText = when {
                     isChannel -> "Здесь пока ничего нет"
@@ -1256,7 +1322,18 @@ fun ChatScreen(
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(hideKeyboardOnScroll) {
+                            if (hideKeyboardOnScroll) {
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (kotlin.math.abs(dragAmount) > 2f) {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                    }
+                                }
+                            }
+                        },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
@@ -1290,7 +1367,15 @@ fun ChatScreen(
                                 avatarName = uiState.chatTitle,
                                 avatarPhotoUrl = uiState.otherUserPhotoUrl,
                                 avatarBase64 = uiState.otherUserAvatarBase64,
-                                onCommentsClick = { onOpenComments(chatId, message.id) },
+                                authorName = if (uiState.chatType == "GROUP" || uiState.chatType == "CHANNEL") uiState.authorNames[message.senderId] else null,
+                                onSelectionToggle = { selected ->
+                                    selectedMessageIds.value = selectedMessageIds.value.toMutableSet().let { ids ->
+                                        if (!ids.add(selected.id)) ids.remove(selected.id)
+                                        ids
+                                    }
+                                },
+                                onTripleTap = { selected -> viewModel.toggleReaction(selected.id, quickReaction) },
+                                onInfoClick = { infoMessage = it },
                                 onReply = { viewModel.setReplyingTo(message) },
                                 onEdit = { viewModel.setEditingMessage(message) },
                                 onDelete = { viewModel.deleteMessage(message) },
@@ -1317,7 +1402,14 @@ fun ChatScreen(
         }
     }
 
-    // НОВОЕ (систе��а жалоб, п.5 ТЗ): диалог подачи жалобы на сообщение.
+    infoMessage?.let { message ->
+        MessageInfoDialog(
+            message = message,
+            authorName = uiState.authorNames[message.senderId],
+            onDismiss = { infoMessage = null }
+        )
+    }
+
     reportTargetMessage?.let { message ->
         ReportDialog(
             chatId = chatId,
@@ -1568,12 +1660,16 @@ private fun SwipeableMessageBubble(
     onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit,
+    onSelectionToggle: (Message) -> Unit = {},
+    onTripleTap: (Message) -> Unit = {},
+    onInfoClick: (Message) -> Unit = {},
     onSwipeBack: () -> Unit,
     groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
     showAvatar: Boolean = false,
     avatarName: String = "",
     avatarPhotoUrl: String? = null,
-    avatarBase64: String? = null
+    avatarBase64: String? = null,
+    authorName: String? = null
 ) {
     var offsetX by remember { mutableFloatStateOf(0f) }
     val dpPerCm = 160f / 2.54f
@@ -1638,11 +1734,15 @@ private fun SwipeableMessageBubble(
                 onImageClick = onImageClick, onViewOnceClick = onViewOnceClick,
                 onReplyQuoteClick = onReplyQuoteClick,
                 onForwardedSenderClick = onForwardedSenderClick,
+                onSelectionToggle = onSelectionToggle,
+                onTripleTap = onTripleTap,
+                onInfoClick = onInfoClick,
                 groupPosition = groupPosition,
                 showAvatar = showAvatar,
                 avatarName = avatarName,
                 avatarPhotoUrl = avatarPhotoUrl,
-                avatarBase64 = avatarBase64
+                avatarBase64 = avatarBase64,
+                authorName = authorName
             )
         }
     }
@@ -1657,6 +1757,7 @@ private fun MessageBubble(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
     isOfficialChannel: Boolean = false,
+    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
     onCommentsClick: () -> Unit,
     onReply: () -> Unit,
     onEdit: () -> Unit,
@@ -1672,11 +1773,14 @@ private fun MessageBubble(
     onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
     onForwardedSenderClick: (String) -> Unit,
-    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
+    onSelectionToggle: (Message) -> Unit = {},
+    onTripleTap: (Message) -> Unit = {},
+    onInfoClick: (Message) -> Unit = {},
     showAvatar: Boolean = false,
     avatarName: String = "",
     avatarPhotoUrl: String? = null,
-    avatarBase64: String? = null
+    avatarBase64: String? = null,
+    authorName: String? = null
 ) {
     val bubbleColor = if (isOwnMessage) {
         if (isSystemInDarkTheme()) TelegramColors.darkOutgoing else TelegramColors.lightOutgoing
@@ -1692,7 +1796,19 @@ private fun MessageBubble(
     val alignment = if (isOwnMessage) Alignment.CenterEnd else Alignment.CenterStart
     val bubbleShape = telegramBubbleShape(isOwnMessage, groupPosition)
     val clipboardManager = LocalClipboardManager.current
+    val sendAppearance = remember(message.id) { Animatable(if (isOwnMessage) 0.86f else 1f) }
+    LaunchedEffect(message.id) {
+        if (isOwnMessage) sendAppearance.animateTo(1f, animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f))
+    }
     var showMenu by remember { mutableStateOf(false) }
+    var tapCount by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tapCount) {
+        if (tapCount > 0) {
+            kotlinx.coroutines.delay(450)
+            tapCount = 0
+        }
+    }
+    var showReactionPicker by remember { mutableStateOf(false) }
     var revealImage by remember { mutableStateOf(autoDownloadImages) }
     if (message.isDeleted) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
@@ -1701,7 +1817,14 @@ private fun MessageBubble(
         return
     }
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Row(verticalAlignment = Alignment.Bottom) {
+        Row(
+            modifier = Modifier.graphicsLayer {
+                scaleX = sendAppearance.value
+                scaleY = sendAppearance.value
+                alpha = sendAppearance.value
+            },
+            verticalAlignment = Alignment.Bottom
+        ) {
             if (!isOwnMessage) {
                 if (showAvatar) {
                     UserAvatar(
@@ -1722,10 +1845,10 @@ private fun MessageBubble(
                     Text("Закреплено", style = MaterialTheme.typography.labelSmall, color = colorTheme.primary)
                 }
             }
-            Box {
+            BoxWithConstraints {
                 Column(
                     modifier = Modifier
-                        .widthIn(max = 280.dp)
+                        .widthIn(max = maxWidth * 0.78f)
                         .shadow(
                             elevation = 1.dp,
                             shape = bubbleShape,
@@ -1737,21 +1860,45 @@ private fun MessageBubble(
                         .then(if (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST) {
                             Modifier.drawBehind { drawTelegramTail(bubbleColor, isOwnMessage) }
                         } else Modifier)
-                        .combinedClickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {},
-                            onLongClick = { showMenu = true }
-                        )
+                        .pointerInput(message.id) {
+                            detectTapGestures(
+                                onLongPress = { showMenu = true },
+                                onTap = {
+                                    tapCount += 1
+                                    if (tapCount == 3) {
+                                        onTripleTap(message)
+                                        tapCount = 0
+                                    }
+                                }
+                            )
+                        }
                 ) {
+                    if (!authorName.isNullOrBlank() && !isOwnMessage) {
+                        Text(
+                            text = authorName,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = stableAuthorColor(message.senderId),
+                            modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp)
+                        )
+                    }
                     message.forwardedFromSenderName?.let {
                         val senderId = message.forwardedFromSenderId
-                        Text(
-                            "Переслано от $it", style = MaterialTheme.typography.labelMedium,
-                            color = textColor.copy(alpha = 0.75f), fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .padding(start = 12.dp, top = 8.dp, end = 12.dp)
-                                .then(
+                        Row(
+                            modifier = Modifier.padding(start = 10.dp, top = 8.dp, end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            UserAvatar(
+                                displayName = it,
+                                photoUrl = message.forwardedFromSenderPhotoUrl,
+                                avatarBase64 = message.forwardedFromSenderAvatarBase64,
+                                size = 24.dp,
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                            Text(
+                                "Переслано от $it", style = MaterialTheme.typography.labelMedium,
+                                color = textColor.copy(alpha = 0.75f), fontWeight = FontWeight.Bold,
+                                modifier = Modifier.then(
                                     if (senderId != null) {
                                         Modifier.clickable(
                                             interactionSource = remember { MutableInteractionSource() },
@@ -1760,7 +1907,8 @@ private fun MessageBubble(
                                         )
                                     } else Modifier
                                 )
-                        )
+                            )
+                        }
                     }
                     message.replyToText?.let { replyText ->
                         Column(
@@ -2037,18 +2185,49 @@ private fun MessageBubble(
                 }
             }
         }
+        if (showReactionPicker && !isOfficialChannel) {
+            Surface(
+                modifier = Modifier.align(alignment),
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = 8.dp
+            ) {
+                ReactionPickerPanel(
+                    reactions = QUICK_REACTIONS,
+                    selectedReactions = message.reactions.filterValues { currentUserId in it }.keys,
+                    onReactionSelected = { emoji ->
+                        onReact(emoji)
+                        showReactionPicker = false
+                    },
+                    onDismiss = { showReactionPicker = false }
+                )
+            }
+        }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    // НОВОЕ (лента новостей): в оф.канале нет реакций.
                     if (!isOfficialChannel) {
-                        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            QUICK_REACTIONS.forEach { emoji ->
-                                Text(emoji, fontSize = MaterialTheme.typography.headlineSmall.fontSize,
-                                    modifier = Modifier.clickable { onReact(emoji); showMenu = false }.padding(6.dp))
-                            }
-                        }
-                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Добавить реакцию") },
+                            leadingIcon = { Icon(Icons.Filled.EmojiEmotions, contentDescription = null) },
+                            onClick = { showMenu = false; showReactionPicker = true }
+                        )
                     }
-                    DropdownMenuItem(text = { Text("Ответить") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null) }, onClick = { showMenu = false; onReply() })
+                    if (!isOfficialChannel) {
+                        DropdownMenuItem(
+                            text = { Text("Выбрать") },
+                            leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
+                            onClick = { showMenu = false; onSelectionToggle(message) }
+                        )
+                    }
+                    if (!isOfficialChannel) {
+                        DropdownMenuItem(
+                            text = { Text("Информация о сообщении") },
+                            leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                            onClick = { showMenu = false; onInfoClick(message) }
+                        )
+                    }
+                    DropdownMenuItem(text = { Text("Ответить") },
+
+ leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null) }, onClick = { showMenu = false; onReply() })
                     if (isChannel && !isOfficialChannel) {
                         DropdownMenuItem(
                             text = { Text("Комментарии") },
@@ -2121,9 +2300,14 @@ private fun MessageBubble(
                                         scaleY = animatedScale
                                     }
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(
+                    .background(
                                         if (reactedByMe) colorTheme.primary.copy(alpha = 0.25f)
                                         else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .border(
+                                        width = if (reactedByMe) 1.dp else 0.dp,
+                                        color = if (reactedByMe) colorTheme.primary else Color.Transparent,
+                                        shape = RoundedCornerShape(12.dp)
                                     )
                                     .clickable { onReact(emoji) }
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
@@ -2367,6 +2551,42 @@ private fun NewsFullscreenDialog(
 }
 
 @Composable
+private fun stableAuthorColor(senderId: String): Color {
+    val colors = listOf(Color(0xFFE57373), Color(0xFF64B5F6), Color(0xFF81C784), Color(0xFFFFB74D), Color(0xFFBA68C8), Color(0xFF4DB6AC))
+    return colors[(senderId.hashCode() and Int.MAX_VALUE) % colors.size]
+}
+
+@Composable
+private fun MessageInfoDialog(message: Message, authorName: String?, onDismiss: () -> Unit) {
+    val rows = buildList {
+        add("ID сообщения" to message.id)
+        add("ID чата" to message.chatId)
+        add("Автор" to (authorName ?: message.senderId))
+        add("Время" to formatMessageTime(message.timestamp))
+        add("Статус" to message.status.name)
+        if (message.isEdited) add("Изменено" to "Да")
+        if (message.isPinned) add("Закреплено" to "Да")
+        if (message.replyToMessageId != null) add("Ответ на" to message.replyToMessageId)
+        if (message.forwardedFromSenderName != null) add("Переслано от" to message.forwardedFromSenderName)
+        if (message.imageBase64 != null || message.imagesBase64.isNotEmpty()) add("Тип" to "Изображение")
+        if (message.voiceBase64 != null) add("Тип" to "Голосовое сообщение")
+        if (message.fileName != null) add("Файл" to message.fileName)
+        if (message.fileSizeBytes != null) add("Размер файла" to FileUtils.formatSize(message.fileSizeBytes))
+        if (message.fileMimeType != null) add("MIME" to message.fileMimeType)
+        if (message.locationLat != null) add("Геопозиция" to "${message.locationLat}, ${message.locationLng}")
+        if (message.commentsCount > 0) add("Комментарии" to message.commentsCount.toString())
+        if (message.viewCount > 0) add("Просмотры" to message.viewCount.toString())
+        if (message.reactions.isNotEmpty()) add("Реакции" to message.reactions.entries.joinToString { "${it.key}: ${it.value.size}" })
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Информация о сообщении") },
+        text = { LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) { items(rows) { (key, value) -> Text("$key: $value", modifier = Modifier.padding(vertical = 4.dp)) } } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } }
+    )
+}
+
+@Composable
 private fun EditPreviewBar(message: Message, onCancel: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -2378,6 +2598,54 @@ private fun EditPreviewBar(message: Message, onCancel: () -> Unit) {
             Text(message.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
         }
         IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, contentDescription = "Отменить") }
+    }
+}
+
+@Composable
+private fun ReactionPickerPanel(
+    reactions: List<String>,
+    selectedReactions: Set<String>,
+    onReactionSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(modifier = Modifier.padding(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Реакции", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = "Закрыть")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            reactions.forEach { emoji ->
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (emoji in selectedReactions) LocalColorTheme.current.primary.copy(alpha = 0.2f)
+                            else Color.Transparent
+                        )
+                        .border(
+                            width = if (emoji in selectedReactions) 1.dp else 0.dp,
+                            color = if (emoji in selectedReactions) LocalColorTheme.current.primary else Color.Transparent,
+                            shape = CircleShape
+                        )
+                        .clickable { onReactionSelected(emoji) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(emoji, fontSize = 22.sp)
+                }
+            }
+        }
+        Text(
+            "Нажмите выбранную реакцию ещё раз, чтобы убрать её",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+        )
     }
 }
 
@@ -3727,6 +3995,52 @@ private fun ImageCaptionDialog(
                 ) {
                     TextButton(onClick = onDismiss) { Text("Отмена") }
                     Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onSend(caption.trim()) }) { Text("Отправить") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageAlbumCaptionDialog(
+    imagesBase64: List<String>,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var caption by remember { mutableStateOf("") }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Отправить альбом (${imagesBase64.size})", style = MaterialTheme.typography.titleMedium)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    gridItems(imagesBase64) { base64 ->
+                        Image(
+                            bitmap = ImageUtils.decodeBase64ToBitmap(base64)?.asImageBitmap() ?: return@gridItems,
+                            contentDescription = "Превью",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp))
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = caption,
+                    onValueChange = { caption = it },
+                    placeholder = { Text("Подпись (необязательно)…") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    maxLines = 3
+                )
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Отмена") }
                     Button(onClick = { onSend(caption.trim()) }) { Text("Отправить") }
                 }
             }
