@@ -1,0 +1,405 @@
+package app.yodo.messenger.data.local
+
+import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import app.yodo.messenger.domain.model.ChatFolder
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import javax.inject.Inject
+import javax.inject.Singleton
+
+private val Context.settingsDataStore by preferencesDataStore(name = "yodo_user_settings")
+
+enum class FontSize(val scale: Float, val displayName: String) {
+    EXTRA_SMALL(0.8f, "XS"),
+    SMALL(0.9f, "S"),
+    MEDIUM(1.0f, "M"),
+    LARGE(1.15f, "L"),
+    EXTRA_LARGE(1.3f, "XL")
+}
+
+enum class PinRequirement(val displayName: String) {
+    NEVER("Никогда"),
+    ON_CLOSE("После закрытия приложения"),
+    ON_BACKGROUND("После сворачивания приложения")
+}
+
+sealed class PinCheckResult {
+    data object Success : PinCheckResult()
+    data class WrongPin(val attemptsRemaining: Int) : PinCheckResult()
+    data class LockedOut(val unlockAtMillis: Long) : PinCheckResult()
+}
+
+// НОВОЕ (скрытые чаты): результат проверки PIN для «шторки скрытых чатов».
+enum class HiddenPinResult { MAIN, DECOY, NONE }
+
+// НОВОЕ (п.13): типы фона чата
+enum class ChatBackgroundType(val displayName: String) {
+    DEFAULT("Стандартный"),
+    GRADIENT_1("Градиент 1"),
+    GRADIENT_2("Градиент 2"),
+    GRADIENT_3("Градиент 3"),
+    GRADIENT_4("Градиент 4"),
+    CUSTOM_IMAGE("Своё фото")
+}
+
+private const val MAX_PIN_ATTEMPTS = 5
+private const val PIN_LOCKOUT_MS = 30_000L
+
+@Singleton
+class UserSettingsPreferences @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val appLockState: AppLockState
+) {
+    private val sendOnEnterKey = booleanPreferencesKey("send_on_enter")
+    private val fontSizeKey = stringPreferencesKey("font_size")
+    private val showOnlineStatusKey = booleanPreferencesKey("show_online_status")
+    private val showReadReceiptsKey = booleanPreferencesKey("show_read_receipts")
+    private val autoDownloadImagesKey = booleanPreferencesKey("auto_download_images")
+    private val notificationSoundKey = booleanPreferencesKey("notification_sound")
+    private val notificationVibrationKey = booleanPreferencesKey("notification_vibration")
+    private val muteAllNotificationsKey = booleanPreferencesKey("mute_all_notifications")
+    private val hideKeyboardOnSendKey = booleanPreferencesKey("hide_keyboard_on_send")
+    private val hideKeyboardOnScrollKey = booleanPreferencesKey("hide_keyboard_on_scroll")
+    private val quickReactionKey = stringPreferencesKey("quick_reaction")
+    private val advancedPollsEnabledKey = booleanPreferencesKey("advanced_polls_enabled")
+    private val pinHashKey = stringPreferencesKey("pin_hash")
+    private val pinSaltKey = stringPreferencesKey("pin_salt")
+    private val pinRequirementKey = stringPreferencesKey("pin_requirement")
+    private val pinFailedAttemptsKey = intPreferencesKey("pin_failed_attempts")
+    private val pinLockedUntilKey = longPreferencesKey("pin_locked_until")
+    // НОВОЕ: задержка (в секундах) перед блокировкой при сворачивании (0 = сразу).
+    private val pinLockDelaySecondsKey = intPreferencesKey("pin_lock_delay_seconds")
+    // НОВОЕ (скрытые чаты): ложный (decoy) PIN-код и набор ID скрытых чатов.
+    private val decoyPinHashKey = stringPreferencesKey("decoy_pin_hash")
+    private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
+    private val hiddenChatIdsKey = stringSetPreferencesKey("hidden_chat_ids")
+    private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
+    // НОВОЕ: тихие часы, пауза уведомлений (snooze) и скрытие текста в уведомлениях.
+    private val quietHoursEnabledKey = booleanPreferencesKey("quiet_hours_enabled")
+    private val quietHoursStartKey = intPreferencesKey("quiet_hours_start")
+    private val quietHoursEndKey = intPreferencesKey("quiet_hours_end")
+    private val hideNotificationPreviewKey = booleanPreferencesKey("hide_notification_preview")
+    private val notificationsSnoozedUntilKey = longPreferencesKey("notifications_snoozed_until")
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    private val autoDeleteEnabledKey = booleanPreferencesKey("auto_delete_enabled")
+    private val autoDeleteDaysKey = intPreferencesKey("auto_delete_days")
+    private val lastActiveTimestampKey = longPreferencesKey("last_active_timestamp")
+
+    // НОВОЕ (п.13): фон чата
+    private val chatBackgroundTypeKey = stringPreferencesKey("chat_background_type")
+    private val chatBackgroundCustomPathKey = stringPreferencesKey("chat_background_custom_path")
+
+    // НОВОЕ (п.4): папки чатов
+    private val chatFoldersJsonKey = stringPreferencesKey("chat_folders_json")
+
+    // НОВОЕ (поиск по настройкам): показывать ли результаты настроек в общем поиске.
+    private val showSettingsInGlobalSearchKey = booleanPreferencesKey("show_settings_in_global_search")
+
+    val sendOnEnter: Flow<Boolean> = context.settingsDataStore.data.map { it[sendOnEnterKey] ?: true }
+    val fontSize: Flow<FontSize> = context.settingsDataStore.data.map { prefs ->
+        prefs[fontSizeKey]?.let { raw -> runCatching { FontSize.valueOf(raw) }.getOrNull() } ?: FontSize.MEDIUM
+    }
+    val showOnlineStatus: Flow<Boolean> = context.settingsDataStore.data.map { it[showOnlineStatusKey] ?: true }
+    val showReadReceipts: Flow<Boolean> = context.settingsDataStore.data.map { it[showReadReceiptsKey] ?: true }
+    val autoDownloadImages: Flow<Boolean> = context.settingsDataStore.data.map { it[autoDownloadImagesKey] ?: true }
+    val notificationSound: Flow<Boolean> = context.settingsDataStore.data.map { it[notificationSoundKey] ?: true }
+    val notificationVibration: Flow<Boolean> = context.settingsDataStore.data.map { it[notificationVibrationKey] ?: true }
+    val muteAllNotifications: Flow<Boolean> = context.settingsDataStore.data.map { it[muteAllNotificationsKey] ?: false }
+    val hideKeyboardOnSend: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnSendKey] ?: true }
+    val hideKeyboardOnScroll: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnScrollKey] ?: true }
+    val quickReaction: Flow<String> = context.settingsDataStore.data.map { it[quickReactionKey] ?: "👍" }
+    // НОВОЕ: расширенные опросы (включая викторины) включены по умолчанию —
+    // пользователю не нужно включать их вручную в настройках.
+    val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: true }
+
+    // НОВОЕ (поиск по настройкам): по умолчанию включено — настройки видны в общем поиске.
+    val showSettingsInGlobalSearch: Flow<Boolean> = context.settingsDataStore.data.map { it[showSettingsInGlobalSearchKey] ?: true }
+
+    val pinRequirement: Flow<PinRequirement> = context.settingsDataStore.data.map { prefs ->
+        prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
+    }
+    val isPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[pinHashKey].isNullOrBlank() }
+    // НОВОЕ: через сколько секунд после сворачивания блокировать приложение (0 = сразу).
+    val pinLockDelaySeconds: Flow<Int> = context.settingsDataStore.data.map { it[pinLockDelaySecondsKey] ?: 0 }
+    // НОВОЕ (скрытые чаты): установлен ли ложный PIN и множество скрытых чатов.
+    val isDecoyPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[decoyPinHashKey].isNullOrBlank() }
+    val hiddenChatIds: Flow<Set<String>> = context.settingsDataStore.data.map { it[hiddenChatIdsKey] ?: emptySet() }
+    /** НОВОЕ (скрытые чаты): активен ли сейчас режим ложного PIN (только runtime). */
+    val decoyMode: kotlinx.coroutines.flow.StateFlow<Boolean> = appLockState.decoyMode
+
+    val notificationPermissionAsked: Flow<Boolean> =
+        context.settingsDataStore.data.map { it[notificationPermissionAskedKey] ?: false }
+
+    // НОВОЕ: тихие часы (по умолчанию с 22:00 до 07:00), пауза и скрытие превью.
+    val quietHoursEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[quietHoursEnabledKey] ?: false }
+    val quietHoursStart: Flow<Int> = context.settingsDataStore.data.map { it[quietHoursStartKey] ?: 22 }
+    val quietHoursEnd: Flow<Int> = context.settingsDataStore.data.map { it[quietHoursEndKey] ?: 7 }
+    val hideNotificationPreview: Flow<Boolean> = context.settingsDataStore.data.map { it[hideNotificationPreviewKey] ?: false }
+    val notificationsSnoozedUntil: Flow<Long> = context.settingsDataStore.data.map { it[notificationsSnoozedUntilKey] ?: 0L }
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    val autoDeleteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[autoDeleteEnabledKey] ?: false }
+    val autoDeleteDays: Flow<Int> = context.settingsDataStore.data.map { it[autoDeleteDaysKey] ?: 30 }
+    val lastActiveTimestamp: Flow<Long> = context.settingsDataStore.data.map { it[lastActiveTimestampKey] ?: 0L }
+
+    // НОВОЕ (п.13): фон чата
+    val chatBackgroundType: Flow<ChatBackgroundType> = context.settingsDataStore.data.map { prefs ->
+        prefs[chatBackgroundTypeKey]?.let { raw ->
+            runCatching { ChatBackgroundType.valueOf(raw) }.getOrNull()
+        } ?: ChatBackgroundType.DEFAULT
+    }
+    val chatBackgroundCustomPath: Flow<String> = context.settingsDataStore.data.map { it[chatBackgroundCustomPathKey] ?: "" }
+
+    // НОВОЕ (п.4): папки чатов
+    val chatFolders: Flow<List<ChatFolder>> = context.settingsDataStore.data.map { prefs ->
+        prefs[chatFoldersJsonKey]?.let { json ->
+            runCatching { Json.decodeFromString<List<ChatFolder>>(json) }.getOrDefault(emptyList())
+        } ?: emptyList()
+    }
+
+    suspend fun setNotificationPermissionAsked(asked: Boolean) {
+        context.settingsDataStore.edit { it[notificationPermissionAskedKey] = asked }
+    }
+
+    // НОВОЕ: тихие часы / пауза / скрытие превью.
+    suspend fun setQuietHoursEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[quietHoursEnabledKey] = enabled } }
+    suspend fun setQuietHours(startHour: Int, endHour: Int) {
+        context.settingsDataStore.edit {
+            it[quietHoursStartKey] = ((startHour % 24) + 24) % 24
+            it[quietHoursEndKey] = ((endHour % 24) + 24) % 24
+        }
+    }
+    suspend fun setHideNotificationPreview(enabled: Boolean) { context.settingsDataStore.edit { it[hideNotificationPreviewKey] = enabled } }
+    suspend fun snoozeNotificationsFor(durationMillis: Long) {
+        context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = System.currentTimeMillis() + durationMillis }
+    }
+    suspend fun clearNotificationSnooze() {
+        context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = 0L }
+    }
+    suspend fun setSendOnEnter(enabled: Boolean) { context.settingsDataStore.edit { it[sendOnEnterKey] = enabled } }
+    suspend fun setFontSize(size: FontSize) { context.settingsDataStore.edit { it[fontSizeKey] = size.name } }
+    suspend fun setShowOnlineStatus(enabled: Boolean) { context.settingsDataStore.edit { it[showOnlineStatusKey] = enabled } }
+    suspend fun setShowReadReceipts(enabled: Boolean) { context.settingsDataStore.edit { it[showReadReceiptsKey] = enabled } }
+    suspend fun setAutoDownloadImages(enabled: Boolean) { context.settingsDataStore.edit { it[autoDownloadImagesKey] = enabled } }
+    suspend fun setNotificationSound(enabled: Boolean) { context.settingsDataStore.edit { it[notificationSoundKey] = enabled } }
+    suspend fun setNotificationVibration(enabled: Boolean) { context.settingsDataStore.edit { it[notificationVibrationKey] = enabled } }
+    suspend fun setMuteAllNotifications(enabled: Boolean) { context.settingsDataStore.edit { it[muteAllNotificationsKey] = enabled } }
+    suspend fun setHideKeyboardOnSend(enabled: Boolean) { context.settingsDataStore.edit { it[hideKeyboardOnSendKey] = enabled } }
+    suspend fun setHideKeyboardOnScroll(enabled: Boolean) { context.settingsDataStore.edit { it[hideKeyboardOnScrollKey] = enabled } }
+    suspend fun setQuickReaction(emoji: String) { context.settingsDataStore.edit { it[quickReactionKey] = emoji } }
+    suspend fun setAdvancedPollsEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[advancedPollsEnabledKey] = enabled } }
+    // НОВОЕ (поиск по настройкам): включить/выключить показ настроек в общем поиске.
+    suspend fun setShowSettingsInGlobalSearch(enabled: Boolean) { context.settingsDataStore.edit { it[showSettingsInGlobalSearchKey] = enabled } }
+
+    suspend fun setPin(pin: String) {
+        val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val hash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
+        context.settingsDataStore.edit {
+            it[pinSaltKey] = salt
+            it[pinHashKey] = hash
+        }
+    }
+
+    suspend fun clearPin() {
+        context.settingsDataStore.edit {
+            it.remove(pinHashKey)
+            it.remove(pinSaltKey)
+            // Снимаем и ложный PIN — он не имеет смысла без основного.
+            it.remove(decoyPinHashKey)
+            it.remove(decoyPinSaltKey)
+            it[pinRequirementKey] = PinRequirement.NEVER.name
+        }
+        appLockState.setDecoyMode(false)
+    }
+
+    // НОВОЕ (скрытые чаты): установка/снятие ложного (decoy) PIN-кода.
+    suspend fun setDecoyPin(pin: String) {
+        val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()
+        val hash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
+        context.settingsDataStore.edit {
+            it[decoyPinSaltKey] = salt
+            it[decoyPinHashKey] = hash
+        }
+    }
+
+    suspend fun clearDecoyPin() {
+        context.settingsDataStore.edit {
+            it.remove(decoyPinHashKey)
+            it.remove(decoyPinSaltKey)
+        }
+    }
+
+    // НОВОЕ (скрытые чаты): пометить/снять пометку "скрытый" для чата.
+    suspend fun setChatHidden(chatId: String, hidden: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[hiddenChatIdsKey] ?: emptySet()
+            prefs[hiddenChatIdsKey] = if (hidden) current + chatId else current - chatId
+        }
+    }
+
+    suspend fun setPinRequirement(requirement: PinRequirement) {
+        context.settingsDataStore.edit { it[pinRequirementKey] = requirement.name }
+    }
+
+    // НОВОЕ: задать задержку блокировки при сворачивании (в секундах, 0 = сразу).
+    suspend fun setPinLockDelaySeconds(seconds: Int) {
+        context.settingsDataStore.edit { it[pinLockDelaySecondsKey] = seconds.coerceAtLeast(0) }
+    }
+
+    // НОВОЕ (скрытые чаты): без побочных эффектов определить, какой PIN введён —
+    // основной (MAIN), ложный (DECOY) или ни один (NONE). Используется для
+    // «шторки скрытых чатов»: основной → показать скрытые, ложный → пусто.
+    suspend fun checkHiddenPin(pin: String): HiddenPinResult {
+        val prefs = context.settingsDataStore.data.first()
+        val salt = prefs[pinSaltKey]
+        val storedHash = prefs[pinHashKey]
+        if (salt != null && storedHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, salt) == storedHash
+        ) return HiddenPinResult.MAIN
+        val decoySalt = prefs[decoyPinSaltKey]
+        val decoyHash = prefs[decoyPinHashKey]
+        if (decoySalt != null && decoyHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, decoySalt) == decoyHash
+        ) return HiddenPinResult.DECOY
+        return HiddenPinResult.NONE
+    }
+
+    suspend fun verifyPin(pin: String): PinCheckResult {
+        val prefs = context.settingsDataStore.data.first()
+        val now = System.currentTimeMillis()
+        val lockedUntil = prefs[pinLockedUntilKey] ?: 0L
+        if (lockedUntil > now) {
+            return PinCheckResult.LockedOut(lockedUntil)
+        }
+        val salt = prefs[pinSaltKey]
+        val storedHash = prefs[pinHashKey]
+        if (salt == null || storedHash == null) {
+            return PinCheckResult.Success
+        }
+        val candidateHash = app.yodo.messenger.core.util.PinHasher.hash(pin, salt)
+        if (candidateHash == storedHash) {
+            // Введён основной PIN — обычный режим (скрытые чаты видны).
+            appLockState.setDecoyMode(false)
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it.remove(pinLockedUntilKey)
+            }
+            return PinCheckResult.Success
+        }
+        // НОВОЕ (скрытые чаты): если основной PIN не подошёл, проверяем ложный (decoy) PIN.
+        // При его вводе приложение открывается в decoy-режиме, где скрытые чаты не видны.
+        val decoySalt = prefs[decoyPinSaltKey]
+        val decoyHash = prefs[decoyPinHashKey]
+        if (decoySalt != null && decoyHash != null &&
+            app.yodo.messenger.core.util.PinHasher.hash(pin, decoySalt) == decoyHash
+        ) {
+            appLockState.setDecoyMode(true)
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it.remove(pinLockedUntilKey)
+            }
+            return PinCheckResult.Success
+        }
+        val failedAttempts = (prefs[pinFailedAttemptsKey] ?: 0) + 1
+        return if (failedAttempts >= MAX_PIN_ATTEMPTS) {
+            val unlockAt = now + PIN_LOCKOUT_MS
+            context.settingsDataStore.edit {
+                it[pinFailedAttemptsKey] = 0
+                it[pinLockedUntilKey] = unlockAt
+            }
+            PinCheckResult.LockedOut(unlockAt)
+        } else {
+            context.settingsDataStore.edit { it[pinFailedAttemptsKey] = failedAttempts }
+            PinCheckResult.WrongPin(MAX_PIN_ATTEMPTS - failedAttempts)
+        }
+    }
+
+    // НОВОЕ (п.18): автоудаление аккаунта
+    suspend fun setAutoDeleteEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[autoDeleteEnabledKey] = enabled }
+    }
+    suspend fun setAutoDeleteDays(days: Int) {
+        context.settingsDataStore.edit { it[autoDeleteDaysKey] = days }
+    }
+    suspend fun updateLastActiveTimestamp() {
+        context.settingsDataStore.edit { it[lastActiveTimestampKey] = System.currentTimeMillis() }
+    }
+
+    // НОВОЕ (п.13): фон чата
+    suspend fun setChatBackgroundType(type: ChatBackgroundType) {
+        context.settingsDataStore.edit { it[chatBackgroundTypeKey] = type.name }
+    }
+    suspend fun setChatBackgroundCustomPath(path: String) {
+        context.settingsDataStore.edit { it[chatBackgroundCustomPathKey] = path }
+    }
+
+    // НОВОЕ (п.4): папки чатов
+    suspend fun setChatFolders(folders: List<ChatFolder>) {
+        context.settingsDataStore.edit { it[chatFoldersJsonKey] = Json.encodeToString(folders) }
+    }
+    suspend fun addChatFolder(folder: ChatFolder) {
+        val current = chatFolders.first().toMutableList()
+        current.add(folder)
+        setChatFolders(current)
+    }
+    suspend fun updateChatFolder(folder: ChatFolder) {
+        val current = chatFolders.first().toMutableList()
+        val index = current.indexOfFirst { it.id == folder.id }
+        if (index >= 0) {
+            current[index] = folder
+            setChatFolders(current)
+        }
+    }
+    suspend fun deleteChatFolder(folderId: String) {
+        val current = chatFolders.first().filter { it.id != folderId }
+        setChatFolders(current)
+    }
+    suspend fun addChatToFolder(folderId: String, chatId: String) {
+        val current = chatFolders.first().toMutableList()
+        val index = current.indexOfFirst { it.id == folderId }
+        if (index >= 0) {
+            val folder = current[index]
+            if (chatId !in folder.chatIds) {
+                current[index] = folder.copy(chatIds = folder.chatIds + chatId)
+                setChatFolders(current)
+            }
+        }
+    }
+    suspend fun removeChatFromFolder(folderId: String, chatId: String) {
+        val current = chatFolders.first().toMutableList()
+        val index = current.indexOfFirst { it.id == folderId }
+        if (index >= 0) {
+            val folder = current[index]
+            current[index] = folder.copy(chatIds = folder.chatIds - chatId)
+            setChatFolders(current)
+        }
+    }
+
+    // ============ НОВОЕ (Batch 7): Центр безопасности и статусы ============
+    // 2FA переехала на email-код (Firestore, см. TwoFactorRepository) — второй
+    // локальный пароль и контрольные вопросы для сброса больше не хранятся тут.
+    // Здесь остаются: защита от скриншотов, эмодзи/текстовый статус.
+    private val screenshotProtectionKey = booleanPreferencesKey("screenshot_protection")
+    private val emojiStatusKey = stringPreferencesKey("emoji_status")
+    private val customStatusKey = stringPreferencesKey("custom_status")
+
+    val screenshotProtection: Flow<Boolean> = context.settingsDataStore.data.map { it[screenshotProtectionKey] ?: false }
+    val emojiStatus: Flow<String> = context.settingsDataStore.data.map { it[emojiStatusKey] ?: "" }
+    val customStatus: Flow<String> = context.settingsDataStore.data.map { it[customStatusKey] ?: "" }
+
+    suspend fun setScreenshotProtection(enabled: Boolean) { context.settingsDataStore.edit { it[screenshotProtectionKey] = enabled } }
+    suspend fun setEmojiStatus(value: String) { context.settingsDataStore.edit { it[emojiStatusKey] = value } }
+    suspend fun setCustomStatus(value: String) { context.settingsDataStore.edit { it[customStatusKey] = value } }
+}

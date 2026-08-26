@@ -1,0 +1,224 @@
+package app.yodo.messenger.features.chats
+
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.HowToReg
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.ui.components.UserAvatar
+import app.yodo.messenger.R
+import app.yodo.messenger.ui.theme.YodoError
+
+@Composable
+fun GroupInfoScreen(
+    onBackClick: () -> Unit,
+    onLeftGroup: () -> Unit,
+    onOpenManageRoles: (String) -> Unit = {},
+    onOpenForumTopics: (String) -> Unit = {},
+    viewModel: GroupInfoViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val didLeave by viewModel.didLeave.collectAsState()
+
+    LaunchedEffect(didLeave) {
+        if (didLeave) onLeftGroup()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.group_info_title), style = MaterialTheme.typography.titleLarge) },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back_cd))
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        when (val state = uiState) {
+            is GroupInfoUiState.Loading -> {
+                Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
+            }
+            is GroupInfoUiState.NotFound -> {
+                Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    Text(
+                        text = stringResource(R.string.group_info_not_found),
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+            }
+            is GroupInfoUiState.Content -> {
+                Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        UserAvatar(
+                            displayName = state.info.title,
+                            photoUrl = null,
+                            avatarBase64 = null,
+                            size = 96.dp
+                        )
+                        Text(
+                            text = state.info.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.group_info_members, state.info.members.size),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        if (state.info.description.isNotBlank()) {
+                            Text(
+                                text = state.info.description,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    // НОВОЕ (конфиденциальность групп): показываем текущий режим доступа.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = when (state.info.accessMode) {
+                                app.yodo.messenger.domain.model.ChannelAccessMode.OPEN -> Icons.Filled.Public
+                                app.yodo.messenger.domain.model.ChannelAccessMode.MODERATED -> Icons.Filled.HowToReg
+                                app.yodo.messenger.domain.model.ChannelAccessMode.HIDDEN -> Icons.Filled.Lock
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                state.info.accessMode.title,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                state.info.accessMode.description,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (viewModel.myUid != null && viewModel.myUid == state.info.createdBy) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenManageRoles(viewModel.chatId) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                stringResource(R.string.group_info_manage_roles),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    // НОВОЕ (форумные группы): пункт-переход к разделам форума, если группа — форум.
+                    if (state.info.isForum) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenForumTopics(viewModel.chatId) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.Forum,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                stringResource(R.string.group_info_forum_topics),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(state.info.members, key = { it.uid }) { member ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                UserAvatar(
+                                    displayName = member.displayName,
+                                    photoUrl = member.photoUrl,
+                                    avatarBase64 = member.avatarBase64,
+                                    size = 44.dp
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(member.displayName, style = MaterialTheme.typography.bodyLarge)
+                                    if (member.uid == state.info.createdBy) {
+                                        Text(stringResource(R.string.group_info_creator), style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = { viewModel.leaveGroup() },
+                        colors = ButtonDefaults.buttonColors(containerColor = YodoError),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp)
+                    ) {
+                        Text(stringResource(R.string.group_info_leave), color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
