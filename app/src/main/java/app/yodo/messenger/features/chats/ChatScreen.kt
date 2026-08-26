@@ -30,12 +30,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -113,6 +113,7 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -139,6 +140,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -170,6 +172,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toPx
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -241,6 +244,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val selectedMessageIds = remember { mutableStateOf<Set<String>>(emptySet()) }
     var infoMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val quickReaction = viewModel.quickReaction.collectAsState().value
@@ -249,6 +253,12 @@ fun ChatScreen(
     // НОВОЕ: диалог «Быстрые ответы» (шаблоны из «Фишки и инструменты»).
     var showQuickReplies by remember { mutableStateOf(false) }
     val toolsPrefs = remember { context.getSharedPreferences("yodo_tools", Context.MODE_PRIVATE) }
+
+    // НОВОЕ (картинки из буфера + подпись): base64 картинки, ожидающей подписью
+    // и подтверждения отправки (не моментальная отправка).
+    var pendingCaptionImageBase64 by remember { mutableStateOf<String?>(null) }
+    var pendingCaptionImagesBase64 by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isProcessingMedia by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.initialDraft) {
         uiState.initialDraft?.let { if (inputText.isBlank()) inputText = it }
@@ -350,11 +360,6 @@ fun ChatScreen(
     }
 
     var showAttachMenu by remember { mutableStateOf(false) }
-    // НОВОЕ (кар��и��ки и�� буфера + подпись): base64 картинки, ожидаю��ей подписью
-    // и подтверждения отправки (не моментальная отправка).
-    var pendingCaptionImageBase64 by remember { mutableStateOf<String?>(null) }
-    var pendingCaptionImagesBase64 by remember { mutableStateOf<List<String>>(emptyList()) }
-    var isProcessingMedia by remember { mutableStateOf(false) }
 
     // НОВОЕ (картинки из буф����ра): читаем изображение из системного буфера обмена.
     fun pasteImageFromClipboard() {
@@ -1375,6 +1380,7 @@ fun ChatScreen(
                                     }
                                 },
                                 onTripleTap = { selected -> viewModel.toggleReaction(selected.id, quickReaction) },
+                                onCommentsClick = { onOpenComments(chatId, message.id) },
                                 onInfoClick = { infoMessage = it },
                                 onReply = { viewModel.setReplyingTo(message) },
                                 onEdit = { viewModel.setEditingMessage(message) },
@@ -2185,6 +2191,7 @@ private fun MessageBubble(
                 }
             }
         }
+        }
         if (showReactionPicker && !isOfficialChannel) {
             Surface(
                 modifier = Modifier.align(alignment),
@@ -2259,7 +2266,6 @@ private fun MessageBubble(
                         )
                     }
                 }
-            }
 
             // ═══════════════ ЭТАП 14: АНИМИРОВАННЫЕ РЕАКЦИИ ═══════════════
             if (message.reactions.isNotEmpty() && !isOfficialChannel) {
@@ -2389,7 +2395,6 @@ private fun MessageBubble(
             }
         }
     }
-}
 
 // НОВОЕ (усечение длинных постов): обрезка текста для превью в списке сообщений.
 // Отрезаем по тому же критерию (220 симв. / 4 переноса) и добавляем "…".
