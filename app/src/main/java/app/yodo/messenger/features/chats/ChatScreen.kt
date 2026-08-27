@@ -2329,7 +2329,6 @@ private fun MessageBubble(
         if (showTextSelectionDialog) {
             TextSelectionDialog(
                 text = message.text,
-                clipboardManager = clipboardManager,
                 onDismiss = { showTextSelectionDialog = false }
             )
         }
@@ -2555,20 +2554,14 @@ private fun PostFullscreenDialog(
 // НОВОЕ (копирование фрагмента): отдельный полноэкранный диалог "режима выделения" для
 // сообщений в обычном чате (не только длинных постов). Открывается только по кнопке
 // "Копировать фрагмент" из контекстного меню сообщения — долгое нажатие на сообщении
-// теперь всегда открывает меню, а не запускает выделение текста напрямую. Внутри диалога
-// текст обёрнут в SelectionContainer, поэтому стандартное выделение (потяг за маркеры,
-// системная плашка "Копировать") работает как обычно, плюс дублирующая кнопка "Копировать
-// выделенное" в шапке — на случай, если системная плашка не появилась (некоторые прошивки).
+// теперь всегда открывает меню, а не запускает выделение текста напрямую. Текст обёрнут
+// в SelectionContainer, поэтому выделение (потяг за маркеры) и системная плашка
+// "Копировать" работают как обычно.
 @Composable
 private fun TextSelectionDialog(
     text: String,
-    clipboardManager: androidx.compose.ui.platform.ClipboardManager,
     onDismiss: () -> Unit
 ) {
-    var justCopied by remember { mutableStateOf(false) }
-    // Текущее выделение внутри SelectionContainer — обновляется автоматически при
-    // перетаскивании маркеров выделения. Пусто, пока пользователь ничего не выделил.
-    val selection = remember { mutableStateOf<androidx.compose.foundation.text.selection.Selection?>(null) }
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
@@ -2594,7 +2587,7 @@ private fun TextSelectionDialog(
             }
             HorizontalDivider()
             Text(
-                "Выделите часть текста — потяните за маркеры, затем нажмите «Копировать выделенное» или используйте системную плашку.",
+                "Выделите часть текста — потяните за маркеры, затем используйте системную плашку «Копировать».",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
@@ -2605,42 +2598,10 @@ private fun TextSelectionDialog(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp)
             ) {
-                androidx.compose.foundation.text.selection.SelectionContainer(
-                    selection = selection.value,
-                    onSelectionChange = { selection.value = it }
-                ) {
+                androidx.compose.foundation.text.selection.SelectionContainer {
                     Text(text, style = MaterialTheme.typography.bodyLarge)
                 }
                 Spacer(modifier = Modifier.height(80.dp))
-            }
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val hasSelection = selection.value != null
-                Button(
-                    enabled = hasSelection,
-                    onClick = {
-                        val sel = selection.value ?: return@Button
-                        val start = minOf(sel.start.offset, sel.end.offset)
-                        val end = maxOf(sel.start.offset, sel.end.offset)
-                        val fragment = text.substring(start.coerceIn(0, text.length), end.coerceIn(0, text.length))
-                        if (fragment.isNotEmpty()) {
-                            clipboardManager.setText(AnnotatedString(fragment))
-                            justCopied = true
-                        }
-                    }
-                ) {
-                    Icon(
-                        if (justCopied) Icons.Filled.Check else Icons.Filled.ContentCopy,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (justCopied) "Скопировано" else "Копировать выделенное")
-                }
             }
         }
     }

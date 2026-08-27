@@ -1,7 +1,6 @@
 package app.yodo.messenger.features.chats
 
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -70,7 +69,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.graphicsLayer
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -392,10 +391,8 @@ fun ChatListScreen(
                                     onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
                                     isHidden = chat.chatId in hiddenChatIds,
                                     onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) },
-                                    modifier = Modifier.animateItem(
-                                        fadeInSpec = null,
-                                        fadeOutSpec = tween(YodoMotion.DURATION_FAST),
-                                        placementSpec = YodoMotion.emphasized(YodoMotion.DURATION_MEDIUM)
+                                    modifier = Modifier.animateItemPlacement(
+                                        YodoMotion.emphasized(YodoMotion.DURATION_MEDIUM)
                                     )
                                 )
                             }
@@ -961,7 +958,7 @@ internal fun SwipeableChatListItem(
         animationSpec = YodoMotion.confirm(),
         label = "deleteIconScale"
     )
-    val trackColor by androidx.compose.animation.core.animateColorAsState(
+    val trackColor by androidx.compose.animation.animateColorAsState(
         targetValue = Color.Red.copy(alpha = 0.12f + revealProgress * 0.18f),
         animationSpec = YodoMotion.standard(),
         label = "swipeTrackColor"
@@ -1071,7 +1068,7 @@ private fun ChatListItem(
         animationSpec = YodoMotion.standard(YodoMotion.DURATION_INSTANT),
         label = "chatRowPressScale"
     )
-    val rowBackground by androidx.compose.animation.core.animateColorAsState(
+    val rowBackground by androidx.compose.animation.animateColorAsState(
         targetValue = if (hasUnread) {
             colorTheme.primary.copy(alpha = 0.05f)
         } else {
