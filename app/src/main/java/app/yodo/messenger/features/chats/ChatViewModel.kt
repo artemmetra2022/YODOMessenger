@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.yodo.messenger.core.util.RateLimiter
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.NotificationMessageStore
@@ -111,6 +112,23 @@ class ChatViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    // НОВОЕ (rate limiting): не более 8 отправок (текст/фото/голос/файл/локация/опрос)
+    // за 10 секунд из одного чата — защита от спама и случайного флуда (например,
+    // залипшая кнопка отправки или баг в UI, вызывающий повторные клики).
+    private val sendRateLimiter = RateLimiter(maxEvents = 8, windowMillis = 10_000L)
+
+    // Возвращает true, если отправка запрещена лимитом (и выставляет понятное сообщение
+    // об ошибке с числом секунд до следующей попытки).
+    private fun rateLimitGuard(): Boolean {
+        if (sendRateLimiter.tryAcquire()) return false
+        val waitSeconds = (sendRateLimiter.retryAfterMillis() / 1000L) + 1
+        _uiState.value = _uiState.value.copy(
+            isSending = false,
+            errorMessage = "Слишком много сообщений подряд. Подождите $waitSeconds сек."
+        )
+        return true
+    }
 
     fun prepareForward(message: Message) {
         // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
@@ -537,9 +555,12 @@ class ChatViewModel @Inject constructor(
         if (text.isBlank()) return
         // НОВОЕ (реальная блокировка): нельзя писать, если кто-то кого-то заблокировал.
         if (blockGuard()) return
+        val editing = _uiState.value.editingMessage
+        // НОВОЕ (rate limiting): лимитируем только отправку новых сообщений, а не
+        // редактирование уже существующих — правка не создаёт новый флуд.
+        if (editing == null && rateLimitGuard()) return
         clearTypingStatus()
         viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
-        val editing = _uiState.value.editingMessage
         if (editing != null) {
             _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null, editingMessage = null)
             viewModelScope.launch {
@@ -589,6 +610,7 @@ class ChatViewModel @Inject constructor(
     // НОВОЕ (картинки из буфера + подпись): передаём необязательную подпись к фото.
     fun sendImage(base64: String, caption: String = "", isViewOnce: Boolean = false) {
         if (blockGuard()) return
+        if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce, topicId = topicId)) {
@@ -602,6 +624,7 @@ class ChatViewModel @Inject constructor(
     fun sendImages(imagesBase64: List<String>, caption: String = "") {
         if (imagesBase64.isEmpty()) return
         if (blockGuard()) return
+        if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption, topicId = topicId)) {
@@ -631,6 +654,7 @@ class ChatViewModel @Inject constructor(
 
     // НОВОЕ (п.37): отправка записанного голосового сообщения.
     fun sendVoice(base64: String, durationMs: Long) {
+        if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendVoiceMessage(chatId, base64, durationMs, topicId = topicId)) {
@@ -643,6 +667,7 @@ class ChatViewModel @Inject constructor(
     // НОВОЕ: отправка файлового вложения — base64 + метаданные уже подготовлены
     // на уровне UI (см. FileUtils.prepareFileForSending), здесь только пересылка в репозиторий.
     fun sendFile(base64: String, fileName: String, mimeType: String, sizeBytes: Long) {
+        if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendFileMessage(chatId, base64, fileName, mimeType, sizeBytes, topicId = topicId)) {
@@ -654,6 +679,7 @@ class ChatViewModel @Inject constructor(
 
     // НОВОЕ: отправка геолокации — точки на карте.
     fun sendLocation(lat: Double, lng: Double) {
+        if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendLocationMessage(chatId, lat, lng, topicId = topicId)) {
@@ -677,6 +703,7 @@ class ChatViewModel @Inject constructor(
         correctOptionIndex: Int? = null,
         explanation: String? = null
     ) {
+        if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
             when (val result = messageRepository.sendPollMessage(

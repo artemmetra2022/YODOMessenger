@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -113,6 +114,8 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -1365,6 +1368,8 @@ fun ChatScreen(
                                 colorTheme = colorTheme,
                                 isChannel = isChannel,
                                 isOfficialChannel = uiState.isOfficialChannel,
+                                isSelectionMode = isSelectionMode,
+                                isSelected = message.id in selectedMessageIds.value,
                                 groupPosition = groupPosition,
                                 showAvatar = !message.senderId.equals(viewModel.currentUserId) &&
                                     (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST),
@@ -1650,6 +1655,8 @@ private fun SwipeableMessageBubble(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
     isOfficialChannel: Boolean = false,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     onCommentsClick: () -> Unit,
     onReply: () -> Unit,
     onEdit: () -> Unit,
@@ -1684,29 +1691,36 @@ private fun SwipeableMessageBubble(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .pointerInput(message.id) {
-                val replyThresholdPx = replyThresholdDp * density
-                val forwardZoneEndPx = forwardZoneEndDp * density
-                val maxDragPx = maxDragDp * density
-                detectHorizontalDragGestures(
-                    onDragStart = { offsetX = 0f },
-                    onDragEnd = {
-                        when {
-                            offsetX > replyThresholdPx -> onReply()
-                            // Свайп влево — переслать любое сообщение (в т.ч. чуж��е в личном
-                            // чате). Раньше длинный свайп влево срабатывал как "назад" и мешал
-                            // пересылке; теперь за "назад" отвечает только краевой свайп (swipeToGoBack).
-                            // view-once сообщения пересылать нельзя.
-                            offsetX < -replyThresholdPx && !message.isViewOnce -> onForward()
+            // НОВОЕ (выделение сообщений): полоса-подсветка на всю ширину строки,
+            // цвет берётся из применённой цветовой темы (colorTheme.primary), как в
+            // референсе — на манер выделения элементов в списке чатов WhatsApp.
+            .background(if (isSelected) colorTheme.primary.copy(alpha = 0.16f) else Color.Transparent)
+            .padding(vertical = 1.dp)
+            .then(
+                if (isSelectionMode) Modifier else Modifier.pointerInput(message.id) {
+                    val replyThresholdPx = replyThresholdDp * density
+                    val forwardZoneEndPx = forwardZoneEndDp * density
+                    val maxDragPx = maxDragDp * density
+                    detectHorizontalDragGestures(
+                        onDragStart = { offsetX = 0f },
+                        onDragEnd = {
+                            when {
+                                offsetX > replyThresholdPx -> onReply()
+                                // Свайп влево — переслать любое сообщение (в т.ч. чуж��е в личном
+                                // чате). Раньше длинный свайп влево срабатывал как "назад" и мешал
+                                // пересылке; теперь за "назад" отвечает только краевой свайп (swipeToGoBack).
+                                // view-once сообщения пересылать нельзя.
+                                offsetX < -replyThresholdPx && !message.isViewOnce -> onForward()
+                            }
+                            offsetX = 0f
+                        },
+                        onDragCancel = { offsetX = 0f },
+                        onHorizontalDrag = { _, dragAmount ->
+                            offsetX = (offsetX + dragAmount).coerceIn(-maxDragPx, maxDragPx)
                         }
-                        offsetX = 0f
-                    },
-                    onDragCancel = { offsetX = 0f },
-                    onHorizontalDrag = { _, dragAmount ->
-                        offsetX = (offsetX + dragAmount).coerceIn(-maxDragPx, maxDragPx)
-                    }
-                )
-            }
+                    )
+                }
+            )
     ) {
         if (offsetX > 12f) {
             Icon(
@@ -1729,6 +1743,7 @@ private fun SwipeableMessageBubble(
                 currentUserId = currentUserId, autoDownloadImages = autoDownloadImages,
                 colorTheme = colorTheme,
                 isChannel = isChannel, isOfficialChannel = isOfficialChannel,
+                isSelectionMode = isSelectionMode, isSelected = isSelected,
                 onCommentsClick = onCommentsClick,
                 onReply = onReply, onEdit = onEdit, onDelete = onDelete,
                 onForward = onForward, onReact = onReact, onPin = onPin,
@@ -1762,6 +1777,8 @@ private fun MessageBubble(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
     isOfficialChannel: Boolean = false,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
     onCommentsClick: () -> Unit,
     onReply: () -> Unit,
@@ -1815,13 +1832,33 @@ private fun MessageBubble(
     }
     var showReactionPicker by remember { mutableStateOf(false) }
     var revealImage by remember { mutableStateOf(autoDownloadImages) }
+    // НОВОЕ (копирование фрагмента): отдельный режим выделения текста сообщения,
+    // открывается кнопкой "Копировать фрагмент" из контекстного меню.
+    var showTextSelectionDialog by remember { mutableStateOf(false) }
     if (message.isDeleted) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
             Text("Сообщение удалено", style = MaterialTheme.typography.bodyMedium, color = Color.Gray, modifier = Modifier.padding(8.dp))
         }
         return
     }
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // НОВОЕ (выделение сообщений): чекбокс режима выбора слева от строки сообщения,
+        // цвет галочки/рамки — colorTheme.primary (меняется вместе с применённой темой).
+        if (isSelectionMode) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onSelectionToggle(message) },
+                colors = CheckboxDefaults.colors(
+                    checkedColor = colorTheme.primary,
+                    uncheckedColor = colorTheme.primary.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier.padding(start = 4.dp, end = 2.dp)
+            )
+        }
+        Box(modifier = Modifier.weight(1f), contentAlignment = alignment) {
         Row(
             modifier = Modifier.graphicsLayer {
                 scaleX = sendAppearance.value
@@ -1865,14 +1902,22 @@ private fun MessageBubble(
                         .then(if (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST) {
                             Modifier.drawBehind { drawTelegramTail(bubbleColor, isOwnMessage) }
                         } else Modifier)
-                        .pointerInput(message.id) {
+                        .pointerInput(message.id, isSelectionMode) {
                             detectTapGestures(
-                                onLongPress = { showMenu = true },
+                                onLongPress = { if (!isSelectionMode) showMenu = true },
                                 onTap = {
-                                    tapCount += 1
-                                    if (tapCount == 3) {
-                                        onTripleTap(message)
-                                        tapCount = 0
+                                    // НОВОЕ (выделение сообщений): если уже включён режим
+                                    // множественного выбора (есть хотя бы одно выделенное
+                                    // сообщение), обычный тап по любому сообщению добавляет
+                                    // или снимает его из выделения — как в WhatsApp/Telegram.
+                                    if (isSelectionMode) {
+                                        onSelectionToggle(message)
+                                    } else {
+                                        tapCount += 1
+                                        if (tapCount == 3) {
+                                            onTripleTap(message)
+                                            tapCount = 0
+                                        }
                                     }
                                 }
                             )
@@ -2079,7 +2124,13 @@ private fun MessageBubble(
                         // 220 симв. ИЛИ 4+ переноса строки. Работает в личных чатах, группах и каналах.
                         val isLongPost = newsBody.length >= 220 || newsBody.count { it == '\n' } >= 4
                         val displayBody = if (isLongPost) truncatePostPreview(newsBody) else newsBody
-                        SelectionContainer {
+                        // ИЗМЕНЕНО (копирование фрагмента): текст сообщения больше не оборачиваем
+                        // в SelectionContainer — раньше это включало выделение текста по долгому
+                        // нажатию и конфликтовало с контекстным меню (тоже открывающимся по
+                        // долгому нажатию). Теперь долгое нажатие всегда открывает меню, а режим
+                        // выделения текста запускается отдельно — кнопкой "Копировать фрагмент"
+                        // в этом меню (см. showTextSelectionDialog ниже).
+                        run {
                             val inlineText = buildAnnotatedString {
                                 append(displayBody)
                                 append("  ")
@@ -2248,6 +2299,13 @@ private fun MessageBubble(
                     }
                     if (message.text.isNotBlank()) {
                         DropdownMenuItem(text = { Text("Копировать") }, leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }, onClick = { showMenu = false; clipboardManager.setText(AnnotatedString(message.text)) })
+                        // НОВОЕ (копирование фрагмента): открывает отдельный режим выделения
+                        // части текста сообщения (см. TextSelectionDialog ниже).
+                        DropdownMenuItem(
+                            text = { Text("Копировать фрагмент") },
+                            leadingIcon = { Icon(Icons.Filled.ContentCut, contentDescription = null) },
+                            onClick = { showMenu = false; showTextSelectionDialog = true }
+                        )
                     }
                     // НОВОЕ (одноразовые медиа): фото "на один просмотр" нельзя пересылать.
                     if (!message.isViewOnce) {
@@ -2265,6 +2323,16 @@ private fun MessageBubble(
                         )
                     }
                 }
+
+        // НОВОЕ (копирование фрагмента): отдельный диалог с режимом выделения текста —
+        // открывается только по кнопке "Копировать фрагмент" из меню, не по долгому нажатию.
+        if (showTextSelectionDialog) {
+            TextSelectionDialog(
+                text = message.text,
+                clipboardManager = clipboardManager,
+                onDismiss = { showTextSelectionDialog = false }
+            )
+        }
 
             // ═══════════════ ЭТАП 14: АНИМИРОВАННЫЕ РЕАКЦИИ ═══════════════
             if (message.reactions.isNotEmpty() && !isOfficialChannel) {
@@ -2393,6 +2461,7 @@ private fun MessageBubble(
                 }
             }
         }
+        }
     }
 
 // НОВОЕ (усечение длинных постов): обрезка текста для превью в списке сообщений.
@@ -2477,6 +2546,100 @@ private fun PostFullscreenDialog(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    }
+}
+
+// НОВОЕ (копирование фрагмента): отдельный полноэкранный диалог "режима выделения" для
+// сообщений в обычном чате (не только длинных постов). Открывается только по кнопке
+// "Копировать фрагмент" из контекстного меню сообщения — долгое нажатие на сообщении
+// теперь всегда открывает меню, а не запускает выделение текста напрямую. Внутри диалога
+// текст обёрнут в SelectionContainer, поэтому стандартное выделение (потяг за маркеры,
+// системная плашка "Копировать") работает как обычно, плюс дублирующая кнопка "Копировать
+// выделенное" в шапке — на случай, если системная плашка не появилась (некоторые прошивки).
+@Composable
+private fun TextSelectionDialog(
+    text: String,
+    clipboardManager: androidx.compose.ui.platform.ClipboardManager,
+    onDismiss: () -> Unit
+) {
+    var justCopied by remember { mutableStateOf(false) }
+    // Текущее выделение внутри SelectionContainer — обновляется автоматически при
+    // перетаскивании маркеров выделения. Пусто, пока пользователь ничего не выделил.
+    val selection = remember { mutableStateOf<androidx.compose.foundation.text.selection.Selection?>(null) }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Icon(Icons.Filled.ContentCut, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Копирование отрывка",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Закрыть") }
+            }
+            HorizontalDivider()
+            Text(
+                "Выделите часть текста — потяните за маркеры, затем нажмите «Копировать выделенное» или используйте системную плашку.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+            ) {
+                androidx.compose.foundation.text.selection.SelectionContainer(
+                    selection = selection.value,
+                    onSelectionChange = { selection.value = it }
+                ) {
+                    Text(text, style = MaterialTheme.typography.bodyLarge)
+                }
+                Spacer(modifier = Modifier.height(80.dp))
+            }
+            HorizontalDivider()
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val hasSelection = selection.value != null
+                Button(
+                    enabled = hasSelection,
+                    onClick = {
+                        val sel = selection.value ?: return@Button
+                        val start = minOf(sel.start.offset, sel.end.offset)
+                        val end = maxOf(sel.start.offset, sel.end.offset)
+                        val fragment = text.substring(start.coerceIn(0, text.length), end.coerceIn(0, text.length))
+                        if (fragment.isNotEmpty()) {
+                            clipboardManager.setText(AnnotatedString(fragment))
+                            justCopied = true
+                        }
+                    }
+                ) {
+                    Icon(
+                        if (justCopied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (justCopied) "Скопировано" else "Копировать выделенное")
                 }
             }
         }
