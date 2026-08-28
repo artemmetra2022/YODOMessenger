@@ -25,9 +25,11 @@ sealed class SearchUiState {
     data object NoResults : SearchUiState()
     // НОВОЕ (переработка каналов): результаты теперь — и люди, и каналы.
     // НОВОЕ (поиск по настройкам): а также совпадения по настройкам приложения.
+    // НОВОЕ (админ-функции групп): и группы (открытые/модерируемые видны в поиске).
     data class Results(
         val users: List<YodoUser>,
         val channels: List<ChannelSearchItem>,
+        val groups: List<ChannelSearchItem> = emptyList(),
         val settings: List<SettingsSearchItem> = emptyList()
     ) : SearchUiState()
 }
@@ -51,6 +53,11 @@ class SearchViewModel @Inject constructor(
     private val _openChannelProfileId = MutableStateFlow<String?>(null)
     val openChannelProfileId: StateFlow<String?> = _openChannelProfileId
 
+    // НОВОЕ (админ-функции групп): тап по группе, в которой пользователь не состоит —
+    // открываем профиль группы (там можно вступить/подать заявку), а не чат.
+    private val _openGroupProfileId = MutableStateFlow<String?>(null)
+    val openGroupProfileId: StateFlow<String?> = _openGroupProfileId
+
     // НОВОЕ (поиск по настройкам): тап по найденной настройке — переходим в
     // экран настроек и прокручиваем к нужному пункту (по anchorId).
     private val _openSettingsAnchor = MutableStateFlow<String?>(null)
@@ -72,14 +79,16 @@ class SearchViewModel @Inject constructor(
             delay(350) // debounce — не долбим Firestore на каждое нажатие клавиши
             val users = userRepository.searchUsers(query)
             val channels = chatRepository.searchChannels(query)
+            // НОВОЕ (админ-функции групп): группы в поиске (открытые/модерируемые).
+            val groups = chatRepository.searchGroups(query)
             // НОВОЕ (поиск по настройкам): подмешиваем совпадения по настройкам,
             // если пользователь не отключил их показ в общем поиске.
             val showSettings = userSettingsPreferences.showSettingsInGlobalSearch.first()
             val settings = if (showSettings) SettingsSearchMatcher.search(query) else emptyList()
-            _uiState.value = if (users.isEmpty() && channels.isEmpty() && settings.isEmpty()) {
+            _uiState.value = if (users.isEmpty() && channels.isEmpty() && groups.isEmpty() && settings.isEmpty()) {
                 SearchUiState.NoResults
             } else {
-                SearchUiState.Results(users = users, channels = channels, settings = settings)
+                SearchUiState.Results(users = users, channels = channels, groups = groups, settings = settings)
             }
         }
     }
@@ -102,6 +111,15 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    // НОВОЕ (админ-функции групп): тап по группе в выдаче поиска.
+    fun openGroup(group: ChannelSearchItem) {
+        if (group.isSubscribed) {
+            _openChatId.value = group.chatId
+        } else {
+            _openGroupProfileId.value = group.chatId
+        }
+    }
+
     // НОВОЕ (поиск по настройкам): тап по найденной настройке.
     fun openSetting(item: SettingsSearchItem) {
         _openSettingsAnchor.value = item.anchorId
@@ -110,5 +128,6 @@ class SearchViewModel @Inject constructor(
     fun consumeErrorMessage() { _errorMessage.value = null }
     fun consumeOpenChatId() { _openChatId.value = null }
     fun consumeOpenChannelProfileId() { _openChannelProfileId.value = null }
+    fun consumeOpenGroupProfileId() { _openGroupProfileId.value = null }
     fun consumeOpenSettingsAnchor() { _openSettingsAnchor.value = null }
 }

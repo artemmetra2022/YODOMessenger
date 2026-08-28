@@ -191,6 +191,9 @@ interface ChatRepository {
     // НОВОЕ (переработка каналов):
     /** Поиск каналов по префиксу названия (без учёта регистра). */
     suspend fun searchChannels(query: String): List<ChannelSearchItem>
+    // НОВОЕ (админ-функции групп): поиск групп по названию/описанию/категории —
+    // скрытые (HIDDEN) группы не показываются, если пользователь не участник.
+    suspend fun searchGroups(query: String): List<ChannelSearchItem>
     // НОВОЕ (каталог/рекомендации каналов): подборка без поискового запроса —
     // топ по подписчикам + группировка по категориям, для отдельного экрана каталога.
     // НОВОЕ (каталог/рекомендации каналов): подборка без поискового запроса —
@@ -235,6 +238,13 @@ interface ChatRepository {
     fun observeSupportConversations(): Flow<List<SupportConversation>>
 
     suspend fun getChatInfo(chatId: String): ChatInfo?
+
+    // ИСПРАВЛЕНО (шапка чата иногда показывает "Чат"/аватар-заглушку): getChatInfo — разовый
+    // suspend-запрос, который при плохой сети/ошибке молча возвращает null и заголовок так
+    // и остаётся дефолтным навсегда. observeChatInfo — realtime-подписка на документ чата:
+    // как только Firestore (кэш или сервер) отдаёт актуальные данные, они применяются, а при
+    // временном сбое сети предыдущее значение не сбрасывается в null.
+    fun observeChatInfo(chatId: String): kotlinx.coroutines.flow.Flow<ChatInfo?>
     suspend fun getGroupInfo(chatId: String): GroupInfo?
     fun observeForumTopics(chatId: String): Flow<List<ForumTopic>>
     suspend fun createForumTopic(chatId: String, title: String): ChannelUpdateResult
@@ -294,8 +304,11 @@ interface ChatRepository {
 
     // === НОВОЕ (система жалоб, п.5 ТЗ): бан участника чата/канала ===
 
-    /** ��сключить и заблокировать участника — он теряет доступ к чату и не может вернуться по приглашению. */
+    /** Исключить и заблокировать участника — он теряет доступ к чату и не может вернуться по приглашению. */
     suspend fun banMember(chatId: String, userId: String): ChannelUpdateResult
     suspend fun unbanMember(chatId: String, userId: String): ChannelUpdateResult
     suspend fun getBannedMemberIds(chatId: String): List<String>
+    // НОВОЕ (админ-функции групп): исключить участника из группы/канала без бана —
+    // он просто удаляется из participantIds (и adminIds, если был админом).
+    suspend fun removeMember(chatId: String, userId: String): ChannelUpdateResult
 }

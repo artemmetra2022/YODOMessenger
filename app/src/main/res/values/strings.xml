@@ -482,9 +482,25 @@
 
     <!-- Search -->
     <string name="search_hint">Найдите людей по имени или @username —
-или каналы по названию</string>
+или группы и каналы по названию</string>
     <string name="search_no_results">Никого и ничего не нашли</string>
     <string name="search_channels_header">Каналы</string>
+    <!-- НОВОЕ (админ-функции групп): группы в выдаче общего поиска -->
+    <string name="search_groups_header">Группы</string>
+    <string name="search_member_of_group">Вы участник</string>
+    <plurals name="search_group_members">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участников</item>
+    </plurals>
+    <!-- НОВОЕ (админ-функции групп): число участников в профиле группы -->
+    <plurals name="group_profile_members">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участников</item>
+    </plurals>
     <string name="search_people_header">Люди</string>
     <!-- НОВОЕ (поиск по настройкам): результаты настроек в общем поиске -->
     <string name="search_settings_header">Настройки</string>

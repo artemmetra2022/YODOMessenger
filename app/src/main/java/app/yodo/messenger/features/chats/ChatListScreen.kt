@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
@@ -132,6 +133,9 @@ fun ChatListScreen(
     onOpenAdminPanel: () -> Unit = {},
     // НОВОЕ (расширение интерфейса каналов): открытие каталога/рекомендаций каналов.
     onDiscoverChannels: () -> Unit = {},
+    // НОВОЕ (админ-функции групп): переход к экрану информации о группе по тапу
+    // на бейдж заявок (для владельца/админа — сразу к заявкам, без захода в чат).
+    onOpenGroupInfo: (String) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -391,6 +395,9 @@ fun ChatListScreen(
                                     onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
                                     isHidden = chat.chatId in hiddenChatIds,
                                     onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) },
+                                    // НОВОЕ (админ-функции групп): тап по бейджу заявок —
+                                    // сразу к экрану группы с заявками.
+                                    onRequestsClick = { onOpenGroupInfo(chat.chatId) },
                                     modifier = Modifier.animateItemPlacement(
                                         YodoMotion.emphasized(YodoMotion.DURATION_MEDIUM)
                                     )
@@ -936,6 +943,8 @@ internal fun SwipeableChatListItem(
     onToggleArchive: () -> Unit = {},
     isHidden: Boolean = false,
     onToggleHidden: () -> Unit = {},
+    // НОВОЕ (админ-функции групп): тап по бейджу заявок на карточке группы.
+    onRequestsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // НОВОЕ (motion): свайп теперь анимируется пружиной вместо мгновенного
@@ -988,6 +997,7 @@ internal fun SwipeableChatListItem(
             ChatListItem(
                 chat = chat, colorTheme = colorTheme,
                 onClick = onClick, onLongClick = { showMenu = true },
+                onRequestsClick = onRequestsClick,
                 isHidden = isHidden
             )
         }
@@ -1038,6 +1048,8 @@ private fun ChatListItem(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    // НОВОЕ (админ-функции групп): тап по бейджу заявок открывает экран группы.
+    onRequestsClick: () -> Unit = {},
     isHidden: Boolean = false
 ) {
     // ИСПРАВЛЕНО (логотип поддержки): чат поддержки (support_<uid>) раньше
@@ -1279,6 +1291,45 @@ private fun ChatListItem(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                }
+                // НОВОЕ (админ-функции групп): бейдж ожидающих заявок на вступление —
+                // виден только владельцу/админам группы (у остальных поле всегда 0).
+                // Лёгкий «приглушённый» стиль, чтобы не спорить с бейджем непрочитанных.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = chat.type == ChatType.GROUP && chat.pendingRequestsCount > 0,
+                    enter = androidx.compose.animation.scaleIn(
+                        animationSpec = YodoMotion.confirm(),
+                        initialScale = 0.4f
+                    ) + androidx.compose.animation.fadeIn(YodoMotion.standard(YodoMotion.DURATION_FAST)),
+                    exit = androidx.compose.animation.scaleOut(
+                        animationSpec = YodoMotion.exit(),
+                        targetScale = 0.4f
+                    ) + androidx.compose.animation.fadeOut(YodoMotion.exit())
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 6.dp)
+                            .clip(CircleShape)
+                            .background(colorTheme.primary.copy(alpha = 0.14f))
+                            // НОВОЕ (админ-функции групп): бейдж кликабелен — ведёт
+                            // прямо к заявкам (экран информации о группе).
+                            .clickable { onRequestsClick() }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.HowToReg,
+                            contentDescription = "Заявки на вступление",
+                            tint = colorTheme.primary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = if (chat.pendingRequestsCount > 99) "99+" else chat.pendingRequestsCount.toString(),
+                            color = colorTheme.primary,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
                 if (!isChannel) {
                     // НОВОЕ (motion): бейдж непрочитанных появляется/меняет число с лёгким

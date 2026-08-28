@@ -10,6 +10,8 @@ import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.NotificationMessageStore
 import app.yodo.messenger.data.local.UserSettingsPreferences
+import app.yodo.messenger.domain.model.AdminActionType
+import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.UserPresence
 import app.yodo.messenger.domain.repository.ChatRepository
@@ -64,6 +66,9 @@ data class ChatUiState(
     // (у каналов аватар лежит в самом документе чата, а не в профиле пользователя).
     val channelAvatarBase64: String? = null,
     val isAdmin: Boolean = false,
+    // НОВОЕ (модерация групп/каналов): права текущего пользователя в этом чате —
+    // используются для показа админских действий в меню сообщения (удаление чужих).
+    val myPermissions: MemberPermissions? = null,
     // НОВОЕ: подписка/подписчики для пользовательских каналов
     val subscriberCount: Int = 0,
     val isSubscribed: Boolean = false,
@@ -81,6 +86,11 @@ data class ChatUiState(
     val justForwardedTargetName: String? = null,
     val justForwardedTargetUserId: String? = null,
     val forwardUndoSecondsLeft: Int = 0,
+    // НОВОЕ (индикатор загрузки шапки чата): true, пока не пришёл первый снапшот с
+    // реальными данными чата (название/аватар). Используется, чтобы показать баннер
+    // "Обновление... N сек" вместо того, чтобы молча висеть на дефолтных "Чат"/"Ч".
+    val isChatInfoLoading: Boolean = true,
+    val chatInfoLoadingSeconds: Int = 0,
     // НОВОЕ (FAQ-бот поддержки): текущий экран бота поддержки. null == панель бота
     // скрыта (пользователь свернул её и печатает оператору вручную).
     val supportFaqScreen: SupportFaqScreen? = null
@@ -356,9 +366,29 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { draftsPreferences.saveDraft(chatId, text) }
     }
 
+    // ИСПРАВЛЕНО (шапка чата иногда показывает "Чат"/аватар-заглушку): раньше здесь был
+    // разовый suspend-запрос getChatInfo — при плохой сети/ошибке результат мог остаться
+    // null навсегда, и заголовок так и не обновлялся с дефолтного "Чат". Теперь подписка
+    // через observeChatInfo — данные применяются, как только становятся доступны (сначала
+    // из локального кэша Firestore, затем — подтверждённые сервером), а временный сетевой
+    // сбой не сбрасывает уже показанные корректные данные.
+    private var chatInfoInitialized = false
+
     private fun loadChatInfo() {
+        // НОВОЕ (баннер "Обновление... N сек"): пока не пришёл первый снапшот с данными
+        // чата, каждую секунду увеличиваем счётчик, чтобы в шапке было видно, сколько
+        // времени уже идёт загрузка (а не молча висело "Чат"/"Ч" без объяснения).
         viewModelScope.launch {
-            chatRepository.getChatInfo(chatId)?.let { info ->
+            var seconds = 0
+            while (_uiState.value.isChatInfoLoading) {
+                _uiState.value = _uiState.value.copy(chatInfoLoadingSeconds = seconds)
+                delay(1_000L)
+                seconds++
+            }
+        }
+        viewModelScope.launch {
+            chatRepository.observeChatInfo(chatId).collect { info ->
+                info ?: return@collect
                 // НОВОЕ: право публиковать посты — владелец канала (создатель) или
                 // назначенный им админ. Плюс сохраняем старую проверку по email для
                 // единственного служебного официального канала (обратная совместимость).
@@ -389,15 +419,31 @@ class ChatViewModel @Inject constructor(
                     isSubscribed = info.isSubscribed,
                     isChannelOwner = myUid != null && myUid == info.channelOwnerId,
                     // НОВОЕ (лента новостей): официальный канал показываем как ленту новостей.
-                    isOfficialChannel = chatId == ChatRepository.OFFICIAL_CHANNEL_ID
+                    isOfficialChannel = chatId == ChatRepository.OFFICIAL_CHANNEL_ID,
+                    // Первые реальные данные получены — гасим баннер загрузки, что
+                    // автоматически останавливает loadingTickerJob (see while-условие выше).
+                    isChatInfoLoading = false
                 )
-                info.otherUserId?.let { observePresence(it) }
-                if (info.type == "GROUP" || info.type == "CHANNEL") {
-                    val names = chatRepository.getGroupInfo(chatId)?.members?.associate { it.uid to it.displayName }.orEmpty()
-                    _uiState.value = _uiState.value.copy(authorNames = names)
+                // Одноразовые побочные эффекты (подписка на presence, загрузка имён
+                // участников, права модератора, статус блокировки) — только при первом
+                // успешном снапшоте, чтобы не переподписываться и не дублировать запросы
+                // на каждое обновление документа чата.
+                if (!chatInfoInitialized) {
+                    chatInfoInitialized = true
+                    info.otherUserId?.let { observePresence(it) }
+                    if (info.type == "GROUP" || info.type == "CHANNEL") {
+                        val names = chatRepository.getGroupInfo(chatId)?.members?.associate { it.uid to it.displayName }.orEmpty()
+                        _uiState.value = _uiState.value.copy(authorNames = names)
+                        // НОВОЕ (модерация): права текущего пользователя (владелец/роль) —
+                        // по ним UI решает, показывать ли удаление чужих сообщений.
+                        if (myUid != null) {
+                            val perms = chatRepository.getMemberPermissions(chatId, myUid)
+                            _uiState.value = _uiState.value.copy(myPermissions = perms)
+                        }
+                    }
+                    // НОВОЕ (реальная блокировка): в приватном чате узнаём, кто кого заблокировал.
+                    info.otherUserId?.let { other -> refreshBlockState(other) }
                 }
-                // НОВОЕ (реальная блокировка): в приватном чате узнаём, кто кого заблокировал.
-                info.otherUserId?.let { other -> refreshBlockState(other) }
             }
         }
     }
@@ -740,18 +786,47 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = messageRepository.deleteMessage(chatId, message.id)) {
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
-                else -> {}
+                else -> {
+                    // НОВОЕ (модерация): удаление чужого сообщения фиксируем в журнале
+                    // администраторов ТОЛЬКО после успеха — иначе отказ правил (например,
+                    // у снятого модератора) оставлял бы в журнале несуществующие действия.
+                    val myUid = currentUserId
+                    if (message.senderId != null && message.senderId != myUid) {
+                        chatRepository.logAdminAction(
+                            chatId = chatId,
+                            actionType = AdminActionType.MESSAGE_DELETED,
+                            details = "Удалено сообщение",
+                            targetUserId = message.senderId,
+                            targetUserName = _uiState.value.authorNames[message.senderId]
+                        )
+                    }
+                }
             }
         }
     }
 
     fun deleteMessages(messages: List<Message>) {
-        val ids = messages.filter { it.senderId == currentUserId }.map { it.id }
+        // НОВОЕ (модерация): модератор с правом DELETE_MESSAGES удаляет в режиме
+        // выбора и чужие сообщения; обычный участник — только свои.
+        val canDeleteOthers = _uiState.value.myPermissions?.has(
+            app.yodo.messenger.domain.model.Permission.DELETE_MESSAGES
+        ) == true
+        val mine = messages.filter { it.senderId == currentUserId }
+        val others = if (canDeleteOthers) messages.filter { it.senderId != null && it.senderId != currentUserId } else emptyList()
+        val ids = (mine + others).map { it.id }
         if (ids.isEmpty()) return
         viewModelScope.launch {
             when (val result = messageRepository.deleteMessages(chatId, ids)) {
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
-                else -> {}
+                else -> {
+                    if (others.isNotEmpty()) {
+                        chatRepository.logAdminAction(
+                            chatId = chatId,
+                            actionType = AdminActionType.MESSAGE_DELETED,
+                            details = "Удалено сообщений (модерация): ${others.size}"
+                        )
+                    }
+                }
             }
         }
     }

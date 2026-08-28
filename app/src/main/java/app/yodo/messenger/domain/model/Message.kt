@@ -1,6 +1,9 @@
 package app.yodo.messenger.domain.model
 
-enum class MessageStatus { SENDING, SENT, READ, FAILED }
+// ИСПРАВЛЕНО (индикатор прочитано/доставлено): добавлено промежуточное состояние
+// DELIVERED. Раньше статус прыгал сразу SENT -> READ, из-за чего получатель не мог
+// увидеть, что сообщение дошло до сервера/устройства собеседника, но ещё не прочитано.
+enum class MessageStatus { SENDING, SENT, DELIVERED, READ, FAILED }
 
 data class Message(
     val id: String,

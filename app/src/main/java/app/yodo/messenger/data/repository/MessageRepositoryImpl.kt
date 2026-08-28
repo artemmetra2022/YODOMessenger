@@ -17,6 +17,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -54,8 +55,37 @@ class MessageRepositoryImpl @Inject constructor(
                     // п.38: истёкшие исчезающие сообщения не показываем в UI
                     .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
                 trySend(messages)
+                // ИСПРАВЛЕНО (индикатор доставлено): как только чужое сообщение со
+                // статусом SENT дошло до нашего устройства (мы получили снапшот не из
+                // локального кэша, а подтверждённый сервером), помечаем его DELIVERED.
+                // Раньше статус мог перескакивать сразу в READ при входе в чат, минуя
+                // "доставлено" — отправитель никогда не видел промежуточное состояние.
+                markIncomingMessagesAsDelivered(snapshot)
             }
         awaitClose { listener.remove() }
+    }
+
+    /**
+     * ИСПРАВЛЕНО (индикатор доставлено): проставляет статус DELIVERED чужим сообщениям,
+     * которые дошли до нашего устройства (сервер подтвердил снапшот — hasPendingWrites
+     * == false), но всё ещё числятся SENT. Best-effort и не блокирует UI: ошибки просто
+     * логируются молча, чат продолжает работать даже если это обновление не удалось.
+     */
+    private fun markIncomingMessagesAsDelivered(snapshot: QuerySnapshot?) {
+        val myUid = firebaseAuth.currentUser?.uid ?: return
+        if (snapshot == null || snapshot.metadata.hasPendingWrites()) return
+        val toUpdate = snapshot.documents.filter { doc ->
+            doc.getString("senderId") != myUid && doc.getString("status") == MessageStatus.SENT.name
+        }
+        if (toUpdate.isEmpty()) return
+        toUpdate.chunked(500).forEach { chunk ->
+            val batch = firestore.batch()
+            chunk.forEach { doc -> batch.update(doc.reference, "status", MessageStatus.DELIVERED.name) }
+            // Best-effort: если batch не закоммитится (нет сети, отказ правил и т.п.),
+            // просто проглатываем ошибку — это не должно ронять экран чата или ретраить
+            // бесконечно, следующий снапшот всё равно попробует снова.
+            batch.commit().addOnFailureListener { }
+        }
     }
 
     // НОВОЕ (переработка каналов): одно сообщение — для превью поста в экране комментариев.
@@ -624,10 +654,14 @@ class MessageRepositoryImpl @Inject constructor(
             if (showReadReceipts) {
                 val messagesRef = chatRef.collection("messages")
                 // whereNotEqualTo требует составного индекса — заменяем на фильтрацию
-                // в памяти: загружаем только SENT-сообщения (они есть всегда), затем
-                // отбираем чужие. Batch делим по 500, чтобы не превысить лимит Firestore.
+                // в памяти: загружаем SENT- и DELIVERED-сообщения (статусы до READ),
+                // затем отбираем чужие. Batch делим по 500, чтобы не превысить лимит
+                // Firestore. ИСПРАВЛЕНО: раньше проверялся только "SENT" — сообщения,
+                // уже помеченные DELIVERED, не переходили в READ при открытии чата.
                 val sentSnapshot = messagesRef.whereEqualTo("status", "SENT").get().await()
-                val unreadDocs = sentSnapshot.documents.filter { it.getString("senderId") != uid }
+                val deliveredSnapshot = messagesRef.whereEqualTo("status", "DELIVERED").get().await()
+                val unreadDocs = (sentSnapshot.documents + deliveredSnapshot.documents)
+                    .filter { it.getString("senderId") != uid }
                 if (unreadDocs.isNotEmpty()) {
                     unreadDocs.chunked(500).forEach { chunk ->
                         val batch = firestore.batch()
@@ -928,9 +962,12 @@ class MessageRepositoryImpl @Inject constructor(
                 topicId = doc.getString("topicId"),
                 text = decryptMessageText(doc),
                 timestamp = doc.getLong("timestamp") ?: 0L,
-                status = doc.getString("status")?.let { raw ->
-                    runCatching { MessageStatus.valueOf(raw) }.getOrDefault(MessageStatus.SENT)
-                } ?: MessageStatus.SENT,
+                // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше статус брался
+                // прямо из поля "status" без учёта hasPendingWrites, поэтому оптимистично
+                // созданное локальное сообщение могло на мгновение показать неверную
+                // (устаревшую из кэша) галочку. Теперь решение централизовано в
+                // resolveMessageStatus и явно учитывает, подтверждена ли запись сервером.
+                status = resolveMessageStatus(doc.getString("status"), doc.metadata.hasPendingWrites()),
                 replyToMessageId = doc.getString("replyToMessageId"),
                 replyToSenderName = doc.getString("replyToSenderName"),
                 replyToText = doc.getString("replyToText"),

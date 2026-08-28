@@ -86,6 +86,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Flag
@@ -268,9 +269,27 @@ fun ChatScreen(
     LaunchedEffect(uiState.editingMessage) {
         uiState.editingMessage?.let { inputText = it.text }
     }
-    LaunchedEffect(uiState.messages.size) {
+    // ИСПРАВЛЕНО (автоскролл вниз не работает): раньше триггером было uiState.messages.size —
+    // эффект не срабатывал, если менялся контент последнего сообщения без изменения общего
+    // количества (реакция, статус прочитано, редактирование), и мог доскроллить не до самого
+    // низа при первом входе в чат, если LazyColumn ещё не успел измерить высоты элементов
+    // (особенно с картинками/медиа) до вызова animateScrollToItem. Теперь:
+    // 1) триггер — id последнего сообщения, а не размер списка, поэтому реагирует и на
+    //    обновления контента последнего сообщения;
+    // 2) делаем немедленный (без анимации) scrollToItem, а затем ещё раз после того, как
+    //    Compose пересчитает layout — на случай, если высота последнего айтема изменилась
+    //    уже после первого скролла (догрузилась картинка и т.п.).
+    LaunchedEffect(uiState.messages.lastOrNull()?.id, uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+            val lastIndex = uiState.messages.size - 1
+            listState.scrollToItem(lastIndex)
+            // Даём Compose кадр на пересчёт реальных высот (картинки/медиа догружаются
+            // асинхронно), затем ещё раз докручиваем — теперь уже с анимацией.
+            kotlinx.coroutines.delay(50L)
+            val currentLastIndex = uiState.messages.size - 1
+            if (currentLastIndex >= 0) {
+                listState.animateScrollToItem(currentLastIndex)
+            }
         }
     }
     LaunchedEffect(uiState.errorMessage) {
@@ -449,6 +468,31 @@ fun ChatScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {
+                // НОВОЕ (баннер "Обновление... N сек"): пока данные чата (название, аватар)
+                // ещё не пришли с Firestore, показываем явную полоску с индикатором и
+                // счётчиком секунд — вместо того, чтобы молча показывать дефолтные
+                // "Чат"/"Ч" без объяснения, что происходит.
+                if (uiState.isChatInfoLoading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(telegramBar)
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = colorTheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Обновление... ${uiState.chatInfoLoadingSeconds} сек",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                }
                 if (isSelectionMode) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -1368,6 +1412,9 @@ fun ChatScreen(
                                 colorTheme = colorTheme,
                                 isChannel = isChannel,
                                 isOfficialChannel = uiState.isOfficialChannel,
+                                // НОВОЕ (модерация): право удалять чужие сообщения
+                                // (владелец/модератор/админ с правом DELETE_MESSAGES).
+                                canDeleteOthers = uiState.myPermissions?.has(app.yodo.messenger.domain.model.Permission.DELETE_MESSAGES) == true,
                                 isSelectionMode = isSelectionMode,
                                 isSelected = message.id in selectedMessageIds.value,
                                 groupPosition = groupPosition,
@@ -1655,6 +1702,8 @@ private fun SwipeableMessageBubble(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
     isOfficialChannel: Boolean = false,
+    // НОВОЕ (модерация): может ли текущий пользователь удалять чужие сообщения.
+    canDeleteOthers: Boolean = false,
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
     onCommentsClick: () -> Unit,
@@ -1743,6 +1792,7 @@ private fun SwipeableMessageBubble(
                 currentUserId = currentUserId, autoDownloadImages = autoDownloadImages,
                 colorTheme = colorTheme,
                 isChannel = isChannel, isOfficialChannel = isOfficialChannel,
+                canDeleteOthers = canDeleteOthers,
                 isSelectionMode = isSelectionMode, isSelected = isSelected,
                 onCommentsClick = onCommentsClick,
                 onReply = onReply, onEdit = onEdit, onDelete = onDelete,
@@ -1777,6 +1827,8 @@ private fun MessageBubble(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     isChannel: Boolean,
     isOfficialChannel: Boolean = false,
+    // НОВОЕ (модерация): может ли текущий пользователь удалять чужие сообщения.
+    canDeleteOthers: Boolean = false,
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
     groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
@@ -1835,6 +1887,8 @@ private fun MessageBubble(
     // НОВОЕ (копирование фрагмента): отдельный режим выделения текста сообщения,
     // открывается кнопкой "Копировать фрагмент" из контекстного меню.
     var showTextSelectionDialog by remember { mutableStateOf(false) }
+    // НОВОЕ (модерация): подтверждение удаления чужого сообщения модератором/админом.
+    var showDeleteOthersConfirm by remember { mutableStateOf(false) }
     if (message.isDeleted) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
             Text("Сообщение удалено", style = MaterialTheme.typography.bodyMedium, color = Color.Gray, modifier = Modifier.padding(8.dp))
@@ -2138,7 +2192,21 @@ private fun MessageBubble(
                                 append(formatMessageTime(message.timestamp))
                                 if (isOwnMessage) {
                                     append("  ")
-                                    append(if (message.status == MessageStatus.READ) "✓✓" else "✓")
+                                    // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше
+                                    // здесь было только два варианта ("✓✓" для READ, "✓" для всего
+                                    // остального), поэтому SENDING/FAILED/DELIVERED выглядели
+                                    // одинаково как "отправлено". Теперь текстовые галочки
+                                    // синхронизированы по смыслу и по цвету с иконкой статуса ниже.
+                                    val (statusText, statusColor) = when (message.status) {
+                                        MessageStatus.SENDING -> "🕓" to timeColor
+                                        MessageStatus.FAILED -> "⚠" to Color(0xFFFF5A5A)
+                                        MessageStatus.SENT -> "✓" to timeColor
+                                        MessageStatus.DELIVERED -> "✓✓" to timeColor
+                                        MessageStatus.READ -> "✓✓" to Color(0xFF60E6FF)
+                                    }
+                                    pushStyle(SpanStyle(color = statusColor, fontSize = 11.sp))
+                                    append(statusText)
+                                    pop()
                                 }
                                 pop()
                             }
@@ -2228,12 +2296,23 @@ private fun MessageBubble(
                             )
                             Text("${message.viewCount}", color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
                         }
+                        // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше было
+                        // только два визуальных состояния (READ vs всё остальное), из-за
+                        // чего SENDING/FAILED выглядели неотличимо от обычного "отправлено",
+                        // а промежуточного "доставлено" не было вовсе. Теперь все статусы
+                        // отражены отдельной иконкой/цветом.
                         if (isOwnMessage && message.text.isBlank()) {
-                            val statusIcon = if (message.status == MessageStatus.READ) Icons.Filled.DoneAll else Icons.Filled.Done
+                            val (statusIcon, statusDescription, statusTint) = when (message.status) {
+                                MessageStatus.SENDING -> Triple(Icons.Filled.Schedule, "Отправка…", textColor.copy(alpha = 0.5f))
+                                MessageStatus.FAILED -> Triple(Icons.Filled.ErrorOutline, "Не отправлено", Color(0xFFFF5A5A))
+                                MessageStatus.SENT -> Triple(Icons.Filled.Done, "Отправлено", textColor.copy(alpha = 0.7f))
+                                MessageStatus.DELIVERED -> Triple(Icons.Filled.DoneAll, "Доставлено", textColor.copy(alpha = 0.7f))
+                                MessageStatus.READ -> Triple(Icons.Filled.DoneAll, "Прочитано", Color(0xFF60E6FF))
+                            }
                             Icon(
                                 imageVector = statusIcon,
-                                contentDescription = if (message.status == MessageStatus.READ) "Прочитано" else "Отправлено",
-                                tint = if (message.status == MessageStatus.READ) Color(0xFF60E6FF) else textColor.copy(alpha = 0.7f),
+                                contentDescription = statusDescription,
+                                tint = statusTint,
                                 modifier = Modifier.size(14.dp).padding(start = 4.dp)
                             )
                         }
@@ -2313,7 +2392,7 @@ private fun MessageBubble(
                     }
                     if (isOwnMessage) {
                         DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
-                        DropdownMenuItem(text = { Text("Удалит��") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
+                        DropdownMenuItem(text = { Text("Удалить") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
                     } else {
                         // НОВОЕ (система жалоб, п.5 ТЗ): жалоба на чужое сообщение.
                         DropdownMenuItem(
@@ -2321,8 +2400,35 @@ private fun MessageBubble(
                             leadingIcon = { Icon(Icons.Filled.Flag, contentDescription = null) },
                             onClick = { showMenu = false; onReport() }
                         )
+                        // НОВОЕ (модерация): модератор/админ (право DELETE_MESSAGES)
+                        // может удалить чужое сообщение — с подтверждением.
+                        if (canDeleteOthers) {
+                            DropdownMenuItem(
+                                text = { Text("Удалить для всех", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = { showMenu = false; showDeleteOthersConfirm = true }
+                            )
+                        }
                     }
                 }
+
+        // НОВОЕ (модерация): подтверждение удаления чужого сообщения.
+        if (showDeleteOthersConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteOthersConfirm = false },
+                title = { Text("Удалить сообщение?") },
+                text = { Text("Сообщение будет удалено для всех участников. Действие попадёт в журнал администраторов.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteOthersConfirm = false
+                        onDelete()
+                    }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteOthersConfirm = false }) { Text("Отмена") }
+                }
+            )
+        }
 
         // НОВОЕ (копирование фрагмента): отдельный диалог с режимом выделения текста —
         // открывается только по кнопке "Копировать фрагмент" из меню, не по долгому нажатию.
