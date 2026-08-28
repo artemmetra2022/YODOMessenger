@@ -91,11 +91,13 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
 
-      # Gradle сам создаёт debug.keystore при первой сборке (стандартные пароли Android).
-      # Печатаем SHA-1/SHA-256 прямо в лог — нужны для Google Sign-In и Phone Auth,
-      # получить их без компьютера (без `./gradlew signingReport`) больше неоткуда.
-      - name: Print debug keystore SHA-1 / SHA-256
-        run: keytool -list -v -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
+      # Отпечатки подписи нужны для Google Sign-In и Phone Auth — получить их без
+      # компьютера (без `./gradlew signingReport`) больше неоткуда. Берём напрямую
+      # из собранного APK через apksigner (не зависит от alias/расположения keystore).
+      - name: Print APK signing SHA-1 / SHA-256
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME" -name apksigner -type f | head -1)
+          "$APKSIGNER" print-certs --print-certs-subject-to-page-delimiter "" app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256"
      
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
