@@ -62,7 +62,7 @@ jobs:
         id: release
         run: |
           python3 - <<'EOF'
-          import json, re, urllib.request
+          import json, os, re, urllib.request
 
           tag = ""
           try:
@@ -77,11 +77,15 @@ jobs:
           m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag or "")
           if m:
               major, minor, patch = map(int, m.groups())
-              print(f"version_name={major}.{minor}.{patch}")
-              print(f"version_code={major * 10000 + minor * 100 + patch}")
+              version_name = f"{major}.{minor}.{patch}"
+              version_code = major * 10000 + minor * 100 + patch
           else:
-              print("version_name=0.1.0-mvp")
-              print("version_code=1")
+              version_name = "0.1.0-mvp"
+              version_code = 1
+          print(f"Latest release tag: {tag!r} -> versionName={version_name}, versionCode={version_code}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version_name={version_name}\n")
+              f.write(f"version_code={version_code}\n")
           EOF
 
       - name: Build debug APK
@@ -90,6 +94,8 @@ jobs:
       # Gradle сам создаёт debug.keystore при первой сборке (стандартные пароли Android).
       # Печатаем SHA-1/SHA-256 прямо в лог — нужны для Google Sign-In и Phone Auth,
       # получить их без компьютера (без `./gradlew signingReport`) больше неоткуда.
+      - name: Print debug keystore SHA-1 / SHA-256
+        run: keytool -list -v -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
      
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
