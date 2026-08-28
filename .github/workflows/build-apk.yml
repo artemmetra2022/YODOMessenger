@@ -97,7 +97,7 @@ jobs:
       - name: Print APK signing SHA-1 / SHA-256
         run: |
           APKSIGNER=$(find "$ANDROID_HOME" -name apksigner -type f | head -1)
-          "$APKSIGNER" print-certs --print-certs-subject-to-page-delimiter "" app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256"
      
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
