@@ -56,8 +56,36 @@ jobs:
           echo "--- Проверка валидности JSON ---"
           python3 -c "import json; json.load(open('app/google-services.json'))" && echo "OK: google-services.json валиден"
 
+      # Версия берётся из последнего GitHub-релиза (тег вида v1.2.3 → versionName=1.2.3,
+      # versionCode=10203). Если релиза нет или тег не в формате vX.Y.Z — fallback на дефолт.
+      - name: Get latest release version
+        id: release
+        run: |
+          python3 - <<'EOF'
+          import json, re, urllib.request
+
+          tag = ""
+          try:
+              with urllib.request.urlopen(
+                  "https://api.github.com/repos/artemmetra2022/YODOMessenger/releases/latest",
+                  timeout=15,
+              ) as resp:
+                  tag = json.load(resp).get("tag_name", "")
+          except Exception:
+              pass
+
+          m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag or "")
+          if m:
+              major, minor, patch = map(int, m.groups())
+              print(f"version_name={major}.{minor}.{patch}")
+              print(f"version_code={major * 10000 + minor * 100 + patch}")
+          else:
+              print("version_name=0.1.0-mvp")
+              print("version_code=1")
+          EOF
+
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleDebug -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
 
       # Gradle сам создаёт debug.keystore при первой сборке (стандартные пароли Android).
       # Печатаем SHA-1/SHA-256 прямо в лог — нужны для Google Sign-In и Phone Auth,
