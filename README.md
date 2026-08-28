@@ -192,8 +192,6 @@ app/src/main/java/app/yodo/messenger/
 - **Compile SDK**: 34
 - **Target SDK**: 34
 - **Min SDK**: 26
-- **Version Code**: 1
-- **Version Name**: 0.1.0-mvp
 - **Application ID**: `app.yodo.messenger`
 
 ### Разрешения приложения
