@@ -36,6 +36,8 @@ import {
   serverTimestamp,
   deleteField,
   deleteDoc,
+  arrayUnion,
+  arrayRemove,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { initQrLogin } from "./qr-login.js";
 
@@ -213,6 +215,12 @@ let allMessagesLoaded = false;
 
 // Вложение (фото) для следующей отправки
 let pendingImageBase64 = null;
+
+// Сообщение, на которое отвечаем (reply/цитирование)
+let pendingReply = null; // { id, senderId, senderName, text }
+
+// Emoji для быстрых реакций
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
 // Индикатор "печатает..." — троттлинг собственных апдейтов
 let lastTypingSentAt = 0;
@@ -830,6 +838,9 @@ function findChatData(chatId) {
 function canSendInActiveChat() {
   if (!activeChatId) return false;
   if (activeChatId === OFFICIAL_CHANNEL_ID) return isAdmin;
+  if (activeChatData && activeChatData.type === "CHANNEL") {
+    return isChannelManagerOf(activeChatData);
+  }
   return true;
 }
 
@@ -840,13 +851,60 @@ function updateChatHeader() {
   $("chat-title").innerHTML = (activeChatData ? esc(chatDisplayName(activeChatData)) : "Чат") + verified;
   $("chat-header-avatar").textContent = activeChatData ? (chatDisplayName(activeChatData)[0] || "?").toUpperCase() : "?";
 
-  // Форма отправки скрыта для не-админов в официальном канале (read-only рассылка).
+  // Форма отправки скрыта для не-владельцев/админов канала (read-only лента).
   const canSend = canSendInActiveChat();
   $("form-send").classList.toggle("hidden", !canSend);
   $("btn-attach").classList.toggle("hidden", !canSend);
   if (!canSend) {
-    $("chat-subtitle").textContent = "Только для чтения — официальные объявления";
+    if (activeChatId === OFFICIAL_CHANNEL_ID) {
+      $("chat-subtitle").textContent = "Только для чтения — официальные объявления";
+    } else if (activeChatData && activeChatData.type === "CHANNEL") {
+      const count = (activeChatData.participantIds || []).length;
+      $("chat-subtitle").textContent = count + " подписчиков · только владелец/админы публикуют посты";
+    } else {
+      $("chat-subtitle").textContent = "Только для чтения";
+    }
     $("chat-subtitle").classList.remove("online");
+  } else if (activeChatData && activeChatData.type === "CHANNEL") {
+    const count = (activeChatData.participantIds || []).length;
+    $("chat-subtitle").textContent = count + " подписчиков";
+    $("chat-subtitle").classList.remove("online");
+  }
+
+  updateChannelSubscribeButton();
+}
+
+// НОВОЕ: кнопка подписки/отписки в шапке для обычных (не служебных) каналов,
+// когда пользователь не владелец/админ — как isSubscribed/isChannelOwner в Android.
+function updateChannelSubscribeButton() {
+  let btn = $("btn-channel-subscribe");
+  const isRegularChannel = activeChatData && activeChatData.type === "CHANNEL" && activeChatId !== OFFICIAL_CHANNEL_ID;
+  if (!isRegularChannel) {
+    if (btn) btn.classList.add("hidden");
+    return;
+  }
+  const isOwner = activeChatData.createdBy === currentUser.uid;
+  const isSubscribed = (activeChatData.participantIds || []).includes(currentUser.uid);
+  const hasPending = false; // заявка проверяется лениво, см. requestToJoinChannel
+
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "btn-channel-subscribe";
+    btn.className = "btn-secondary";
+    btn.style.marginLeft = "auto";
+    btn.style.flexShrink = "0";
+    $("chat-header-info").after(btn);
+  }
+  btn.classList.remove("hidden");
+  if (isOwner) {
+    btn.classList.add("hidden"); // владелец не отписывается от своего канала
+  } else if (isSubscribed) {
+    btn.textContent = "Отписаться";
+    btn.onclick = () => unsubscribeFromChannel(activeChatId);
+  } else {
+    const mode = channelAccessModeOf(activeChatData);
+    btn.textContent = mode === "MODERATED" ? "Подать заявку" : "Подписаться";
+    btn.onclick = () => joinOrOpenChannel(activeChatData);
   }
 }
 
@@ -861,8 +919,10 @@ function openChat(chatId) {
   $("chat-active").classList.remove("hidden");
   document.getElementById("screen-app").classList.add("chat-open");
   $("messages").innerHTML = "";
+  $("btn-load-more").classList.add("hidden");
   $("typing-indicator").classList.add("hidden");
   cancelPendingImage();
+  cancelReply();
   oldestLoadedMessageDoc = null;
   allMessagesLoaded = false;
   renderChatList();
@@ -925,11 +985,8 @@ function listenActiveMessages() {
     const container = $("messages");
     const wasNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
 
-    // Сохраняем кнопку "Загрузить ещё" при перерисовке
-    const loadMoreBtn = $("btn-load-more");
     container.innerHTML = "";
-    container.appendChild(loadMoreBtn);
-    loadMoreBtn.classList.toggle("hidden", allMessagesLoaded || snap.size < MESSAGES_PAGE_SIZE);
+    $("btn-load-more").classList.toggle("hidden", allMessagesLoaded || snap.size < MESSAGES_PAGE_SIZE);
 
     if (snap.docs.length > 0) oldestLoadedMessageDoc = snap.docs[0];
 
@@ -977,16 +1034,15 @@ $("btn-load-more").addEventListener("click", async () => {
   const snap = await getDocs(q);
   if (snap.empty) { allMessagesLoaded = true; $("btn-load-more").classList.add("hidden"); return; }
 
-  const loadMoreBtn = $("btn-load-more");
   const frag = document.createDocumentFragment();
   snap.forEach((d) => {
     const msg = d.data();
     msg.id = d.id;
     frag.appendChild(renderMessage(msg));
   });
-  loadMoreBtn.after(frag);
+  container.prepend(frag);
   oldestLoadedMessageDoc = snap.docs[0];
-  if (snap.size < MESSAGES_PAGE_SIZE) { allMessagesLoaded = true; loadMoreBtn.classList.add("hidden"); }
+  if (snap.size < MESSAGES_PAGE_SIZE) { allMessagesLoaded = true; $("btn-load-more").classList.add("hidden"); }
 
   // Сохраняем позицию скролла относительно новой высоты
   container.scrollTop = container.scrollHeight - prevHeight;
@@ -1000,6 +1056,8 @@ $("btn-back").addEventListener("click", () => {
   if (presenceUnsub) { presenceUnsub(); presenceUnsub = null; }
   if (typingUnsub) { typingUnsub(); typingUnsub = null; }
   cancelPendingImage();
+  cancelReply();
+  $("btn-load-more").classList.add("hidden");
   $("chat-active").classList.add("hidden");
   $("chat-empty").classList.remove("hidden");
   document.getElementById("screen-app").classList.remove("chat-open");
@@ -1056,6 +1114,207 @@ function buildReplyPreview(replyToSenderName, replyToText) {
   return div;
 }
 
+/* ------------------------------------------------------------------ */
+/* Reply / цитирование                                                  */
+/* ------------------------------------------------------------------ */
+
+function cancelReply() {
+  pendingReply = null;
+  $("reply-preview-bar").classList.add("hidden");
+}
+
+function startReply(msg) {
+  if (!msg || msg.isDeleted) return;
+  pendingReply = {
+    id: msg.id,
+    senderId: msg.senderId,
+    senderName: msg.senderId === currentUser.uid ? "Вы" : senderNameForReply(msg.senderId),
+    text: msg.text || (msg.imageBase64 ? "📷 Фото" : ""),
+  };
+  $("reply-preview-name").textContent = pendingReply.senderName;
+  $("reply-preview-text").textContent = pendingReply.text;
+  $("reply-preview-bar").classList.remove("hidden");
+  $("message-input").focus();
+}
+
+function senderNameForReply(uid) {
+  if (uid === "support_system") return "Поддержка YODO";
+  if (userNamesCache.has(uid)) return userNamesCache.get(uid);
+  return "…";
+}
+
+$("btn-cancel-reply").addEventListener("click", cancelReply);
+
+/* ------------------------------------------------------------------ */
+/* Реакции                                                              */
+/* ------------------------------------------------------------------ */
+
+function closeAnyEmojiPicker() {
+  document.querySelectorAll(".emoji-picker").forEach((el) => el.remove());
+}
+
+function toggleReaction(chatId, msgId, emoji, currentReactions) {
+  const uid = currentUser.uid;
+  const list = (currentReactions && currentReactions[emoji]) || [];
+  const mine = list.includes(uid);
+  const field = "reactions." + emoji;
+  const msgRef = doc(db, "chats", chatId, "messages", msgId);
+  if (mine) {
+    const next = list.filter((u) => u !== uid);
+    if (next.length === 0) {
+      updateDoc(msgRef, { [field]: deleteField() }).catch(() => {});
+    } else {
+      updateDoc(msgRef, { [field]: next }).catch(() => {});
+    }
+  } else {
+    updateDoc(msgRef, { [field]: [...list, uid] }).catch(() => {});
+  }
+}
+
+function openEmojiPicker(anchorBtn, chatId, msg) {
+  closeAnyEmojiPicker();
+  const picker = document.createElement("div");
+  picker.className = "emoji-picker";
+  for (const emoji of QUICK_REACTIONS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = emoji;
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleReaction(chatId, msg.id, emoji, msg.reactions);
+      closeAnyEmojiPicker();
+    });
+    picker.appendChild(b);
+  }
+  anchorBtn.closest(".msg").appendChild(picker);
+  setTimeout(() => {
+    document.addEventListener("click", closeAnyEmojiPicker, { once: true });
+  }, 0);
+}
+
+function buildReactionsBar(chatId, msg) {
+  const reactions = msg.reactions;
+  if (!reactions || Object.keys(reactions).length === 0) return null;
+  const bar = document.createElement("div");
+  bar.className = "msg-reactions";
+  for (const [emoji, uids] of Object.entries(reactions)) {
+    if (!uids || uids.length === 0) continue;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "reaction-chip" + (uids.includes(currentUser.uid) ? " mine" : "");
+    chip.innerHTML = `${esc(emoji)} <span>${uids.length}</span>`;
+    chip.addEventListener("click", () => toggleReaction(chatId, msg.id, emoji, reactions));
+    bar.appendChild(chip);
+  }
+  return bar.childElementCount ? bar : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Пересылка сообщений                                                  */
+/* ------------------------------------------------------------------ */
+
+let forwardingMessage = null; // { text, imageBase64, senderId }
+
+function forwardableChatsList() {
+  const list = [];
+  if (!isAdmin && supportChatData) list.push(supportChatData);
+  for (const chat of chatsCache.values()) {
+    if (chat.type === "GROUP" || chat.type === "PRIVATE" || chat.type === "CHANNEL") list.push(chat);
+  }
+  return list;
+}
+
+function openForwardModal(msg) {
+  forwardingMessage = {
+    text: msg.text || "",
+    imageBase64: msg.imageBase64 || null,
+    senderId: msg.senderId,
+  };
+  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : "");
+  $("forward-search-input").value = "";
+  renderForwardResults(forwardableChatsList());
+  $("modal-forward").classList.remove("hidden");
+  $("forward-search-input").focus();
+}
+
+function renderForwardResults(chats) {
+  const el = $("forward-results");
+  el.innerHTML = "";
+  if (chats.length === 0) {
+    el.innerHTML = '<div class="search-empty">Нет доступных чатов</div>';
+    return;
+  }
+  for (const chat of chats) {
+    const item = document.createElement("div");
+    item.className = "user-result";
+    const letter = (chatDisplayName(chat)[0] || "?").toUpperCase();
+    item.innerHTML = `
+      <div class="chat-avatar">${esc(letter)}</div>
+      <div>
+        <div class="user-result-name">${esc(chatDisplayName(chat))}</div>
+      </div>`;
+    item.addEventListener("click", () => sendForward(chat.id));
+    el.appendChild(item);
+  }
+}
+
+$("forward-search-input").addEventListener("input", () => {
+  const term = $("forward-search-input").value.trim().toLowerCase();
+  const chats = forwardableChatsList().filter((c) => chatDisplayName(c).toLowerCase().includes(term));
+  renderForwardResults(chats);
+});
+
+$("btn-close-forward-modal").addEventListener("click", () => {
+  $("modal-forward").classList.add("hidden");
+  forwardingMessage = null;
+});
+$("modal-forward").addEventListener("click", (e) => {
+  if (e.target === $("modal-forward")) $("btn-close-forward-modal").click();
+});
+
+async function sendForward(targetChatId) {
+  if (!forwardingMessage) return;
+  const fwd = forwardingMessage;
+  $("modal-forward").classList.add("hidden");
+  forwardingMessage = null;
+
+  try {
+    const now = Date.now();
+    const chat = findChatData(targetChatId) || chatsCache.get(targetChatId);
+
+    const batch = writeBatch(db);
+    const msgRef = doc(collection(db, "chats", targetChatId, "messages"));
+    const msgData = {
+      senderId: currentUser.uid,
+      timestamp: now,
+      status: "SENT",
+      notified: false,
+      forwardedFromId: fwd.senderId,
+    };
+    if (fwd.text) msgData.text = fwd.text;
+    if (fwd.imageBase64) msgData.imageBase64 = fwd.imageBase64;
+    batch.set(msgRef, msgData);
+
+    const chatRef = doc(db, "chats", targetChatId);
+    const chatUpdate = {
+      lastMessage: (fwd.text || "📷 Фото"),
+      lastMessageTimestamp: now,
+      lastMessageSenderId: currentUser.uid,
+      lastMessageStatus: "SENT",
+    };
+    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
+    recipients.delete(currentUser.uid);
+    for (const uid of recipients) {
+      chatUpdate["unreadCounts." + uid] = increment(1);
+    }
+    batch.update(chatRef, chatUpdate);
+    await batch.commit();
+  } catch (err) {
+    console.error("Ошибка пересылки:", err);
+    alert("Не удалось переслать сообщение");
+  }
+}
+
 function buildMessageMeta(msg) {
   const div = document.createElement("div");
   div.className = "msg-meta";
@@ -1074,6 +1333,14 @@ function buildMessageMeta(msg) {
   return div;
 }
 
+function buildForwardedLabel() {
+  const div = document.createElement("div");
+  div.className = "msg-sender";
+  div.style.opacity = "0.7";
+  div.textContent = "Переслано";
+  return div;
+}
+
 function renderMessage(msg) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + (msg.senderId === currentUser.uid ? "out" : "in");
@@ -1085,7 +1352,9 @@ function renderMessage(msg) {
   } else {
     const isGroupLike = activeChatData && (activeChatData.type === "GROUP" || activeChatData.type === "CHANNEL");
     const isSupportLike = activeChatData && activeChatData.type === "SUPPORT";
-    if (msg.senderId !== currentUser.uid && (isGroupLike || isSupportLike)) {
+    if (msg.forwardedFromId) {
+      bubble.appendChild(buildForwardedLabel());
+    } else if (msg.senderId !== currentUser.uid && (isGroupLike || isSupportLike)) {
       bubble.appendChild(buildSenderLabel(msg.senderId));
     }
     if (msg.imageBase64) {
@@ -1097,10 +1366,47 @@ function renderMessage(msg) {
     if (msg.text) {
       bubble.appendChild(document.createTextNode(msg.text));
     }
+    const reactionsBar = buildReactionsBar(activeChatId, msg);
+    if (reactionsBar) bubble.appendChild(reactionsBar);
     bubble.appendChild(buildMessageMeta(msg));
   }
 
   wrap.appendChild(bubble);
+
+  if (!msg.isDeleted) {
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
+
+    const reactBtn = document.createElement("button");
+    reactBtn.type = "button";
+    reactBtn.className = "msg-action-btn";
+    reactBtn.title = "Реакция";
+    reactBtn.textContent = "🙂";
+    reactBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openEmojiPicker(reactBtn, activeChatId, msg);
+    });
+    actions.appendChild(reactBtn);
+
+    const replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.className = "msg-action-btn";
+    replyBtn.title = "Ответить";
+    replyBtn.textContent = "↩️";
+    replyBtn.addEventListener("click", () => startReply(msg));
+    actions.appendChild(replyBtn);
+
+    const forwardBtn = document.createElement("button");
+    forwardBtn.type = "button";
+    forwardBtn.className = "msg-action-btn";
+    forwardBtn.title = "Переслать";
+    forwardBtn.textContent = "➡️";
+    forwardBtn.addEventListener("click", () => openForwardModal(msg));
+    actions.appendChild(forwardBtn);
+
+    wrap.appendChild(actions);
+  }
+
   return wrap;
 }
 
@@ -1138,8 +1444,10 @@ $("form-send").addEventListener("submit", async (e) => {
     return;
   }
 
+  const replySnapshot = pendingReply;
   input.value = "";
   cancelPendingImage();
+  cancelReply();
   clearTypingState();
 
   try {
@@ -1157,6 +1465,11 @@ $("form-send").addEventListener("submit", async (e) => {
     };
     if (text) msgData.text = text;
     if (imageBase64) msgData.imageBase64 = imageBase64;
+    if (replySnapshot) {
+      msgData.replyToId = replySnapshot.id;
+      msgData.replyToSenderName = replySnapshot.senderName;
+      msgData.replyToText = replySnapshot.text;
+    }
     batch.set(msgRef, msgData);
 
     const chatRef = doc(db, "chats", activeChatId);
@@ -1183,6 +1496,7 @@ $("form-send").addEventListener("submit", async (e) => {
   } catch (err) {
     console.error("Ошибка отправки:", err);
     input.value = text; // возвращаем текст в поле, чтобы не потерять
+    if (replySnapshot) startReply({ id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text, isDeleted: false });
   }
 });
 
@@ -1326,6 +1640,7 @@ async function runSearch() {
     // Поиск по usernameLowercase (префикс) + displayNameLowercase (префикс)
     const byUsername = await searchUsersByField("usernameLowercase", term);
     const byName = await searchUsersByField("displayNameLowercase", term);
+    const channels = await searchChannels(term);
 
     const seen = new Set();
     const users = [];
@@ -1333,11 +1648,12 @@ async function runSearch() {
     for (const d of byName.docs) { if (!seen.has(d.id)) { seen.add(d.id); users.push(d); } }
 
     resultsEl.innerHTML = "";
-    if (users.length === 0) {
+    if (users.length === 0 && channels.length === 0) {
       resultsEl.innerHTML = '<div class="search-empty">Никого не найдено</div>';
       return;
     }
 
+    for (const channel of channels) resultsEl.appendChild(buildChannelResultItem(channel));
     for (const d of users) {
       if (d.id === currentUser.uid) continue;
       resultsEl.appendChild(buildUserResultItem(d.id, d.data()));
@@ -1491,6 +1807,215 @@ function renderGroupSelectedMembers() {
     });
     container.appendChild(chip);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Каналы — точный порт ChatRepositoryImpl.createChannel/subscribe/       */
+/* unsubscribe/requestToJoin/searchChannels/isChannelManager (Android)    */
+/* ------------------------------------------------------------------ */
+
+$("btn-new-channel").addEventListener("click", () => {
+  $("channel-title-input").value = "";
+  $("channel-desc-input").value = "";
+  $("channel-access-mode").value = "OPEN";
+  $("channel-error").textContent = "";
+  $("modal-new-channel").classList.remove("hidden");
+  $("channel-title-input").focus();
+});
+
+$("btn-close-channel-modal").addEventListener("click", () => {
+  $("modal-new-channel").classList.add("hidden");
+});
+$("modal-new-channel").addEventListener("click", (e) => {
+  if (e.target === $("modal-new-channel")) $("btn-close-channel-modal").click();
+});
+
+// НОВОЕ (переработка каналов): создание — как createChannel в Android.
+// Владелец = createdBy, admins изначально пуст, режим доступа по умолчанию OPEN,
+// ограничения (forwarding/comments/reactions/saving/linkPreviews) — всё разрешено.
+$("btn-create-channel").addEventListener("click", async () => {
+  const errorEl = $("channel-error");
+  errorEl.textContent = "";
+  const title = $("channel-title-input").value.trim();
+  const description = $("channel-desc-input").value.trim();
+  const accessMode = $("channel-access-mode").value; // OPEN | MODERATED | HIDDEN
+
+  if (!title) { errorEl.textContent = "Введите название канала"; return; }
+
+  try {
+    const now = Date.now();
+    const chatRef = doc(collection(db, "chats"));
+    await setDoc(chatRef, {
+      participantIds: [currentUser.uid],
+      type: "CHANNEL",
+      title: title,
+      titleLowercase: title.toLowerCase(),
+      description: description,
+      isVerified: false,
+      lastMessage: "",
+      lastMessageTimestamp: now,
+      lastMessageSenderId: currentUser.uid,
+      unreadCounts: { [currentUser.uid]: 0 },
+      isOnline: false,
+      createdBy: currentUser.uid,
+      adminIds: [],
+      createdAt: now,
+      accessMode: accessMode,
+      allowForwarding: true,
+      allowComments: true,
+      allowReactions: true,
+      allowSaving: true,
+      allowLinkPreviews: true,
+    });
+
+    $("modal-new-channel").classList.add("hidden");
+    openChat(chatRef.id);
+  } catch (err) {
+    console.error("Создание канала:", err);
+    errorEl.textContent = "Не удалось создать канал: " + (err.message || "");
+  }
+});
+
+// НОВОЕ: режим доступа канала определяет тип входа в него.
+function channelAccessModeOf(chat) {
+  const raw = (chat && chat.accessMode ? String(chat.accessMode) : "").toUpperCase();
+  return raw === "MODERATED" || raw === "HIDDEN" ? raw : "OPEN";
+}
+
+function isChannelManagerOf(chat) {
+  if (!chat || !currentUser) return false;
+  const admins = chat.adminIds || [];
+  return chat.createdBy === currentUser.uid || admins.includes(currentUser.uid);
+}
+
+// Порт subscribeToChannel: доступно только для OPEN-каналов (MODERATED идёт
+// через requestToJoinChannel, HIDDEN не должен попадать сюда из поиска).
+async function subscribeToChannel(chatId) {
+  try {
+    await updateDoc(doc(db, "chats", chatId), {
+      participantIds: arrayUnion(currentUser.uid),
+      ["unreadCounts." + currentUser.uid]: 0,
+    });
+    // НОВОЕ (статистика владельца): событие подписки — best-effort, как в Android.
+    setDoc(doc(db, "chats", chatId, "subscriberEvents", currentUser.uid), {
+      subscribedAt: Date.now(),
+      type: "SUBSCRIBE",
+    }).catch(() => {});
+  } catch (err) {
+    console.error("Не удалось подписаться на канал:", err);
+    alert("Не удалось подписаться на канал");
+  }
+}
+
+// Порт unsubscribeFromChannel: владелец не может отписаться (проверка как в Android).
+async function unsubscribeFromChannel(chatId) {
+  const chat = findChatData(chatId);
+  if (chat && chat.createdBy === currentUser.uid) return;
+  try {
+    await updateDoc(doc(db, "chats", chatId), {
+      participantIds: arrayRemove(currentUser.uid),
+    });
+    setDoc(doc(db, "chats", chatId, "subscriberEvents", currentUser.uid + "_unsub_" + Date.now()), {
+      subscribedAt: Date.now(),
+      type: "UNSUBSCRIBE",
+      uid: currentUser.uid,
+    }).catch(() => {});
+  } catch (err) {
+    console.error("Не удалось отписаться от канала:", err);
+  }
+}
+
+// Порт requestToJoinChannel/cancelJoinRequest (MODERATED-каналы).
+async function requestToJoinChannel(chatId) {
+  try {
+    await setDoc(doc(db, "chats", chatId, "joinRequests", currentUser.uid), {
+      userId: currentUser.uid,
+      displayName: currentUser.displayName || "Пользователь",
+      username: currentUser.username || null,
+      requestedAt: Date.now(),
+    });
+    alert("Заявка отправлена. Владелец канала должен её одобрить.");
+  } catch (err) {
+    console.error("Не удалось отправить заявку:", err);
+    alert("Не удалось отправить заявку на вступление");
+  }
+}
+
+async function cancelJoinRequest(chatId) {
+  try {
+    await deleteDoc(doc(db, "chats", chatId, "joinRequests", currentUser.uid));
+  } catch (err) { /* best-effort */ }
+}
+
+// Единая точка входа в канал из результатов поиска — маршрутизация по accessMode,
+// как в Android ChannelProfileScreen/DiscoverChannelsScreen.
+async function joinOrOpenChannel(channel) {
+  const alreadyIn = (channel.participantIds || []).includes(currentUser.uid);
+  if (alreadyIn) { openChat(channel.id); return; }
+
+  const mode = channelAccessModeOf(channel);
+  if (mode === "MODERATED") {
+    await requestToJoinChannel(channel.id);
+  } else {
+    // OPEN (и HIDDEN, куда можно попасть только по прямому знанию chatId — доступ уже есть)
+    await subscribeToChannel(channel.id);
+    openChat(channel.id);
+  }
+}
+
+// Порт searchChannels: фильтр type==CHANNEL, подстрока по title/titleLowercase/
+// description, HIDDEN скрыт от не-подписчиков, верифицированные выше.
+async function searchChannels(term) {
+  const normalized = term.trim().toLowerCase();
+  if (!normalized) return [];
+  try {
+    const snap = await getDocs(query(collection(db, "chats"), where("type", "==", "CHANNEL"), limit(300)));
+    const items = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      data.id = d.id;
+      const mode = channelAccessModeOf(data);
+      const participantIds = data.participantIds || [];
+      const isSub = participantIds.includes(currentUser.uid);
+      if (mode === "HIDDEN" && !isSub) return;
+      const title = (data.title || "").toLowerCase();
+      const titleLc = data.titleLowercase || title;
+      const desc = (data.description || "").toLowerCase();
+      if (titleLc.includes(normalized) || title.includes(normalized) || desc.includes(normalized)) {
+        items.push(data);
+      }
+    });
+    items.sort((a, b) => {
+      const va = a.isVerified ? 1 : 0, vb = b.isVerified ? 1 : 0;
+      if (va !== vb) return vb - va;
+      return (b.participantIds || []).length - (a.participantIds || []).length;
+    });
+    return items.slice(0, 30);
+  } catch (err) {
+    console.error("Поиск каналов:", err);
+    return [];
+  }
+}
+
+function buildChannelResultItem(channel) {
+  const item = document.createElement("div");
+  item.className = "user-result";
+  const alreadyIn = (channel.participantIds || []).includes(currentUser.uid);
+  const subCount = (channel.participantIds || []).length;
+  const mode = channelAccessModeOf(channel);
+  const modeLabel = mode === "MODERATED" ? " · по заявке" : mode === "HIDDEN" ? " · скрытый" : "";
+  const verified = channel.isVerified ? " ✓" : "";
+  item.innerHTML = `
+    <div class="chat-avatar">📢</div>
+    <div>
+      <div class="user-result-name">${esc(channel.title || "")}${verified}</div>
+      <div class="user-result-username">${subCount} подписчиков${esc(modeLabel)}${alreadyIn ? " · вы подписаны" : ""}</div>
+    </div>`;
+  item.addEventListener("click", () => {
+    $("btn-close-modal").click();
+    joinOrOpenChannel(channel);
+  });
+  return item;
 }
 
 $("btn-create-group").addEventListener("click", async () => {

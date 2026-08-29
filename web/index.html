@@ -84,6 +84,7 @@
       <header id="sidebar-header">
         <span class="app-title">YODO</span>
         <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
+        <button id="btn-new-channel" class="icon-btn" title="Новый канал">📢</button>
         <button id="btn-new-group" class="icon-btn" title="Новая группа">👥</button>
         <button id="btn-new-chat" class="icon-btn" title="Новый чат">＋</button>
         <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
@@ -104,10 +105,16 @@
             <div id="chat-subtitle"></div>
           </div>
         </header>
-        <div id="messages">
-          <button id="btn-load-more" class="btn-secondary hidden">Загрузить ещё</button>
-        </div>
+        <button id="btn-load-more" class="btn-secondary hidden">Загрузить ещё</button>
+        <div id="messages"></div>
         <div id="typing-indicator" class="hidden">печатает…</div>
+        <div id="reply-preview-bar" class="hidden">
+          <div id="reply-preview-content">
+            <div id="reply-preview-name"></div>
+            <div id="reply-preview-text"></div>
+          </div>
+          <button type="button" id="btn-cancel-reply" class="icon-btn">✕</button>
+        </div>
         <form id="form-send">
           <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
           <input type="file" id="file-input" accept="image/*" class="hidden">
@@ -128,6 +135,36 @@
         <input type="text" id="search-input" placeholder="Имя или @username..." autocomplete="off">
         <div id="search-results"></div>
         <button class="btn-secondary" id="btn-close-modal">Отмена</button>
+      </div>
+    </div>
+
+    <!-- Модалка: новый канал -->
+    <div id="modal-new-channel" class="modal hidden">
+      <div class="modal-card">
+        <h3>Новый канал</h3>
+        <input type="text" id="channel-title-input" placeholder="Название канала" autocomplete="off">
+        <input type="text" id="channel-desc-input" placeholder="Описание (необязательно)" autocomplete="off">
+        <select id="channel-access-mode">
+          <option value="OPEN">Публичный открытый — виден всем, подписаться может каждый</option>
+          <option value="MODERATED">Публичный модерируемый — вступление по заявке</option>
+          <option value="HIDDEN">Скрытый — не виден в поиске</option>
+        </select>
+        <div class="auth-error" id="channel-error"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="btn-close-channel-modal">Отмена</button>
+          <button class="btn-primary" id="btn-create-channel">Создать</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модалка: переслать сообщение -->
+    <div id="modal-forward" class="modal hidden">
+      <div class="modal-card">
+        <h3>Переслать сообщение</h3>
+        <div id="forward-preview" class="forward-preview"></div>
+        <input type="text" id="forward-search-input" placeholder="Выберите чат..." autocomplete="off">
+        <div id="forward-results"></div>
+        <button class="btn-secondary" id="btn-close-forward-modal">Отмена</button>
       </div>
     </div>
 
