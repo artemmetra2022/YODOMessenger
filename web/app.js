@@ -15,6 +15,13 @@ import {
   signOut,
   sendEmailVerification,
   onAuthStateChanged,
+  updateProfile,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore,
@@ -324,8 +331,8 @@ function validateRegistration({ username, displayName, email, password }) {
   if (!email.includes("@")) {
     return "Некорректный email";
   }
-  if (password.length < 6) {
-    return "Пароль минимум 6 символов";
+  if (evaluatePasswordStrength(password).level !== "STRONG") {
+    return "Пароль должен быть надёжным: минимум 8 символов и хотя бы один спецсимвол";
   }
   return null;
 }
@@ -382,6 +389,197 @@ $("form-register").addEventListener("submit", async (e) => {
   } catch (err) {
     errorEl.textContent = await getErrorMessage(err);
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Пароль: показать/скрыть, надёжность, генератор                       */
+/* Порт PasswordStrength.kt / PasswordStrengthIndicator.kt (Android)     */
+/* ------------------------------------------------------------------ */
+
+const SPECIAL_CHARS_REGEX = /[^A-Za-z0-9]/;
+
+function evaluatePasswordStrength(password) {
+  const checklist = {
+    hasMinLength: password.length >= 8,
+    hasSpecialChar: SPECIAL_CHARS_REGEX.test(password),
+    hasDigit: /\d/.test(password),
+    hasUpperAndLower: /[A-Z]/.test(password) && /[a-z]/.test(password),
+  };
+  const score = Object.values(checklist).filter(Boolean).length;
+
+  let level;
+  if (password.length === 0) level = "WEAK";
+  else if (score <= 1) level = "WEAK";
+  else if (score <= 3) level = "MEDIUM";
+  else level = "STRONG";
+
+  // Как в Android: "надёжный" только если выполнены оба обязательных условия.
+  if (level === "STRONG" && (!checklist.hasMinLength || !checklist.hasSpecialChar)) {
+    level = "MEDIUM";
+  }
+  return { level, checklist };
+}
+
+function generateStrongPassword(length = 14) {
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const special = "!@#$%^&*()-_=+?";
+  const all = lower + upper + digits + special;
+
+  const pick = (chars) => chars[Math.floor(Math.random() * chars.length)];
+  const required = [pick(lower), pick(upper), pick(digits), pick(special)];
+  const rest = Math.max(length - required.length, 0);
+  const body = required.concat(Array.from({ length: rest }, () => pick(all)));
+
+  // Перемешиваем (Fisher-Yates), чтобы обязательные символы не оказались в начале.
+  for (let i = body.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [body[i], body[j]] = [body[j], body[i]];
+  }
+  return body.join("");
+}
+
+const STRENGTH_LABELS = { WEAK: "Ненадёжный", MEDIUM: "Средний", STRONG: "Надёжный" };
+const STRENGTH_CLASSES = { WEAK: "weak", MEDIUM: "medium", STRONG: "strong" };
+
+function renderPasswordStrength(password) {
+  const wrap = $("password-strength-wrap");
+  if (!password) { wrap.classList.add("hidden"); return null; }
+  wrap.classList.remove("hidden");
+
+  const result = evaluatePasswordStrength(password);
+  const cls = STRENGTH_CLASSES[result.level];
+
+  const valueEl = $("password-strength-value");
+  valueEl.textContent = STRENGTH_LABELS[result.level];
+  valueEl.className = "password-strength-value " + cls;
+
+  const fillEl = $("password-strength-bar-fill");
+  fillEl.className = "password-strength-bar-fill " + cls;
+
+  const setCheck = (id, passed, label) => {
+    const el = $(id);
+    el.classList.toggle("passed", passed);
+    el.innerHTML = `<span class="pw-check-icon">${passed ? "●" : "○"}</span> ${label}`;
+  };
+  setCheck("pw-check-length", result.checklist.hasMinLength, "Минимум 8 символов");
+  setCheck("pw-check-special", result.checklist.hasSpecialChar, "Хотя бы один спецсимвол");
+  setCheck("pw-check-digit", result.checklist.hasDigit, "Хотя бы одна цифра");
+  setCheck("pw-check-case", result.checklist.hasUpperAndLower, "Заглавные и строчные буквы");
+
+  return result;
+}
+
+$("reg-password").addEventListener("input", (e) => {
+  renderPasswordStrength(e.target.value);
+});
+
+$("btn-generate-password").addEventListener("click", () => {
+  const generated = generateStrongPassword();
+  $("reg-password").value = generated;
+  $("reg-password").type = "text";
+  $("btn-toggle-reg-password").textContent = "🙈";
+  renderPasswordStrength(generated);
+});
+
+function wireupPasswordToggle(buttonId, inputId) {
+  $(buttonId).addEventListener("click", () => {
+    const input = $(inputId);
+    const isHidden = input.type === "password";
+    input.type = isHidden ? "text" : "password";
+    $(buttonId).textContent = isHidden ? "🙈" : "👁";
+  });
+}
+wireupPasswordToggle("btn-toggle-login-password", "login-password");
+wireupPasswordToggle("btn-toggle-reg-password", "reg-password");
+
+/* ------------------------------------------------------------------ */
+/* Восстановление пароля (email со ссылкой сброса, как в Android)       */
+/* ------------------------------------------------------------------ */
+
+$("link-forgot-password").addEventListener("click", () => {
+  $("forgot-password-form-wrap").classList.remove("hidden");
+  $("forgot-password-success-wrap").classList.add("hidden");
+  $("forgot-identifier").value = $("login-identifier").value.trim();
+  $("forgot-password-error").textContent = "";
+  showScreen("screen-forgot-password");
+});
+
+$("link-back-to-login-from-forgot").addEventListener("click", () => {
+  showScreen("screen-login");
+});
+
+$("form-forgot-password").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errorEl = $("forgot-password-error");
+  errorEl.textContent = "";
+
+  const identifier = $("forgot-identifier").value.trim();
+  if (!identifier) { errorEl.textContent = "Введите email или username"; return; }
+
+  try {
+    const email = await resolveEmailForLogin(identifier);
+    await sendPasswordResetEmail(auth, email);
+    $("forgot-password-form-wrap").classList.add("hidden");
+    $("forgot-password-success-wrap").classList.remove("hidden");
+  } catch (err) {
+    // Как и на Android — не раскрываем, существует ли аккаунт: одинаковое сообщение
+    // об успехе для несуществующего email, но явные ошибки резолва username показываем.
+    if (err.message === "USERNAME_NOT_FOUND") {
+      errorEl.textContent = "Пользователь с таким username не найден";
+    } else if (err.code === "auth/invalid-email") {
+      errorEl.textContent = "Некорректный email";
+    } else {
+      $("forgot-password-form-wrap").classList.add("hidden");
+      $("forgot-password-success-wrap").classList.remove("hidden");
+    }
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Google Sign-In (popup)                                               */
+/* ------------------------------------------------------------------ */
+
+async function signInWithGoogle(errorElId) {
+  const errorEl = $(errorElId);
+  errorEl.textContent = "";
+  try {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    const uid = result.user.uid;
+
+    // Если это первый вход через Google — создаём документ профиля, как при обычной регистрации.
+    const snap = await getDoc(doc(db, "users", uid));
+    if (!snap.exists()) {
+      const now = Date.now();
+      const displayName = result.user.displayName || "Пользователь";
+      await setDoc(doc(db, "users", uid), {
+        uid: uid,
+        displayName: displayName,
+        displayNameLowercase: displayName.toLowerCase(),
+        email: result.user.email || "",
+        publicId: buildPublicId(uid),
+        isEmailVerified: true,
+        createdAt: now,
+      });
+    }
+    // дальнейшая навигация — в onAuthStateChanged
+  } catch (err) {
+    if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") return;
+    errorEl.textContent = await getErrorMessage(err);
+  }
+}
+
+$("btn-login-google").addEventListener("click", () => signInWithGoogle("login-error"));
+$("btn-register-google").addEventListener("click", () => signInWithGoogle("register-error"));
+
+/* ------------------------------------------------------------------ */
+/* Вход по номеру телефона — пока заглушка (в разработке)               */
+/* ------------------------------------------------------------------ */
+
+$("btn-login-phone").addEventListener("click", () => {
+  $("login-error").textContent = "Вход по номеру телефона пока в разработке — скоро будет доступен.";
 });
 
 /* ------------------------------------------------------------------ */
@@ -2057,5 +2255,528 @@ $("btn-create-group").addEventListener("click", async () => {
   } catch (err) {
     console.error("Создание группы:", err);
     errorEl.textContent = "Не удалось создать группу: " + (err.message || "");
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Настройки: тема, профиль, приватность, безопасность, уведомления     */
+/* ------------------------------------------------------------------ */
+
+const THEME_STORAGE_KEY = "yodo-theme";
+
+function applyTheme(theme) {
+  document.documentElement.classList.toggle("theme-light", theme === "light");
+  document.querySelectorAll(".settings-theme-option").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.theme === theme);
+  });
+}
+
+function initTheme() {
+  let saved = "dark";
+  try { saved = localStorage.getItem(THEME_STORAGE_KEY) || "dark"; } catch (e) { /* приватный режим и т.п. */ }
+  applyTheme(saved);
+}
+initTheme();
+
+document.querySelectorAll(".settings-theme-option").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const theme = btn.dataset.theme;
+    applyTheme(theme);
+    try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* игнорируем */ }
+  });
+});
+
+// Переключение вкладок настроек
+document.querySelectorAll(".settings-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".settings-tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".settings-panel").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.querySelector(`.settings-panel[data-panel="${tab.dataset.tab}"]`).classList.add("active");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Профиль пользователя: полный набор полей из Android (users/{uid})   */
+/* ------------------------------------------------------------------ */
+
+// Кэш последнего загруженного документа профиля — чтобы не перезатирать
+// поля, которые ещё не подтягивали (аналог YodoUser с Android).
+let settingsProfileDoc = null;
+
+async function loadSettingsProfileDoc() {
+  try {
+    const snap = await getDoc(doc(db, "users", currentUser.uid));
+    settingsProfileDoc = snap.exists() ? snap.data() : {};
+  } catch (e) {
+    settingsProfileDoc = {};
+  }
+  return settingsProfileDoc;
+}
+
+function renderAvatarPreview(el, displayName, avatarBase64) {
+  if (avatarBase64) {
+    el.innerHTML = `<img src="data:image/jpeg;base64,${avatarBase64}" alt="">`;
+  } else {
+    el.textContent = ((displayName || "?")[0] || "?").toUpperCase();
+  }
+}
+
+async function fillSettingsProfile() {
+  if (!currentUser) return;
+  const name = currentUser.displayName || "Без имени";
+  $("settings-displayname").value = name;
+  $("settings-username-input").value = currentUser.username || "";
+  $("settings-email").value = currentUser.email || "";
+  $("settings-display-name-preview").textContent = name;
+  $("settings-username-preview").textContent = currentUser.username ? "@" + currentUser.username : "";
+
+  const data = await loadSettingsProfileDoc();
+  renderAvatarPreview($("settings-avatar-preview"), name, data.avatarBase64);
+  $("settings-bio").value = data.bio || "";
+  $("settings-birthdate").value = data.birthDate || "";
+  $("settings-location").value = data.location || "";
+  $("settings-website").value = data.website || "";
+
+  $("settings-show-online").checked = data.showOnlineStatus !== false;
+  $("settings-show-read-receipts").checked = data.showReadReceipts !== false;
+  $("settings-show-aboutme").checked = data.showAboutMe !== false;
+  $("settings-show-birthdate").checked = data.showBirthDate !== false;
+  $("settings-show-location").checked = data.showLocation !== false;
+  $("settings-show-website").checked = data.showWebsite !== false;
+  $("settings-show-phone").checked = data.showPhoneNumber === true;
+  $("settings-show-email").checked = data.showEmail === true;
+
+  $("settings-autodelete-toggle").checked = data.autoDeleteEnabled === true;
+  const days = data.autoDeleteDays || 30;
+  $("settings-autodelete-days").value = days;
+  $("settings-autodelete-days-value").textContent = days;
+
+  renderBlockedUsersList(data.blockedUsers || []);
+}
+
+function resetSettingsModalFields() {
+  ["settings-profile-error", "settings-profile-success", "settings-privacy-error", "settings-privacy-success",
+   "settings-security-error", "settings-security-success", "settings-pin-error", "settings-pin-success",
+   "settings-autodelete-error", "settings-autodelete-success", "settings-avatar-error"].forEach((id) => {
+    $(id).textContent = "";
+  });
+  $("settings-current-password").value = "";
+  $("settings-new-password").value = "";
+  $("settings-new-password-confirm").value = "";
+  $("settings-pin-new").value = "";
+  $("settings-pin-confirm").value = "";
+  $("settings-notifications-hint").textContent =
+    ("Notification" in window)
+      ? (Notification.permission === "denied"
+          ? "Уведомления заблокированы в настройках браузера."
+          : "")
+      : "Ваш браузер не поддерживает уведомления.";
+  $("settings-notifications-toggle").checked = notificationsEnabled;
+  $("settings-notifications-toggle").disabled = ("Notification" in window) ? Notification.permission === "denied" : true;
+
+  updatePinStatusLabel();
+}
+
+$("btn-open-settings").addEventListener("click", async () => {
+  resetSettingsModalFields();
+  document.querySelectorAll(".settings-tab")[0].click();
+  $("modal-settings").classList.remove("hidden");
+  await fillSettingsProfile();
+});
+
+$("btn-close-settings-modal").addEventListener("click", () => {
+  $("modal-settings").classList.add("hidden");
+});
+
+$("modal-settings").addEventListener("click", (e) => {
+  if (e.target.id === "modal-settings") $("modal-settings").classList.add("hidden");
+});
+
+/* ------------------------------------------------------------------ */
+/* Загрузка аватара (сжатие в base64, как в Android ImageUtils)         */
+/* ------------------------------------------------------------------ */
+
+// Те же лимиты, что и на Android: 512px, JPEG, качество 88 с шагом -8 до
+// минимума 60, итог должен влезать в AVATAR_MAX_BASE64 (550 000 символов).
+const AVATAR_MAX_DIMENSION = 512;
+const AVATAR_STARTING_QUALITY = 0.88;
+const AVATAR_MIN_QUALITY = 0.60;
+const AVATAR_MAX_BASE64 = 550_000;
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+async function compressAvatarToBase64(file) {
+  const img = await loadImageFromFile(file);
+  let { width, height } = img;
+  if (width > AVATAR_MAX_DIMENSION || height > AVATAR_MAX_DIMENSION) {
+    if (width >= height) {
+      height = Math.round(height * (AVATAR_MAX_DIMENSION / width));
+      width = AVATAR_MAX_DIMENSION;
+    } else {
+      width = Math.round(width * (AVATAR_MAX_DIMENSION / height));
+      height = AVATAR_MAX_DIMENSION;
+    }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, width, height);
+
+  let quality = AVATAR_STARTING_QUALITY;
+  let base64 = "";
+  while (quality >= AVATAR_MIN_QUALITY) {
+    const dataUrl = canvas.toDataURL("image/jpeg", quality);
+    base64 = dataUrl.split(",")[1] || "";
+    if (base64.length <= AVATAR_MAX_BASE64) return base64;
+    quality -= 0.08;
+  }
+  // Даже на минимальном качестве не влезло — уменьшаем разрешение вдвое и пробуем ещё раз.
+  if (width > 128 && height > 128) {
+    const canvas2 = document.createElement("canvas");
+    canvas2.width = Math.round(width / 2);
+    canvas2.height = Math.round(height / 2);
+    const ctx2 = canvas2.getContext("2d");
+    ctx2.drawImage(canvas, 0, 0, canvas2.width, canvas2.height);
+    const dataUrl2 = canvas2.toDataURL("image/jpeg", AVATAR_MIN_QUALITY);
+    base64 = dataUrl2.split(",")[1] || "";
+  }
+  return base64;
+}
+
+$("btn-upload-avatar").addEventListener("click", () => $("settings-avatar-input").click());
+
+$("settings-avatar-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const errorEl = $("settings-avatar-error");
+  errorEl.textContent = "";
+  if (!file.type.startsWith("image/")) {
+    errorEl.textContent = "Выберите файл изображения";
+    return;
+  }
+  try {
+    const base64 = await compressAvatarToBase64(file);
+    if (!base64 || base64.length > AVATAR_MAX_BASE64) {
+      errorEl.textContent = "Не удалось обработать изображение";
+      return;
+    }
+    await updateDoc(doc(db, "users", currentUser.uid), { avatarBase64: base64, avatarUrl: deleteField() });
+    settingsProfileDoc = settingsProfileDoc || {};
+    settingsProfileDoc.avatarBase64 = base64;
+    renderAvatarPreview($("settings-avatar-preview"), currentUser.displayName, base64);
+  } catch (err) {
+    console.error("Загрузка аватара:", err);
+    errorEl.textContent = "Не удалось загрузить фото: " + (err.message || "");
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Сохранение профиля (имя, username, о себе, дата/локация/сайт)        */
+/* ------------------------------------------------------------------ */
+
+$("btn-save-profile").addEventListener("click", async () => {
+  const errorEl = $("settings-profile-error");
+  const successEl = $("settings-profile-success");
+  errorEl.textContent = "";
+  successEl.textContent = "";
+
+  const newName = $("settings-displayname").value.trim();
+  const newUsernameRaw = $("settings-username-input").value.trim().toLowerCase();
+  const bio = $("settings-bio").value.trim().slice(0, 300);
+  const birthDate = $("settings-birthdate").value.trim();
+  const location = $("settings-location").value.trim().slice(0, 100);
+  const website = $("settings-website").value.trim().slice(0, 200);
+
+  if (!newName) { errorEl.textContent = "Введите отображаемое имя"; return; }
+  if (newUsernameRaw && !/^[a-z0-9_]{3,20}$/.test(newUsernameRaw)) {
+    errorEl.textContent = "Username: латиница/цифры/_, 3-20 символов";
+    return;
+  }
+
+  try {
+    // Смена username — так же, как в Android: проверка занятости + перенос usernames/{name}.
+    if (newUsernameRaw && newUsernameRaw !== (currentUser.username || "")) {
+      const takenSnap = await getDoc(doc(db, "usernames", newUsernameRaw));
+      if (takenSnap.exists()) {
+        errorEl.textContent = "Этот username уже занят";
+        return;
+      }
+      const oldUsername = currentUser.username;
+      await setDoc(doc(db, "usernames", newUsernameRaw), { uid: currentUser.uid });
+      if (oldUsername) {
+        try { await deleteDoc(doc(db, "usernames", oldUsername)); } catch (e) { /* best-effort */ }
+      }
+    }
+
+    await updateDoc(doc(db, "users", currentUser.uid), {
+      displayName: newName,
+      displayNameLowercase: newName.toLowerCase(),
+      username: newUsernameRaw || currentUser.username || "",
+      usernameLowercase: newUsernameRaw || currentUser.username || "",
+      bio: bio,
+      birthDate: birthDate,
+      location: location,
+      website: website,
+    });
+    try { await updateProfile(auth.currentUser, { displayName: newName }); } catch (e) { /* не критично */ }
+
+    currentUser.displayName = newName;
+    if (newUsernameRaw) currentUser.username = newUsernameRaw;
+    fillSettingsProfile();
+    successEl.textContent = "Профиль обновлён";
+  } catch (err) {
+    errorEl.textContent = "Не удалось сохранить: " + (err.message || "");
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Приватность: онлайн-статус, прочитано, видимость полей профиля       */
+/* ------------------------------------------------------------------ */
+
+$("btn-save-privacy").addEventListener("click", async () => {
+  const errorEl = $("settings-privacy-error");
+  const successEl = $("settings-privacy-success");
+  errorEl.textContent = "";
+  successEl.textContent = "";
+
+  try {
+    await updateDoc(doc(db, "users", currentUser.uid), {
+      showOnlineStatus: $("settings-show-online").checked,
+      showReadReceipts: $("settings-show-read-receipts").checked,
+      showAboutMe: $("settings-show-aboutme").checked,
+      showBirthDate: $("settings-show-birthdate").checked,
+      showLocation: $("settings-show-location").checked,
+      showWebsite: $("settings-show-website").checked,
+      showPhoneNumber: $("settings-show-phone").checked,
+      showEmail: $("settings-show-email").checked,
+    });
+    successEl.textContent = "Настройки приватности сохранены";
+  } catch (err) {
+    errorEl.textContent = "Не удалось сохранить: " + (err.message || "");
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Заблокированные пользователи (users/{uid}.blockedUsers: string[])    */
+/* ------------------------------------------------------------------ */
+
+async function renderBlockedUsersList(blockedIds) {
+  const listEl = $("settings-blocked-list");
+  listEl.innerHTML = "";
+  if (!blockedIds.length) {
+    listEl.innerHTML = '<div class="settings-blocked-empty">Заблокированных пользователей нет</div>';
+    return;
+  }
+  for (const uid of blockedIds) {
+    let name = uid;
+    try {
+      const snap = await getDoc(doc(db, "users", uid));
+      if (snap.exists()) name = snap.data().displayName || uid;
+    } catch (e) { /* оставляем uid, если профиль не читается */ }
+
+    const row = document.createElement("div");
+    row.className = "settings-blocked-item";
+    row.innerHTML = `<span>${esc(name)}</span>`;
+    const btn = document.createElement("button");
+    btn.className = "btn-secondary settings-small-btn";
+    btn.textContent = "Разблокировать";
+    btn.addEventListener("click", async () => {
+      try {
+        await updateDoc(doc(db, "users", currentUser.uid), { blockedUsers: arrayRemove(uid) });
+        row.remove();
+        if (!listEl.children.length) {
+          listEl.innerHTML = '<div class="settings-blocked-empty">Заблокированных пользователей нет</div>';
+        }
+      } catch (err) {
+        console.error("Разблокировка:", err);
+      }
+    });
+    row.appendChild(btn);
+    listEl.appendChild(row);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Смена пароля (требует реаутентификации)                              */
+/* ------------------------------------------------------------------ */
+
+$("btn-change-password").addEventListener("click", async () => {
+  const errorEl = $("settings-security-error");
+  const successEl = $("settings-security-success");
+  errorEl.textContent = "";
+  successEl.textContent = "";
+
+  const currentPassword = $("settings-current-password").value;
+  const newPassword = $("settings-new-password").value;
+  const confirmPassword = $("settings-new-password-confirm").value;
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    errorEl.textContent = "Заполните все поля";
+    return;
+  }
+  if (newPassword.length < 6) {
+    errorEl.textContent = "Новый пароль минимум 6 символов";
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    errorEl.textContent = "Пароли не совпадают";
+    return;
+  }
+
+  try {
+    const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+    await updatePassword(auth.currentUser, newPassword);
+    $("settings-current-password").value = "";
+    $("settings-new-password").value = "";
+    $("settings-new-password-confirm").value = "";
+    successEl.textContent = "Пароль изменён";
+  } catch (err) {
+    errorEl.textContent = await getErrorMessage(err);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* PIN-код для веб-сессии (локально в браузере, PBKDF2 как в Android)   */
+/* ------------------------------------------------------------------ */
+
+const PIN_ITERATIONS = 50_000;
+const PIN_KEY_LENGTH_BITS = 256;
+
+function pinStorageKeyFor(uid) { return "yodo-pin-" + uid; }
+
+function bufToBase64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function base64ToBuf(b64) {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+}
+
+async function hashPin(pin, saltBase64) {
+  const enc = new TextEncoder();
+  const saltBuf = base64ToBuf(saltBase64);
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const derived = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: saltBuf, iterations: PIN_ITERATIONS, hash: "SHA-256" },
+    keyMaterial,
+    PIN_KEY_LENGTH_BITS
+  );
+  return bufToBase64(derived);
+}
+
+function generatePinSalt() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return bufToBase64(bytes.buffer);
+}
+
+function getStoredPin() {
+  if (!currentUser) return null;
+  try {
+    const raw = localStorage.getItem(pinStorageKeyFor(currentUser.uid));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function updatePinStatusLabel() {
+  const stored = getStoredPin();
+  $("settings-pin-status").textContent = stored ? "PIN установлен для этого браузера" : "PIN не установлен";
+}
+
+$("btn-save-pin").addEventListener("click", async () => {
+  const errorEl = $("settings-pin-error");
+  const successEl = $("settings-pin-success");
+  errorEl.textContent = "";
+  successEl.textContent = "";
+
+  const pin = $("settings-pin-new").value.trim();
+  const confirm = $("settings-pin-confirm").value.trim();
+
+  if (!/^\d{4,6}$/.test(pin)) {
+    errorEl.textContent = "PIN должен состоять из 4-6 цифр";
+    return;
+  }
+  if (pin !== confirm) {
+    errorEl.textContent = "PIN-коды не совпадают";
+    return;
+  }
+
+  try {
+    const salt = generatePinSalt();
+    const hash = await hashPin(pin, salt);
+    localStorage.setItem(pinStorageKeyFor(currentUser.uid), JSON.stringify({ hash, salt }));
+    $("settings-pin-new").value = "";
+    $("settings-pin-confirm").value = "";
+    updatePinStatusLabel();
+    successEl.textContent = "PIN сохранён для этого браузера";
+  } catch (err) {
+    errorEl.textContent = "Не удалось сохранить PIN: " + (err.message || "");
+  }
+});
+
+$("btn-clear-pin").addEventListener("click", () => {
+  if (!currentUser) return;
+  localStorage.removeItem(pinStorageKeyFor(currentUser.uid));
+  $("settings-pin-new").value = "";
+  $("settings-pin-confirm").value = "";
+  $("settings-pin-error").textContent = "";
+  $("settings-pin-success").textContent = "PIN отключён";
+  updatePinStatusLabel();
+});
+
+/* ------------------------------------------------------------------ */
+/* Автоудаление аккаунта (users/{uid}.autoDeleteEnabled/autoDeleteDays)  */
+/* ------------------------------------------------------------------ */
+
+$("settings-autodelete-days").addEventListener("input", (e) => {
+  $("settings-autodelete-days-value").textContent = e.target.value;
+});
+
+$("btn-save-autodelete").addEventListener("click", async () => {
+  const errorEl = $("settings-autodelete-error");
+  const successEl = $("settings-autodelete-success");
+  errorEl.textContent = "";
+  successEl.textContent = "";
+
+  const enabled = $("settings-autodelete-toggle").checked;
+  const days = parseInt($("settings-autodelete-days").value, 10) || 30;
+
+  try {
+    await updateDoc(doc(db, "users", currentUser.uid), {
+      autoDeleteEnabled: enabled,
+      autoDeleteDays: days,
+      lastActiveAt: Date.now(),
+    });
+    successEl.textContent = enabled
+      ? `Аккаунт будет удалён после ${days} дней неактивности`
+      : "Автоудаление отключено";
+  } catch (err) {
+    errorEl.textContent = "Не удалось сохранить: " + (err.message || "");
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Уведомления                                                          */
+/* ------------------------------------------------------------------ */
+
+$("settings-notifications-toggle").addEventListener("change", async (e) => {
+  if (e.target.checked) {
+    const granted = await ensureNotificationPermission();
+    e.target.checked = granted;
+    if (!granted) {
+      $("settings-notifications-hint").textContent = "Разрешение на уведомления не выдано.";
+    }
+  } else {
+    notificationsEnabled = false;
   }
 });
