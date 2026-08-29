@@ -1359,17 +1359,27 @@ fun ChatScreen(
                 }
             }
             if (displayedMessages.isEmpty()) {
-                val emptyText = when {
-                    isChannel -> "Здесь пока ничего нет"
-                    uiState.isSearchActive -> "Ничего не найдено"
-                    else -> "Сообщений пока нет.\nНапишите первым!"
+                // п.7: пока первый снапшот сообщений не пришёл (в т.ч. из офлайн-кэша),
+                // честно показываем индикатор загрузки — раньше здесь сразу висело
+                // «Сообщений пока нет», и при повторном входе в чат это выглядело багом.
+                if (!uiState.initialMessagesReceived) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center).size(28.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    val emptyText = when {
+                        isChannel -> "Здесь пока ничего нет"
+                        uiState.isSearchActive -> "Ничего не найдено"
+                        else -> "Сообщений пока нет.\nНапишите первым!"
+                    }
+                    Text(
+                        text = emptyText,
+                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
                 }
-                Text(
-                    text = emptyText,
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyLarge
-                )
             } else {
                 LazyColumn(
                     state = listState,

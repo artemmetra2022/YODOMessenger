@@ -38,6 +38,9 @@ class MessageRepositoryImpl @Inject constructor(
 ) : MessageRepository {
 
     override fun observeMessages(chatId: String, topicId: String?): Flow<List<Message>> = callbackFlow {
+        // п.7: последний успешно отправленный список — отправляется повторно при ошибке
+        // листенера, чтобы сбой сети не очищал уже показанные на экране сообщения.
+        var lastEmittedMessages: List<Message>? = null
         var query: Query = firestore.collection("chats").document(chatId)
             .collection("messages")
         // НОВОЕ (форумные группы): если открыта конкретная тема — показываем только
@@ -49,11 +52,16 @@ class MessageRepositoryImpl @Inject constructor(
         val listener = query
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) { trySend(emptyList<Message>()); return@addSnapshotListener }
+                // п.7 («вышел из чата и зашёл — сообщений нет»): при ошибке листенера
+                // (сбой сети в момент подписки, permission denied при устаревшем токене)
+                // НЕ отправляем пустой список — показываем последнее известное состояние,
+                // иначе уже загруженные сообщения мгновенно пропадали с экрана.
+                if (error != null) { trySend(lastEmittedMessages ?: emptyList<Message>()); return@addSnapshotListener }
                 val messages = snapshot?.documents.orEmpty()
                     .mapNotNull { doc -> mapDocToMessage(doc, chatId) }
                     // п.38: истёкшие исчезающие сообщения не показываем в UI
                     .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
+                lastEmittedMessages = messages
                 trySend(messages)
                 // ИСПРАВЛЕНО (индикатор доставлено): как только чужое сообщение со
                 // статусом SENT дошло до нашего устройства (мы получили снапшот не из

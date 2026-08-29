@@ -93,7 +93,11 @@ data class ChatUiState(
     val chatInfoLoadingSeconds: Int = 0,
     // НОВОЕ (FAQ-бот поддержки): текущий экран бота поддержки. null == панель бота
     // скрыта (пользователь свернул её и печатает оператору вручную).
-    val supportFaqScreen: SupportFaqScreen? = null
+    val supportFaqScreen: SupportFaqScreen? = null,
+    // НОВОЕ (п.7 «вышел из чата и зашёл — сообщений нет»): false, пока от Firestore
+    // не пришёл первый снапшот сообщений (даже пустой). До этого момента в UI
+    // показывается индикатор загрузки, а не ложное «Сообщений пока нет».
+    val initialMessagesReceived: Boolean = false
 )
 
 // НОВОЕ (FAQ-бот поддержки): три состояния кнопочного бота внутри чата поддержки —
@@ -522,7 +526,12 @@ class ChatViewModel @Inject constructor(
     private fun observeMessages() {
         viewModelScope.launch {
             messageRepository.observeMessages(chatId, topicId).collect { messages ->
-                _uiState.value = _uiState.value.copy(messages = messages)
+                _uiState.value = _uiState.value.copy(
+                    messages = messages,
+                    // п.7: первый снапшот (даже пустой) означает, что данные получены —
+                    // дальше «Сообщений пока нет» уже не ложное, а настоящее состояние.
+                    initialMessagesReceived = true
+                )
                 // ФИКС (бейдж непрочитанных): markAsRead() раньше вызывался только при
                 // открытии чата. Если сообщение (например одноразовое фото) приходило, пока
                 // чат уже открыт, счётчик непрочитанных на сервере рос, а в главном меню бейдж

@@ -26,8 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -341,7 +339,8 @@ fun SettingsScreen(
         QuickReactionDialog(
             selected = quickReaction,
             onSelect = { viewModel.setQuickReaction(it) },
-            onDismiss = { showQuickReactionDialog = false }
+            onDismiss = { showQuickReactionDialog = false },
+            colorTheme = colorTheme
         )
     }
     if (showChatFoldersDialog) {
@@ -1842,7 +1841,7 @@ private fun SettingsClickableRow(
             Icon(icon, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(20.dp))
         }
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = colorTheme.primary)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1853,16 +1852,41 @@ private fun SettingsClickableRow(
 private fun QuickReactionDialog(
     selected: String,
     onSelect: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    colorTheme: ColorTheme
 ) {
     val reactions = listOf("👍", "❤️", "😂", "🔥", "👏", "😢", "😡", "🎉", "🤔", "👎")
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Быстрая реакция") },
         text = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                reactions.forEach { emoji ->
-                    Text(emoji, fontSize = 26.sp, modifier = Modifier.clickable { onSelect(emoji) }.padding(6.dp))
+            // п.6: смайлы сеткой по 5 в ряд (раньше — одна длинная прокручиваемая
+            // строка), текущий выбор подсвечен; после выбора диалог закрывается сам.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                reactions.chunked(5).forEach { rowEmojis ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        rowEmojis.forEach { emoji ->
+                            val isSelected = emoji == selected
+                            Text(
+                                emoji,
+                                fontSize = 26.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isSelected) colorTheme.primary.copy(alpha = 0.18f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable {
+                                        onSelect(emoji)
+                                        onDismiss()
+                                    }
+                                    .padding(6.dp)
+                            )
+                        }
+                    }
                 }
             }
         },
