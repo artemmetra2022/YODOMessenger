@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
@@ -307,7 +308,7 @@ class ChatListViewModel @Inject constructor(
         if (chatId == app.yodo.messenger.domain.repository.ChatRepository.OFFICIAL_CHANNEL_ID) {
             viewModelScope.launch {
                 runCatching {
-                    val pinned = kotlinx.coroutines.flow.first(userSettingsPreferences.officialChannelPinned)
+                    val pinned = userSettingsPreferences.officialChannelPinned.first()
                     userSettingsPreferences.setOfficialChannelPinned(!pinned)
                 }
             }
