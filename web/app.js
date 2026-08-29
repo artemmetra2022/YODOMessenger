@@ -37,17 +37,7 @@ import {
 /* Firebase init                                                       */
 /* ------------------------------------------------------------------ */
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBN0R6R54f1Dah3vp7WrYrsY95e5NgMZA4",
-  authDomain: "yodomessenger.firebaseapp.com",
-  projectId: "yodomessenger",
-  storageBucket: "yodomessenger.firebasestorage.app",
-  messagingSenderId: "509907567167",
-  appId: "1:509907567167:web:b7ea079acbf1ab2272ae8a",
-  measurementId: "G-YGGHJ2BWEM",
-};
-
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(window.FIREBASE_CONFIG);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
