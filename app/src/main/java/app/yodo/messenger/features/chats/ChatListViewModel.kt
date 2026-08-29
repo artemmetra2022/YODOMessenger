@@ -80,6 +80,15 @@ class ChatListViewModel @Inject constructor(
     private val connectivityManager =
         application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
+    // ФИКС КРАША (NPE в combine() из-за порядка инициализации): chatFolders используется
+    // внутри observeChats(), которая раньше вызывалась из init{} ДО объявления этого поля
+    // в теле класса. На debug-сборке это проходило благодаря порядку байткода, но в
+    // релизе с R8-минификацией observeChats() иногда выполнялась до того, как chatFolders
+    // успевал получить значение (StateFlow ещё null) — combine() падал с NPE в CombineKt.
+    // Поле объявлено здесь, ДО init{}, чтобы гарантировать инициализацию первым.
+    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         observeNetworkState()
         observeChats()
@@ -137,10 +146,6 @@ class ChatListViewModel @Inject constructor(
     /** Текущий выбранный фильтр */
     private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
     val activeFilter: StateFlow<ChatFilter> = _activeFilter
-
-    // НОВОЕ (п.4): папки чатов — пользовательские группировки чатов
-    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // НОВОЕ (скрытые чаты): множество ID скрытых чатов (для пунктов меню).
     val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
@@ -211,17 +216,27 @@ class ChatListViewModel @Inject constructor(
             // умолчанию сразу же, не дожидаясь диска — черновики/папки просто "доедут"
             // следующим обновлением, когда будут готовы.
             // НОВОЕ (скрытые чаты): пятый источник — ID скрытых чатов и признак decoy-режима.
-            val hiddenInfo = combine(
+            val hiddenInfo: Flow<Pair<Set<String>, Boolean>> = combine(
                 userSettingsPreferences.hiddenChatIds.onStart { emit(emptySet()) },
                 userSettingsPreferences.decoyMode.onStart { emit(false) }
             ) { ids, decoy -> ids to decoy }
-            combine(
+
+            // ФИКС КРАША: варарг-перегрузка combine() с 5 Flow в связке с R8-минификацией
+            // релизной сборки иногда даёт NullPointerException внутри CombineKt (Flow.collect
+            // на null-ссылке из внутреннего Array<Flow<*>?>). Разбиваем на два вложенных
+            // combine() с фиксированной арностью (по 2-3 потока) — эти перегрузки не используют
+            // варарг-массив и не подвержены этому багу минификации.
+            val baseInfo = combine(
                 chatRepository.observeChatList(),
                 draftsPreferences.observeAllDrafts().onStart { emit(emptyMap()) },
-                _activeFilter,
+                _activeFilter
+            ) { result, drafts, filter -> Triple(result, drafts, filter) }
+
+            combine(
+                baseInfo,
                 chatFolders.onStart { emit(emptyList()) },
                 hiddenInfo
-            ) { result, drafts, filter, folders, hidden ->
+            ) { (result, drafts, filter), folders, hidden ->
                 when (result) {
                     is ChatListResult.Success -> {
                         val chatsWithDrafts = if (drafts.isEmpty()) {
