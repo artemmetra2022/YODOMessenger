@@ -240,6 +240,11 @@ fun YodoNavGraph(
                 // НОВОЕ (каталог/рекомендации каналов): открытие витрины каналов.
                 onDiscoverChannels = {
                     navController.navigate(Routes.DiscoverChannels.route)
+                },
+                // НОВОЕ (админ-функции групп): тап по бейджу заявок на карточке группы —
+                // сразу к экрану информации о группе (раздел «Заявки»).
+                onOpenGroupInfo = { chatId ->
+                    navController.navigate(Routes.GroupInfo.createRoute(chatId))
                 }
             )
         }
@@ -630,10 +635,27 @@ fun YodoNavGraph(
                 onOpenChannelProfile = { channelId ->
                     navController.navigate(Routes.ChannelProfile.createRoute(channelId))
                 },
+                // НОВОЕ (админ-функции групп): тап по группе в выдаче поиска —
+                // в профиль группы (если не участник) или сразу в чат (если участник).
+                onOpenGroupProfile = { chatId ->
+                    navController.navigate(Routes.GroupProfile.createRoute(chatId))
+                },
                 // НОВОЕ (поиск по настройкам): тап по найденной настройке — открываем
                 // экран настроек и прокручиваем сразу к нужному пункту.
                 onOpenSettings = { anchorId ->
                     navController.navigate(Routes.Settings.createRoute(anchorId))
+                }
+            )
+        }
+        // НОВОЕ (админ-функции групп): профиль-превью группы из поиска.
+        composable(
+            route = Routes.GroupProfile.route,
+            arguments = listOf(navArgument(Routes.GroupProfile.ARG_CHAT_ID) { type = NavType.StringType })
+        ) {
+            app.yodo.messenger.features.chats.GroupProfileScreen(
+                onBackClick = { navController.popBackStack() },
+                onChatOpened = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId))
                 }
             )
         }

@@ -8,6 +8,7 @@ import app.yodo.messenger.domain.repository.ChatListResult
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.MessageRepository
 import app.yodo.messenger.domain.repository.SendMessageResult
+import app.yodo.messenger.domain.repository.UserRepository
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,7 @@ import javax.inject.Inject
 class ForwardMessageViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val userRepository: UserRepository,
     private val firebaseAuth: FirebaseAuth,
     private val pendingForwardHolder: PendingForwardHolder,
     private val pendingForwardUndoHolder: PendingForwardUndoHolder
@@ -92,7 +94,18 @@ class ForwardMessageViewModel @Inject constructor(
         _isForwarding.value = true
         _errorMessage.value = null
         viewModelScope.launch {
-            when (val result = messageRepository.forwardMessage(targetChatId, message, originSenderName, myUid)) {
+            val sourceUser = message.forwardedFromSenderId?.let { userRepository.getUserById(it) }
+                ?: userRepository.getUserById(message.senderId)
+            val sourcePhotoUrl = message.forwardedFromSenderPhotoUrl ?: sourceUser?.photoUrl
+            val sourceAvatarBase64 = message.forwardedFromSenderAvatarBase64 ?: sourceUser?.avatarBase64
+            when (val result = messageRepository.forwardMessage(
+                targetChatId = targetChatId,
+                originalMessage = message,
+                fromSenderName = originSenderName,
+                fromSenderId = message.forwardedFromSenderId ?: message.senderId,
+                fromSenderPhotoUrl = sourcePhotoUrl,
+                fromSenderAvatarBase64 = sourceAvatarBase64
+            )) {
                 is SendMessageResult.Success -> {
                     pendingForwardHolder.takeAndClear()
                     // п.2: кладём id пересланного сообщения в holder — ChatScreen того чата,

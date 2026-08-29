@@ -7,7 +7,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -157,14 +156,15 @@ class PresenceRepositoryImpl @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    override suspend fun setTyping(chatId: String, isTyping: Boolean) {
+    override fun setTyping(chatId: String, isTyping: Boolean) {
         val uid = firebaseAuth.currentUser?.uid ?: return
-        try {
-            firestore.collection("chats").document(chatId)
-                .update("typingUsers.$uid", isTyping)
-                .await()
-        } catch (e: Exception) {
-            // Не критично — индикатор просто не обновится в этот раз
-        }
+        // Fire-and-forget: метод вызывается в т.ч. из onCleared() уже уничтожаемой
+        // ViewModel (viewModelScope отменён), поэтому suspend + await() здесь нельзя —
+        // Firestore-запрос уходит собственным потоком и завершается сам.
+        firestore.collection("chats").document(chatId)
+            .update("typingUsers.$uid", isTyping)
+            .addOnFailureListener {
+                // Не критично — индикатор просто не обновится в этот раз
+            }
     }
 }

@@ -1,13 +1,12 @@
-name: Deploy Cloud Functions
+name: Deploy Web Version
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
     paths:
-      - 'functions/**'
+      - 'web/**'
       - 'firebase.json'
-      - '.firebaserc'
 
 jobs:
   deploy:
@@ -22,16 +21,12 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install functions dependencies
-        run: npm install
-        working-directory: functions
-
       - name: Write service account key
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/service-account.json
 
-      - name: Deploy to Firebase
+      - name: Deploy to Firebase Hosting
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/service-account.json
-        run: npx firebase-tools deploy --only functions --project yodomessenger --non-interactive
+        run: npx firebase-tools deploy --only hosting --project yodomessenger --non-interactive

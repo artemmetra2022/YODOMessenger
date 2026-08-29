@@ -27,8 +27,10 @@ android {
         applicationId = "app.yodo.messenger"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-mvp"
+        // Версия подтягивается из последнего GitHub-релиза через CI (флаги -PversionName/-PversionCode).
+        // Локальные сборки без флагов используют дефолтные значения.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0-mvp"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

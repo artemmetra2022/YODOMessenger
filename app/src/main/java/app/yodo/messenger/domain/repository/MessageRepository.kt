@@ -80,9 +80,17 @@ interface MessageRepository {
     suspend fun cancelScheduledMessage(chatId: String, scheduledMessageId: String)
     suspend fun editScheduledMessage(chatId: String, scheduledMessageId: String, newText: String, newScheduledFor: Long)
     suspend fun publishDueScheduledMessages(chatId: String)
-    suspend fun forwardMessage(targetChatId: String, originalMessage: Message, fromSenderName: String, fromSenderId: String): SendMessageResult
+    suspend fun forwardMessage(
+        targetChatId: String,
+        originalMessage: Message,
+        fromSenderName: String,
+        fromSenderId: String,
+        fromSenderPhotoUrl: String? = null,
+        fromSenderAvatarBase64: String? = null
+    ): SendMessageResult
     suspend fun editMessage(chatId: String, messageId: String, newText: String): SendMessageResult
     suspend fun deleteMessage(chatId: String, messageId: String): SendMessageResult
+    suspend fun deleteMessages(chatId: String, messageIds: List<String>): SendMessageResult
     suspend fun markChatAsRead(chatId: String)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
     // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).

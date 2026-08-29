@@ -24,6 +24,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -46,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -59,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.domain.model.ChannelAccessMode
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
 import app.yodo.messenger.features.settings.SettingsSearchItem
@@ -80,6 +84,8 @@ fun SearchScreen(
     onChatOpened: (String) -> Unit,
     onViewProfile: (String) -> Unit,
     onOpenChannelProfile: (String) -> Unit,
+    // НОВОЕ (админ-функции групп): переход на профиль группы из выдачи поиска.
+    onOpenGroupProfile: (String) -> Unit = {},
     // НОВОЕ (поиск по настройкам): открыть экран настроек и прокрутить к найденному пункту.
     onOpenSettings: (String) -> Unit = {},
     viewModel: SearchViewModel = hiltViewModel()
@@ -88,6 +94,7 @@ fun SearchScreen(
     val uiState by viewModel.uiState.collectAsState()
     val openChatId by viewModel.openChatId.collectAsState()
     val openChannelProfileId by viewModel.openChannelProfileId.collectAsState()
+    val openGroupProfileId by viewModel.openGroupProfileId.collectAsState()
     val openSettingsAnchor by viewModel.openSettingsAnchor.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val colorTheme = LocalColorTheme.current
@@ -102,6 +109,13 @@ fun SearchScreen(
         openChannelProfileId?.let {
             onOpenChannelProfile(it)
             viewModel.consumeOpenChannelProfileId()
+        }
+    }
+    // НОВОЕ (админ-функции групп): переход на профиль группы.
+    LaunchedEffect(openGroupProfileId) {
+        openGroupProfileId?.let {
+            onOpenGroupProfile(it)
+            viewModel.consumeOpenGroupProfileId()
         }
     }
     // НОВОЕ (поиск по настройкам): переход в настройки при тапе на найденный пункт.
@@ -191,6 +205,18 @@ fun SearchScreen(
                                         channel = channel,
                                         colorTheme = colorTheme,
                                         onClick = { viewModel.openChannel(channel) }
+                                    )
+                                }
+                            }
+                            // ═══ Секция групп ═══
+                            if (state.groups.isNotEmpty()) {
+                                item { SearchSectionHeader(title = stringResource(R.string.search_groups_header), count = state.groups.size, colorTheme = colorTheme) }
+                                items(state.groups, key = { "gr_${it.chatId}" }) { group ->
+                                    ChannelResultCard(
+                                        channel = group,
+                                        colorTheme = colorTheme,
+                                        isGroup = true,
+                                        onClick = { viewModel.openGroup(group) }
                                     )
                                 }
                             }
@@ -333,9 +359,15 @@ private fun EmptyStateHint(icon: ImageVector, text: String, colorTheme: ColorThe
     }
 }
 
-/** Карточка канала в выдаче поиска — приподнятая, с градиентным кольцом вокруг аватара. */
+/** Карточка канала в выдаче поиска — приподнятая, с градиентным кольцом вокруг аватара.
+ * НОВОЕ (админ-функции групп): переиспользуется для групп (isGroup = true — иконка группы). */
 @Composable
-private fun ChannelResultCard(channel: ChannelSearchItem, colorTheme: ColorTheme, onClick: () -> Unit) {
+private fun ChannelResultCard(
+    channel: ChannelSearchItem,
+    colorTheme: ColorTheme,
+    isGroup: Boolean = false,
+    onClick: () -> Unit
+) {
     val shape = RoundedCornerShape(16.dp)
     Row(
         modifier = Modifier
@@ -367,7 +399,9 @@ private fun ChannelResultCard(channel: ChannelSearchItem, colorTheme: ColorTheme
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    Icons.Filled.Campaign, contentDescription = null,
+                    // НОВОЕ (админ-функции групп): у групп — иконка группы вместо мегафона.
+                    imageVector = if (isGroup) Icons.Filled.Groups else Icons.Filled.Campaign,
+                    contentDescription = null,
                     tint = colorTheme.primary, modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(5.dp))
@@ -379,6 +413,17 @@ private fun ChannelResultCard(channel: ChannelSearchItem, colorTheme: ColorTheme
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
+                // НОВОЕ (админ-функции групп): замочек у модерируемой группы — чтобы
+                // до тапа было ясно, что вступление по заявке, а не мгновенное.
+                if (isGroup && channel.accessMode == ChannelAccessMode.MODERATED) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        Icons.Filled.Lock,
+                        contentDescription = "Вступление по заявке",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
                 if (channel.isVerified) {
                     Spacer(modifier = Modifier.width(4.dp))
                     Box(
@@ -396,8 +441,11 @@ private fun ChannelResultCard(channel: ChannelSearchItem, colorTheme: ColorTheme
                 Icon(Icons.Filled.People, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
+                    // НОВОЕ (админ-функции групп): для групп — «N участников» с верным
+                    // склонением, а не «N подписчиков».
                     text = channel.description.ifBlank {
-                        "${channel.subscriberCount} ${pluralSubscribers(channel.subscriberCount)}"
+                        if (isGroup) pluralStringResource(R.plurals.search_group_members, channel.subscriberCount, channel.subscriberCount)
+                        else "${channel.subscriberCount} ${pluralSubscribers(channel.subscriberCount)}"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -413,7 +461,8 @@ private fun ChannelResultCard(channel: ChannelSearchItem, colorTheme: ColorTheme
                 color = colorTheme.primary.copy(alpha = 0.12f)
             ) {
                 Text(
-                    stringResource(R.string.search_subscribed),
+                    // НОВОЕ (админ-функции групп): для группы — «Вы участник», не «Вы подписаны».
+                    stringResource(if (isGroup) R.string.search_member_of_group else R.string.search_subscribed),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
                     color = colorTheme.primary,

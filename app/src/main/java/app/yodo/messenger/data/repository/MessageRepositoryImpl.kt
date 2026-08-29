@@ -17,6 +17,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -54,8 +55,37 @@ class MessageRepositoryImpl @Inject constructor(
                     // п.38: истёкшие исчезающие сообщения не показываем в UI
                     .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
                 trySend(messages)
+                // ИСПРАВЛЕНО (индикатор доставлено): как только чужое сообщение со
+                // статусом SENT дошло до нашего устройства (мы получили снапшот не из
+                // локального кэша, а подтверждённый сервером), помечаем его DELIVERED.
+                // Раньше статус мог перескакивать сразу в READ при входе в чат, минуя
+                // "доставлено" — отправитель никогда не видел промежуточное состояние.
+                markIncomingMessagesAsDelivered(snapshot)
             }
         awaitClose { listener.remove() }
+    }
+
+    /**
+     * ИСПРАВЛЕНО (индикатор доставлено): проставляет статус DELIVERED чужим сообщениям,
+     * которые дошли до нашего устройства (сервер подтвердил снапшот — hasPendingWrites
+     * == false), но всё ещё числятся SENT. Best-effort и не блокирует UI: ошибки просто
+     * логируются молча, чат продолжает работать даже если это обновление не удалось.
+     */
+    private fun markIncomingMessagesAsDelivered(snapshot: QuerySnapshot?) {
+        val myUid = firebaseAuth.currentUser?.uid ?: return
+        if (snapshot == null || snapshot.metadata.hasPendingWrites()) return
+        val toUpdate = snapshot.documents.filter { doc ->
+            doc.getString("senderId") != myUid && doc.getString("status") == MessageStatus.SENT.name
+        }
+        if (toUpdate.isEmpty()) return
+        toUpdate.chunked(500).forEach { chunk ->
+            val batch = firestore.batch()
+            chunk.forEach { doc -> batch.update(doc.reference, "status", MessageStatus.DELIVERED.name) }
+            // Best-effort: если batch не закоммитится (нет сети, отказ правил и т.п.),
+            // просто проглатываем ошибку — это не должно ронять экран чата или ретраить
+            // бесконечно, следующий снапшот всё равно попробует снова.
+            batch.commit().addOnFailureListener { }
+        }
     }
 
     // НОВОЕ (переработка каналов): одно сообщение — для превью поста в экране комментариев.
@@ -113,7 +143,6 @@ class MessageRepositoryImpl @Inject constructor(
             if (ttlSeconds != null && ttlSeconds > 0) {
                 data["expiresAt"] = now + ttlSeconds * 1000L
             }
-            val newDocRef = chatRef.collection("messages").add(data).await()
             val previewText = if (data["encrypted"] == true) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
                 ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
                 else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
@@ -129,7 +158,18 @@ class MessageRepositoryImpl @Inject constructor(
             participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
                 unreadUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
             }
-            chatRef.update(unreadUpdates).await()
+            // ИСПРАВЛЕНО (дубли сообщений при сетевом сбое): раньше документ сообщения
+            // создавался отдельным вызовом add(), а превью чата (lastMessage/unreadCounts)
+            // и счётчики темы — отдельными update(). Если второй вызов падал при сетевом
+            // сбое, пользователь получал ошибку «не удалось отправить», хотя сообщение
+            // УЖЕ было сохранено в Firestore — повторная отправка создавала дубликат
+            // (и «лишний» unread-инкремент). Теперь все записи идут одним атомарным
+            // WriteBatch: либо сообщение и сопутствующие обновления применяются вместе,
+            // либо не применяется ничего, и повторная отправка действительно оправдана.
+            val newDocRef = chatRef.collection("messages").document()
+            val batch = firestore.batch()
+            batch.set(newDocRef, data)
+            batch.update(chatRef, unreadUpdates)
             if (topicId != null) {
                 val topicUpdates = mutableMapOf<String, Any?>(
                     "lastMessage" to previewText,
@@ -141,8 +181,9 @@ class MessageRepositoryImpl @Inject constructor(
                 participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
                     topicUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
                 }
-                chatRef.collection("topics").document(topicId).update(topicUpdates).await()
+                batch.update(chatRef.collection("topics").document(topicId), topicUpdates)
             }
+            batch.commit().await()
             SendMessageResult.Success(messageId = newDocRef.id)
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не ��далось отправить сообщение")) }
     }
@@ -179,7 +220,9 @@ class MessageRepositoryImpl @Inject constructor(
             if (text.isNullOrEmpty()) return
             val chatSnap = firestore.collection("chats").document(chatId).get().await()
             val type = chatSnap.getString("type")
-            if (type != null && type != "private") return
+            // Чаты создаются с "type" to "PRIVATE" (заглавными), поэтому сравнение
+            // с "private" строчным регистром отключало E2EE для всех личных чатов.
+            if (type != null && !type.equals("private", ignoreCase = true)) return
             val participantIds = (chatSnap.get("participantIds") as? List<*>)
                 ?.filterIsInstance<String>() ?: return
             if (participantIds.size != 2) return
@@ -509,7 +552,14 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
-    override suspend fun forwardMessage(targetChatId: String, originalMessage: Message, fromSenderName: String, fromSenderId: String): SendMessageResult {
+    override suspend fun forwardMessage(
+        targetChatId: String,
+        originalMessage: Message,
+        fromSenderName: String,
+        fromSenderId: String,
+        fromSenderPhotoUrl: String?,
+        fromSenderAvatarBase64: String?
+    ): SendMessageResult {
         // НОВОЕ (одноразовые медиа): view-once фото пересылать нельзя — иначе пересланная
         // копия превратилась бы в обычное, сколько угодно раз открываемое изображение,
         // что противоречит смыслу "один просмотр".
@@ -521,6 +571,8 @@ class MessageRepositoryImpl @Inject constructor(
             "forwardedFromSenderName" to fromSenderName,
             "forwardedFromSenderId" to fromSenderId
         )
+        fromSenderPhotoUrl?.let { data["forwardedFromSenderPhotoUrl"] = it }
+        fromSenderAvatarBase64?.let { data["forwardedFromSenderAvatarBase64"] = it }
         if (originalMessage.imagesBase64.isNotEmpty()) {
             data["imagesBase64"] = originalMessage.imagesBase64
         }
@@ -567,6 +619,33 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось удалить")) }
     }
 
+    override suspend fun deleteMessages(chatId: String, messageIds: List<String>): SendMessageResult {
+        if (messageIds.isEmpty()) return SendMessageResult.Success()
+        return try {
+            val refs = messageIds.map { id ->
+                firestore.collection("chats").document(chatId).collection("messages").document(id)
+            }
+            refs.chunked(500).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { ref ->
+                    batch.update(ref, mapOf(
+                        "isDeleted" to true,
+                        "text" to "",
+                        "imageBase64" to FieldValue.delete(),
+                        "fileBase64" to FieldValue.delete(),
+                        "fileName" to FieldValue.delete(),
+                        "fileMimeType" to FieldValue.delete(),
+                        "fileSizeBytes" to FieldValue.delete(),
+                        "locationLat" to FieldValue.delete(),
+                        "locationLng" to FieldValue.delete()
+                    ))
+                }
+                batch.commit().await()
+            }
+            SendMessageResult.Success()
+        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось удалить сообщения")) }
+    }
+
     override suspend fun markChatAsRead(chatId: String) {
         val uid = firebaseAuth.currentUser?.uid ?: return
         try {
@@ -575,10 +654,14 @@ class MessageRepositoryImpl @Inject constructor(
             if (showReadReceipts) {
                 val messagesRef = chatRef.collection("messages")
                 // whereNotEqualTo требует составного индекса — заменяем на фильтрацию
-                // в памяти: загружаем только SENT-сообщения (они есть всегда), затем
-                // отбираем чужие. Batch делим по 500, чтобы не превысить лимит Firestore.
+                // в памяти: загружаем SENT- и DELIVERED-сообщения (статусы до READ),
+                // затем отбираем чужие. Batch делим по 500, чтобы не превысить лимит
+                // Firestore. ИСПРАВЛЕНО: раньше проверялся только "SENT" — сообщения,
+                // уже помеченные DELIVERED, не переходили в READ при открытии чата.
                 val sentSnapshot = messagesRef.whereEqualTo("status", "SENT").get().await()
-                val unreadDocs = sentSnapshot.documents.filter { it.getString("senderId") != uid }
+                val deliveredSnapshot = messagesRef.whereEqualTo("status", "DELIVERED").get().await()
+                val unreadDocs = (sentSnapshot.documents + deliveredSnapshot.documents)
+                    .filter { it.getString("senderId") != uid }
                 if (unreadDocs.isNotEmpty()) {
                     unreadDocs.chunked(500).forEach { chunk ->
                         val batch = firestore.batch()
@@ -879,9 +962,12 @@ class MessageRepositoryImpl @Inject constructor(
                 topicId = doc.getString("topicId"),
                 text = decryptMessageText(doc),
                 timestamp = doc.getLong("timestamp") ?: 0L,
-                status = doc.getString("status")?.let { raw ->
-                    runCatching { MessageStatus.valueOf(raw) }.getOrDefault(MessageStatus.SENT)
-                } ?: MessageStatus.SENT,
+                // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше статус брался
+                // прямо из поля "status" без учёта hasPendingWrites, поэтому оптимистично
+                // созданное локальное сообщение могло на мгновение показать неверную
+                // (устаревшую из кэша) галочку. Теперь решение централизовано в
+                // resolveMessageStatus и явно учитывает, подтверждена ли запись сервером.
+                status = resolveMessageStatus(doc.getString("status"), doc.metadata.hasPendingWrites()),
                 replyToMessageId = doc.getString("replyToMessageId"),
                 replyToSenderName = doc.getString("replyToSenderName"),
                 replyToText = doc.getString("replyToText"),
@@ -892,6 +978,8 @@ class MessageRepositoryImpl @Inject constructor(
                 isDeleted = doc.getBoolean("isDeleted") ?: false,
                 forwardedFromSenderName = doc.getString("forwardedFromSenderName"),
                 forwardedFromSenderId = doc.getString("forwardedFromSenderId"),
+                forwardedFromSenderPhotoUrl = doc.getString("forwardedFromSenderPhotoUrl"),
+                forwardedFromSenderAvatarBase64 = doc.getString("forwardedFromSenderAvatarBase64"),
                 isPinned = doc.getBoolean("isPinned") ?: false,
                 expiresAt = doc.getLong("expiresAt"),
                 voiceBase64 = doc.getString("voiceBase64"),

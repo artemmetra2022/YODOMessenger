@@ -63,9 +63,13 @@ class AuthRepositoryImpl @Inject constructor(
             }
             // НОВОЕ (email-статус): синхронизируем флаг в Firestore при обычном логине —
             // покрывает случай, когда почта была подтверждена по ссылке, минуя reloadUser().
+            // Пишем РЕАЛЬНОЕ значение (user выше только что перезагружен reload()'ом, так
+            // что isEmailVerified актуален): раньше сюда безусловно писалось true, и при
+            // выключенном требовании верификации пользователь с неподтверждённой почтой
+            // получал в профиле ложный статус «email подтверждён».
             try {
                 firestore.collection("users").document(user.uid)
-                    .update("isEmailVerified", true).await()
+                    .update("isEmailVerified", user.isEmailVerified).await()
             } catch (_: Exception) { }
 
             warmUpFirestore(user.uid)

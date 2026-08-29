@@ -48,6 +48,13 @@ interface PresenceRepository {
     /** Реалтайм-множество uid участников, которые сейчас печатают в этом чате (кроме меня). */
     fun observeTypingUsers(chatId: String): Flow<Set<String>>
 
-    /** Отметить, печатаю ли я сейчас в этом чате. */
-    suspend fun setTyping(chatId: String, isTyping: Boolean)
+    /**
+     * Отметить, печатаю ли я сейчас в этом чате.
+     *
+     * НЕ suspend и fire-and-forget (как setOnline/heartbeat): вызов обязан работать
+     * из ViewModel.onCleared(), где viewModelScope уже отменён и запустить coroutine
+     * невозможно — иначе сброс «печатает…» не уходил бы никогда, и собеседник
+     * видел индикатор зависшим навсегда.
+     */
+    fun setTyping(chatId: String, isTyping: Boolean)
 }

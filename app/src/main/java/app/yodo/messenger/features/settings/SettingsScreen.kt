@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -35,6 +37,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Brightness6
@@ -43,6 +46,7 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.ExitToApp
@@ -111,6 +115,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.data.local.AppLanguage
@@ -165,6 +170,8 @@ fun SettingsScreen(
     val showEmail by viewModel.showEmail.collectAsState()
     val autoDownloadImages by viewModel.autoDownloadImages.collectAsState()
     val hideKeyboardOnSend by viewModel.hideKeyboardOnSend.collectAsState()
+    val hideKeyboardOnScroll by viewModel.hideKeyboardOnScroll.collectAsState()
+    val quickReaction by viewModel.quickReaction.collectAsState()
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
     val notificationSound by viewModel.notificationSound.collectAsState()
     val notificationVibration by viewModel.notificationVibration.collectAsState()
@@ -194,6 +201,7 @@ fun SettingsScreen(
     var showAutoDeleteDialog by remember { mutableStateOf(false) }
     var showChatBackgroundDialog by remember { mutableStateOf(false) }
     var showChatFoldersDialog by remember { mutableStateOf(false) }
+    var showQuickReactionDialog by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val colorTheme = LocalColorTheme.current
@@ -329,6 +337,13 @@ fun SettingsScreen(
     }
 
     // НОВОЕ (п.4): диалог управления папками чатов
+    if (showQuickReactionDialog) {
+        QuickReactionDialog(
+            selected = quickReaction,
+            onSelect = { viewModel.setQuickReaction(it) },
+            onDismiss = { showQuickReactionDialog = false }
+        )
+    }
     if (showChatFoldersDialog) {
         ChatFoldersDialog(
             folders = chatFolders,
@@ -603,7 +618,7 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setSendOnEnter(it) },
                         colorTheme = colorTheme
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsToggleRow(
                         icon = Icons.Filled.Keyboard,
                         title = stringResource(R.string.settings_hide_keyboard),
@@ -612,7 +627,23 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setHideKeyboardOnSend(it) },
                         colorTheme = colorTheme
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsToggleRow(
+                        icon = Icons.Filled.Keyboard,
+                        title = "Скрывать клавиатуру при прокрутке",
+                        subtitle = "Закрывать клавиатуру при прокрутке сообщений",
+                        checked = hideKeyboardOnScroll,
+                        onCheckedChange = { viewModel.setHideKeyboardOnScroll(it) },
+                        colorTheme = colorTheme
+                    )
+                    SettingsClickableRow(
+                        icon = Icons.Filled.EmojiEmotions,
+                        title = "Быстрая реакция",
+                        subtitle = "Тройное нажатие: $quickReaction",
+                        onClick = { showQuickReactionDialog = true },
+                        colorTheme = colorTheme
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsToggleRow(
                         icon = Icons.Filled.Image,
                         title = stringResource(R.string.settings_auto_download),
@@ -621,7 +652,7 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setAutoDownloadImages(it) },
                         colorTheme = colorTheme
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsToggleRow(
                         icon = Icons.Filled.Poll,
                         title = stringResource(R.string.register_advanced_polls_title),
@@ -683,7 +714,7 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setShowOnlineStatus(it) },
                         colorTheme = colorTheme
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsToggleRow(
                         icon = Icons.Filled.RemoveRedEye,
                         title = stringResource(R.string.settings_read_receipts),
@@ -908,7 +939,7 @@ fun SettingsScreen(
                         enter = fadeIn(androidx.compose.animation.core.tween(200)) + slideInVertically(androidx.compose.animation.core.tween(200))
                     ) {
                         Column {
-                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                             SettingsToggleRow(
                                 icon = Icons.Filled.VolumeUp,
                                 title = stringResource(R.string.settings_sound),
@@ -917,7 +948,7 @@ fun SettingsScreen(
                                 onCheckedChange = { viewModel.setNotificationSound(it) },
                                 colorTheme = colorTheme
                             )
-                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                             SettingsToggleRow(
                                 icon = Icons.Filled.Vibration,
                                 title = stringResource(R.string.settings_vibration),
@@ -947,7 +978,7 @@ fun SettingsScreen(
                     )
                     AnimatedVisibility(visible = quietHoursEnabled) {
                         Column {
-                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                             SettingsNavigateRow(
                                 icon = Icons.Filled.Timer,
                                 title = "Начало: %02d:00".format(quietHoursStart),
@@ -955,7 +986,7 @@ fun SettingsScreen(
                                 colorTheme = colorTheme,
                                 onClick = { viewModel.shiftQuietHoursStart(1) }
                             )
-                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                            HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                             SettingsNavigateRow(
                                 icon = Icons.Filled.Timer,
                                 title = "Конец: %02d:00".format(quietHoursEnd),
@@ -965,7 +996,7 @@ fun SettingsScreen(
                             )
                         }
                     }
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsToggleRow(
                         icon = Icons.Filled.RemoveRedEye,
                         title = "Скрывать текст в уведомлениях",
@@ -974,7 +1005,7 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setHideNotificationPreview(it) },
                         colorTheme = colorTheme
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsNavigateRow(
                         icon = Icons.Filled.Timer,
                         title = if (notificationsSnoozedUntil > System.currentTimeMillis()) "Пауза активна — выключить" else "Пауза уведомлений на 1 час",
@@ -985,7 +1016,7 @@ fun SettingsScreen(
                             else viewModel.snoozeNotifications(60L * 60L * 1000L)
                         }
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsNavigateRow(
                         icon = Icons.Filled.Timer,
                         title = "Пауза уведомлений на 8 часов",
@@ -993,7 +1024,7 @@ fun SettingsScreen(
                         colorTheme = colorTheme,
                         onClick = { viewModel.snoozeNotifications(8L * 60L * 60L * 1000L) }
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsNavigateRow(
                         icon = Icons.Filled.VolumeUp,
                         title = "Отправить тестовое уведомление",
@@ -1089,7 +1120,7 @@ fun SettingsScreen(
                         colorTheme = colorTheme,
                         onClick = onSwitchAccount
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsNavigateRow(
                         icon = Icons.Filled.ExitToApp,
                         title = stringResource(R.string.settings_logout),
@@ -1098,7 +1129,7 @@ fun SettingsScreen(
                         tintOverride = YodoError,
                         onClick = { viewModel.logout(); onLoggedOut() }
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     SettingsNavigateRow(
                         icon = Icons.Filled.Delete,
                         title = stringResource(R.string.settings_delete_account),
@@ -1676,7 +1707,7 @@ private fun SettingsSearchBar(
             )
         }
         if (query.isNotEmpty()) {
-            IconButton(onClick = { onQueryChanged("") }, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = { onQueryChanged("") }, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.search_clear_cd), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -1706,18 +1737,18 @@ private fun SettingsSearchResultsList(
             )
             SettingsCard {
                 results.forEachIndexed { index, item ->
-                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                    if (index > 0) HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
-                            .clickable(onClickLabel = item.title) { onResultClick(item) }
+                            .clickable { onResultClick(item) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(colorTheme.primary.copy(alpha = 0.12f)),
                             contentAlignment = Alignment.Center
@@ -1726,7 +1757,7 @@ private fun SettingsSearchResultsList(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                            Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                             Text(
                                 "${item.sectionTitle} · ${item.subtitle}",
                                 style = MaterialTheme.typography.bodySmall,
@@ -1735,11 +1766,10 @@ private fun SettingsSearchResultsList(
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowForwardIos,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                             modifier = Modifier.size(14.dp)
                         )
                     }
@@ -1797,6 +1827,50 @@ private fun SettingsCard(modifier: Modifier = Modifier, content: @Composable () 
 }
 
 @Composable
+private fun SettingsClickableRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    colorTheme: ColorTheme
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(colorTheme.primary.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(20.dp))
+        }
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun QuickReactionDialog(
+    selected: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val reactions = listOf("👍", "❤️", "😂", "🔥", "👏", "😢", "😡", "🎉", "🤔", "👎")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Быстрая реакция") },
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                reactions.forEach { emoji ->
+                    Text(emoji, fontSize = 26.sp, modifier = Modifier.clickable { onSelect(emoji) }.padding(6.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Готово") } }
+    )
+}
+
+@Composable
 private fun SettingsToggleRow(
     icon: ImageVector,
     title: String,
@@ -1811,28 +1885,19 @@ private fun SettingsToggleRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clickable(
-                enabled = enabled,
-                onClickLabel = title,
-                role = androidx.compose.ui.semantics.Role.Switch
-            ) { onCheckedChange(!checked) }
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showIcon) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(colorTheme.primary.copy(alpha = if (enabled) 0.12f else 0.06f)),
+                    .background(colorTheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = if (enabled) colorTheme.primary else colorTheme.primary.copy(alpha = 0.4f),
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(icon, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(20.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
         } else {
@@ -1843,8 +1908,8 @@ private fun SettingsToggleRow(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                color = if (enabled) colorTheme.primary
+                else colorTheme.primary.copy(alpha = 0.4f)
             )
             Text(
                 subtitle,
@@ -1854,7 +1919,6 @@ private fun SettingsToggleRow(
                 )
             )
         }
-        Spacer(modifier = Modifier.width(8.dp))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -1878,13 +1942,13 @@ private fun SettingsNavigateRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clickable(onClickLabel = title, onClick = onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(iconTint.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center
@@ -1893,14 +1957,13 @@ private fun SettingsNavigateRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = iconTint)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(modifier = Modifier.width(8.dp))
         Icon(
             Icons.AutoMirrored.Filled.ArrowForwardIos,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             modifier = Modifier.size(14.dp)
         )
     }

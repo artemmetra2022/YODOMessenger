@@ -14,7 +14,14 @@ class MessageStatusResolverTest {
     @Test
     fun `acknowledged Firestore write uses stored status`() {
         assertEquals(MessageStatus.SENT, resolveMessageStatus("SENT", hasPendingWrites = false))
+        assertEquals(MessageStatus.DELIVERED, resolveMessageStatus("DELIVERED", hasPendingWrites = false))
         assertEquals(MessageStatus.READ, resolveMessageStatus("READ", hasPendingWrites = false))
+    }
+
+    @Test
+    fun `pending write always shows sending even if stored status is more advanced`() {
+        assertEquals(MessageStatus.SENDING, resolveMessageStatus("DELIVERED", hasPendingWrites = true))
+        assertEquals(MessageStatus.SENDING, resolveMessageStatus("READ", hasPendingWrites = true))
     }
 
     @Test

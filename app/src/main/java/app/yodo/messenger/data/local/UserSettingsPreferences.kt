@@ -70,6 +70,8 @@ class UserSettingsPreferences @Inject constructor(
     private val notificationVibrationKey = booleanPreferencesKey("notification_vibration")
     private val muteAllNotificationsKey = booleanPreferencesKey("mute_all_notifications")
     private val hideKeyboardOnSendKey = booleanPreferencesKey("hide_keyboard_on_send")
+    private val hideKeyboardOnScrollKey = booleanPreferencesKey("hide_keyboard_on_scroll")
+    private val quickReactionKey = stringPreferencesKey("quick_reaction")
     private val advancedPollsEnabledKey = booleanPreferencesKey("advanced_polls_enabled")
     private val pinHashKey = stringPreferencesKey("pin_hash")
     private val pinSaltKey = stringPreferencesKey("pin_salt")
@@ -116,6 +118,8 @@ class UserSettingsPreferences @Inject constructor(
     val notificationVibration: Flow<Boolean> = context.settingsDataStore.data.map { it[notificationVibrationKey] ?: true }
     val muteAllNotifications: Flow<Boolean> = context.settingsDataStore.data.map { it[muteAllNotificationsKey] ?: false }
     val hideKeyboardOnSend: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnSendKey] ?: true }
+    val hideKeyboardOnScroll: Flow<Boolean> = context.settingsDataStore.data.map { it[hideKeyboardOnScrollKey] ?: true }
+    val quickReaction: Flow<String> = context.settingsDataStore.data.map { it[quickReactionKey] ?: "👍" }
     // НОВОЕ: расширенные опросы (включая викторины) включены по умолчанию —
     // пользователю не нужно включать их вручную в настройках.
     val advancedPollsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[advancedPollsEnabledKey] ?: true }
@@ -193,6 +197,8 @@ class UserSettingsPreferences @Inject constructor(
     suspend fun setNotificationVibration(enabled: Boolean) { context.settingsDataStore.edit { it[notificationVibrationKey] = enabled } }
     suspend fun setMuteAllNotifications(enabled: Boolean) { context.settingsDataStore.edit { it[muteAllNotificationsKey] = enabled } }
     suspend fun setHideKeyboardOnSend(enabled: Boolean) { context.settingsDataStore.edit { it[hideKeyboardOnSendKey] = enabled } }
+    suspend fun setHideKeyboardOnScroll(enabled: Boolean) { context.settingsDataStore.edit { it[hideKeyboardOnScrollKey] = enabled } }
+    suspend fun setQuickReaction(emoji: String) { context.settingsDataStore.edit { it[quickReactionKey] = emoji } }
     suspend fun setAdvancedPollsEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[advancedPollsEnabledKey] = enabled } }
     // НОВОЕ (поиск по настройкам): включить/выключить показ настроек в общем поиске.
     suspend fun setShowSettingsInGlobalSearch(enabled: Boolean) { context.settingsDataStore.edit { it[showSettingsInGlobalSearchKey] = enabled } }

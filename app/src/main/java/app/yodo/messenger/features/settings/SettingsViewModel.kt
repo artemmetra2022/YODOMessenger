@@ -54,6 +54,8 @@ class SettingsViewModel @Inject constructor(
     val showReadReceipts: StateFlow<Boolean> = userSettingsPreferences.showReadReceipts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val autoDownloadImages: StateFlow<Boolean> = userSettingsPreferences.autoDownloadImages.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val hideKeyboardOnSend: StateFlow<Boolean> = userSettingsPreferences.hideKeyboardOnSend.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val hideKeyboardOnScroll: StateFlow<Boolean> = userSettingsPreferences.hideKeyboardOnScroll.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val quickReaction: StateFlow<String> = userSettingsPreferences.quickReaction.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "👍")
     val notificationSound: StateFlow<Boolean> = userSettingsPreferences.notificationSound.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val notificationVibration: StateFlow<Boolean> = userSettingsPreferences.notificationVibration.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val muteAllNotifications: StateFlow<Boolean> = userSettingsPreferences.muteAllNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -121,6 +123,8 @@ class SettingsViewModel @Inject constructor(
     fun setShowReadReceipts(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setShowReadReceipts(enabled) } }
     fun setAutoDownloadImages(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setAutoDownloadImages(enabled) } }
     fun setHideKeyboardOnSend(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideKeyboardOnSend(enabled) } }
+    fun setHideKeyboardOnScroll(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideKeyboardOnScroll(enabled) } }
+    fun setQuickReaction(emoji: String) { viewModelScope.launch { userSettingsPreferences.setQuickReaction(emoji) } }
     fun setNotificationSound(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationSound(enabled) } }
     fun setNotificationVibration(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationVibration(enabled) } }
     fun setMuteAllNotifications(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setMuteAllNotifications(enabled) } }

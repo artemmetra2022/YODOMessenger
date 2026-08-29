@@ -30,4 +30,4 @@ jobs:
       - name: Deploy Firestore rules and indexes
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/service-account.json
-        run: npx firebase-tools deploy --only firestore:rules,firestore:indexes --project claudemessenger --non-interactive
+        run: npx firebase-tools deploy --only firestore:rules,firestore:indexes --project yodomessenger --non-interactive

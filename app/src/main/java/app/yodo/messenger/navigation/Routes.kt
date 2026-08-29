@@ -65,6 +65,12 @@ sealed class Routes(val route: String) {
         fun createRoute(chatId: String) = "channel_profile/$chatId"
         const val ARG_CHAT_ID = "chatId"
     }
+    // НОВОЕ (админ-функции групп): профиль-превью группы из выдачи поиска
+    // (вступление/подача заявки для неучастников).
+    data object GroupProfile : Routes("group_profile/{chatId}") {
+        fun createRoute(chatId: String) = "group_profile/$chatId"
+        const val ARG_CHAT_ID = "chatId"
+    }
     data object EditChannel : Routes("edit_channel/{chatId}") {
         fun createRoute(chatId: String) = "edit_channel/$chatId"
         const val ARG_CHAT_ID = "chatId"

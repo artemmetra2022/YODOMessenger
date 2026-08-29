@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
@@ -68,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -96,6 +99,7 @@ import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
+import app.yodo.messenger.ui.theme.YodoMotion
 import app.yodo.messenger.ui.theme.YodoOnline
 import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
@@ -129,6 +133,9 @@ fun ChatListScreen(
     onOpenAdminPanel: () -> Unit = {},
     // НОВОЕ (расширение интерфейса каналов): открытие каталога/рекомендаций каналов.
     onDiscoverChannels: () -> Unit = {},
+    // НОВОЕ (админ-функции групп): переход к экрану информации о группе по тапу
+    // на бейдж заявок (для владельца/админа — сразу к заявкам, без захода в чат).
+    onOpenGroupInfo: (String) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -387,7 +394,13 @@ fun ChatListScreen(
                                     onClearHistory = { viewModel.clearChatHistory(chat.chatId) },
                                     onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
                                     isHidden = chat.chatId in hiddenChatIds,
-                                    onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) }
+                                    onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) },
+                                    // НОВОЕ (админ-функции групп): тап по бейджу заявок —
+                                    // сразу к экрану группы с заявками.
+                                    onRequestsClick = { onOpenGroupInfo(chat.chatId) },
+                                    modifier = Modifier.animateItemPlacement(
+                                        YodoMotion.emphasized(YodoMotion.DURATION_MEDIUM)
+                                    )
                                 )
                             }
                         }
@@ -929,26 +942,62 @@ internal fun SwipeableChatListItem(
     onClearHistory: () -> Unit,
     onToggleArchive: () -> Unit = {},
     isHidden: Boolean = false,
-    onToggleHidden: () -> Unit = {}
+    onToggleHidden: () -> Unit = {},
+    // НОВОЕ (админ-функции групп): тап по бейджу заявок на карточке группы.
+    onRequestsClick: () -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
-    var offsetX by remember { mutableFloatStateOf(0f) }
+    // НОВОЕ (motion): свайп теперь анимируется пружиной вместо мгновенного
+    // "прилипания" к пальцу — во время драга следует за пальцем 1:1 (это
+    // и должно быть мгновенным), а при отпускании плавно долетает до 0
+    // или до порога удаления через Animatable, а не через ручной stateful offset.
+    val offsetX = remember { androidx.compose.animation.core.Animatable(0f) }
     var showMenu by remember { mutableStateOf(false) }
     val deleteThreshold = -100f
+    val maxDrag = -200f
+    val scope = rememberCoroutineScope()
 
-    Box {
-        if (offsetX < -20f) {
+    // Прогресс раскрытия свайпа 0f..1f — управляет и цветом подложки, и
+    // масштабом иконки удаления, чтобы жест ощущался отзывчивым, а не бинарным.
+    val revealProgress = (offsetX.value / maxDrag).coerceIn(0f, 1f)
+    val pastDeleteThreshold = offsetX.value < deleteThreshold
+
+    val deleteIconScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pastDeleteThreshold) 1.15f else 0.9f + revealProgress * 0.2f,
+        animationSpec = YodoMotion.confirm(),
+        label = "deleteIconScale"
+    )
+    val trackColor by androidx.compose.animation.animateColorAsState(
+        targetValue = Color.Red.copy(alpha = 0.12f + revealProgress * 0.18f),
+        animationSpec = YodoMotion.standard(),
+        label = "swipeTrackColor"
+    )
+
+    Box(modifier = modifier) {
+        if (revealProgress > 0.02f) {
             Box(
-                modifier = Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.2f)),
+                modifier = Modifier.fillMaxSize().background(trackColor),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.chat_list_delete_cd), tint = Color.Red,
-                    modifier = Modifier.padding(end = 24.dp).size(28.dp))
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = stringResource(R.string.chat_list_delete_cd),
+                    tint = Color.Red,
+                    modifier = Modifier
+                        .padding(end = 24.dp)
+                        .size(28.dp)
+                        .graphicsLayer {
+                            scaleX = deleteIconScale
+                            scaleY = deleteIconScale
+                        }
+                )
             }
         }
-        Box(modifier = Modifier.offset { IntOffset(offsetX.roundToInt(), 0) }) {
+        Box(modifier = Modifier.offset { IntOffset(offsetX.value.roundToInt(), 0) }) {
             ChatListItem(
                 chat = chat, colorTheme = colorTheme,
                 onClick = onClick, onLongClick = { showMenu = true },
+                onRequestsClick = onRequestsClick,
                 isHidden = isHidden
             )
         }
@@ -966,12 +1015,24 @@ internal fun SwipeableChatListItem(
         modifier = Modifier.fillMaxWidth().pointerInput(chat.chatId) {
             detectHorizontalDragGestures(
                 onDragEnd = {
-                    if (offsetX < deleteThreshold) onDelete()
-                    offsetX = 0f
+                    scope.launch {
+                        if (offsetX.value < deleteThreshold) {
+                            // НОВОЕ (motion): улетает влево за край экрана перед удалением,
+                            // а не исчезает мгновенно — глаз успевает связать жест с результатом.
+                            offsetX.animateTo(-1000f, animationSpec = YodoMotion.exit(YodoMotion.DURATION_FAST))
+                            onDelete()
+                        } else {
+                            offsetX.animateTo(0f, animationSpec = YodoMotion.drag())
+                        }
+                    }
                 },
-                onDragCancel = { offsetX = 0f },
+                onDragCancel = {
+                    scope.launch { offsetX.animateTo(0f, animationSpec = YodoMotion.drag()) }
+                },
                 onHorizontalDrag = { _, dragAmount ->
-                    offsetX = (offsetX + dragAmount).coerceIn(-200f, 0f)
+                    scope.launch {
+                        offsetX.snapTo((offsetX.value + dragAmount).coerceIn(maxDrag, 0f))
+                    }
                 }
             )
         }
@@ -987,6 +1048,8 @@ private fun ChatListItem(
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    // НОВОЕ (админ-функции групп): тап по бейджу заявок открывает экран группы.
+    onRequestsClick: () -> Unit = {},
     isHidden: Boolean = false
 ) {
     // ИСПРАВЛЕНО (логотип поддержки): чат поддержки (support_<uid>) раньше
@@ -995,10 +1058,54 @@ private fun ChatListItem(
     val isSavedChat = !isSupportChat && chat.type == ChatType.PRIVATE && chat.otherUserId == null
     val isChannel = chat.type == ChatType.CHANNEL
 
+    // НОВОЕ (иерархия): единственный флаг, который решает "жирность" всей строки.
+    // Непрочитанный чат должен читаться с одного взгляда — не только по бейджу
+    // с числом, но и по весу заголовка и цвету превью. Прочитанные чаты уходят
+    // на второй план, чтобы глаз сам находил, куда нужно вернуться.
+    val hasUnread = !isChannel && chat.unreadCount > 0
+    val titleColor = MaterialTheme.colorScheme.onSurface
+    val previewColor = if (hasUnread) {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    }
+
+    // НОВОЕ (motion): строка чата слегка "прижимается" при нажатии — тот же
+    // эффект, что и у пузырей сообщений, поддерживает единый тактильный язык
+    // приложения между списком и самим чатом.
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isPressed) 0.985f else 1f,
+        animationSpec = YodoMotion.standard(YodoMotion.DURATION_INSTANT),
+        label = "chatRowPressScale"
+    )
+    val rowBackground by androidx.compose.animation.animateColorAsState(
+        targetValue = if (hasUnread) {
+            colorTheme.primary.copy(alpha = 0.05f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = YodoMotion.standard(YodoMotion.DURATION_MEDIUM),
+        label = "chatRowBackground"
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .background(rowBackground)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            // НОВОЕ (иерархия): высота строки стабилизирована к компактным ~72dp
+            // (56dp аватар + 8dp сверху/снизу) вместо "плавающего" padding,
+            // который раньше давал заметный разброс высоты между строками
+            // с разным количеством значков в заголовке.
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Аватар
@@ -1074,23 +1181,33 @@ private fun ChatListItem(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // НОВОЕ (скрытые чаты): маркер-замок у скрытого чата (виден только под основным PIN).
+                    // НОВОЕ (иерархия): статусные иконки (замок/мьют/пин) сведены в один
+                    // приглушённый визуальный "вес" — они вторичны по отношению к имени
+                    // и не должны спорить с ним за внимание. Раньше каждая иконка была
+                    // самостоятельным ярким акцентом (в т.ч. цветом темы у замка).
                     if (isHidden) {
                         Icon(Icons.Filled.Lock, contentDescription = "Скрытый чат",
-                            modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = colorTheme.primary)
+                            modifier = Modifier.size(13.dp).padding(end = 3.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                     }
                     if (chat.isMuted) {
                         Icon(Icons.Filled.NotificationsOff, contentDescription = null,
-                            modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = Color.Gray)
+                            modifier = Modifier.size(13.dp).padding(end = 3.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f))
                     }
                     if (chat.isPinned) {
                         Icon(Icons.Filled.PushPin, contentDescription = null,
-                            modifier = Modifier.size(14.dp).padding(end = 3.dp), tint = Color.Gray)
+                            modifier = Modifier.size(13.dp).padding(end = 3.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f))
                     }
                     Text(
                         chat.title,
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
+                        // НОВОЕ (иерархия): непрочитанный чат — SemiBold и полная непрозрачность;
+                        // прочитанный — Medium. Разница едва заметна построчно, но мгновенно
+                        // читается при взгляде на список целиком, как в почтовых клиентах.
+                        fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Medium,
+                        color = titleColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -1122,7 +1239,11 @@ private fun ChatListItem(
                         Text(
                             formatTimestamp(chat.lastMessageTimestamp),
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color.Gray
+                            // НОВОЕ (иерархия): время — акцентного цвета темы у непрочитанных,
+                            // нейтрально-серое у прочитанных. Раньше было одинаково серым
+                            // всегда, и глазу нечем было "зацепиться" в правом столбце.
+                            fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (hasUnread) colorTheme.primary else Color.Gray
                         )
                         val currentUid = FirebaseAuth.getInstance().currentUser?.uid
                         if (chat.lastMessageSenderId != null && chat.lastMessageSenderId == currentUid) {
@@ -1138,7 +1259,7 @@ private fun ChatListItem(
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
 
             // Нижняя строка
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1148,7 +1269,9 @@ private fun ChatListItem(
                             withStyle(SpanStyle(color = Color.Red, fontWeight = FontWeight.Medium)) {
                                 append(stringResource(R.string.chat_list_draft_prefix))
                             }
-                            append(chat.draftText)
+                            withStyle(SpanStyle(color = previewColor)) {
+                                append(chat.draftText)
+                            }
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
@@ -1159,13 +1282,70 @@ private fun ChatListItem(
                     Text(
                         chat.lastMessage.ifBlank { if (isChannel) stringResource(R.string.chat_list_channel_label) else "" },
                         style = MaterialTheme.typography.bodyMedium,
+                        // НОВОЕ (иерархия): превью последнего сообщения — вторичный текст.
+                        // У непрочитанных чуть темнее (78% альфы), у прочитанных заметно
+                        // приглушённей (55%), так список "расслаивается" на то, что важно
+                        // прямо сейчас, и то, что уже обработано.
+                        color = previewColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                 }
+                // НОВОЕ (админ-функции групп): бейдж ожидающих заявок на вступление —
+                // виден только владельцу/админам группы (у остальных поле всегда 0).
+                // Лёгкий «приглушённый» стиль, чтобы не спорить с бейджем непрочитанных.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = chat.type == ChatType.GROUP && chat.pendingRequestsCount > 0,
+                    enter = androidx.compose.animation.scaleIn(
+                        animationSpec = YodoMotion.confirm(),
+                        initialScale = 0.4f
+                    ) + androidx.compose.animation.fadeIn(YodoMotion.standard(YodoMotion.DURATION_FAST)),
+                    exit = androidx.compose.animation.scaleOut(
+                        animationSpec = YodoMotion.exit(),
+                        targetScale = 0.4f
+                    ) + androidx.compose.animation.fadeOut(YodoMotion.exit())
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 6.dp)
+                            .clip(CircleShape)
+                            .background(colorTheme.primary.copy(alpha = 0.14f))
+                            // НОВОЕ (админ-функции групп): бейдж кликабелен — ведёт
+                            // прямо к заявкам (экран информации о группе).
+                            .clickable { onRequestsClick() }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.HowToReg,
+                            contentDescription = "Заявки на вступление",
+                            tint = colorTheme.primary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = if (chat.pendingRequestsCount > 99) "99+" else chat.pendingRequestsCount.toString(),
+                            color = colorTheme.primary,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 if (!isChannel) {
-                    if (chat.unreadCount > 0) {
+                    // НОВОЕ (motion): бейдж непрочитанных появляется/меняет число с лёгким
+                    // всплытием — сообщает "здесь что-то изменилось" тем же языком,
+                    // которым бейджи говорят на иконке приложения и в уведомлениях.
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = chat.unreadCount > 0,
+                        enter = androidx.compose.animation.scaleIn(
+                            animationSpec = YodoMotion.confirm(),
+                            initialScale = 0.4f
+                        ) + androidx.compose.animation.fadeIn(YodoMotion.standard(YodoMotion.DURATION_FAST)),
+                        exit = androidx.compose.animation.scaleOut(
+                            animationSpec = YodoMotion.exit(),
+                            targetScale = 0.4f
+                        ) + androidx.compose.animation.fadeOut(YodoMotion.exit())
+                    ) {
                         Box(
                             modifier = Modifier.padding(start = 6.dp)
                                 .clip(CircleShape).background(colorTheme.primary)
@@ -1173,7 +1353,9 @@ private fun ChatListItem(
                         ) {
                             Text(
                                 text = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
-                                color = Color.White, style = MaterialTheme.typography.labelMedium
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }

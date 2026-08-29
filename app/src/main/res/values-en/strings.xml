@@ -485,9 +485,21 @@ Be the first!</string>
 
     <!-- Search -->
     <string name="search_hint">Find people by name or @username —
-or channels by title</string>
+or groups and channels by title</string>
     <string name="search_no_results">Nobody and nothing found</string>
     <string name="search_channels_header">Channels</string>
+    <!-- НОВОЕ (админ-функции групп): groups in global search results -->
+    <string name="search_groups_header">Groups</string>
+    <string name="search_member_of_group">Member</string>
+    <plurals name="search_group_members">
+        <item quantity="one">%d member</item>
+        <item quantity="other">%d members</item>
+    </plurals>
+    <!-- НОВОЕ (админ-функции групп): members count on the group profile -->
+    <plurals name="group_profile_members">
+        <item quantity="one">%d member</item>
+        <item quantity="other">%d members</item>
+    </plurals>
     <string name="search_people_header">People</string>
     <!-- НОВОЕ (settings search): settings results in global search -->
     <string name="search_settings_header">Settings</string>
