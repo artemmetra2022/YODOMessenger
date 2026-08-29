@@ -184,6 +184,10 @@
           </div>
           <button type="button" id="btn-cancel-reply" class="icon-btn">✕</button>
         </div>
+        <!-- FAQ-бот поддержки: кнопочная панель вместо поля ввода (как в Android-приложении).
+             Наполняется и показывается кодом в конце app.js (класс faq-open на #chat-active). -->
+        <div id="support-faq-panel"></div>
+        <button type="button" id="btn-faq-reopen" class="faq-reopen-btn">Открыть список вопросов</button>
         <form id="form-send">
           <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
           <input type="file" id="file-input" accept="image/*" class="hidden">
@@ -470,6 +474,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="faq-data.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

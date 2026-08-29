@@ -2769,3 +2769,176 @@ $("settings-notifications-toggle").addEventListener("change", async (e) => {
     notificationsEnabled = false;
   }
 });
+
+
+/* ------------------------------------------------------------------ */
+/* НОВОЕ (FAQ-бот поддержки, веб): кнопочная панель в чате поддержки —  */
+/* зеркало Android-версии (SupportFaq.kt + SupportFaqBotPanel). Данные  */
+/* берутся из window.SUPPORT_FAQ (faq-data.js, подключён до app.js).    */
+/* Логика не меняет существующие функции: читает activeChatId /         */
+/* activeChatData / isAdmin и переключает CSS-классы faq-open /         */
+/* faq-collapsed на #chat-active. Пока FAQ открыт — поле ввода скрыто   */
+/* (CSS), «Связаться с поддержкой» сворачивает панель и возвращает      */
+/* обычное поле ввода.                                                  */
+/* ------------------------------------------------------------------ */
+
+(function () {
+  const FAQ = window.SUPPORT_FAQ;
+  if (!FAQ) return;
+
+  const panel = $("support-faq-panel");
+  const reopenBtn = $("btn-faq-reopen");
+  if (!panel || !reopenBtn) return;
+
+  // Экраны бота: разделы -> вопросы -> ответ, плюс «Нет нужного вопроса?».
+  let faqView = { screen: "sections" };
+  let faqCollapsed = false;
+  let lastFaqChatId = null;
+
+  const findSection = (id) => FAQ.sections.find((s) => s.id === id) || null;
+
+  function renderFaqPanel() {
+    const view = faqView;
+    let title = "Чем помочь?";
+    let showBack = false;
+    let body = "";
+
+    if (view.screen === "questions") {
+      const section = findSection(view.sectionId);
+      title = section ? section.title : "Вопросы";
+      showBack = true;
+      body = (section ? section.questions : []).map((q) =>
+        `<button type="button" class="faq-item" data-faq-question="${esc(q.id)}">
+           <span class="faq-item-title">${esc(q.question)}</span>
+           <span class="faq-item-chevron">›</span>
+         </button>`
+      ).join("");
+    } else if (view.screen === "answer") {
+      const section = findSection(view.sectionId);
+      const q = section ? section.questions.find((x) => x.id === view.questionId) : null;
+      title = section ? section.title : "Ответ";
+      showBack = true;
+      if (q) {
+        body = `
+        <div class="faq-answer-question">${esc(q.question)}</div>
+        <div class="faq-answer-text">${esc(q.answer)}</div>
+        <div class="faq-answer-actions">
+          <button type="button" class="btn-secondary" data-faq-back>← Назад</button>
+          <button type="button" class="btn-primary" data-faq-contact>Связаться с поддержкой</button>
+        </div>`;
+      }
+    } else if (view.screen === "other") {
+      title = "Нет нужного вопроса?";
+      showBack = true;
+      body = `
+        <div class="faq-other">
+          <div class="faq-other-title">Не нашли ответ среди готовых вопросов?</div>
+          <div class="faq-other-desc">Опишите вашу проблему своими словами — оператор поддержки ответит вам в этом же чате.</div>
+          <button type="button" class="btn-primary faq-contact-btn" data-faq-contact>Связаться с поддержкой</button>
+        </div>`;
+    } else {
+      body = FAQ.sections.map((s) =>
+        `<button type="button" class="faq-item" data-faq-section="${esc(s.id)}">
+           <span class="faq-item-emoji">${esc(s.emoji)}</span>
+           <span class="faq-item-title">${esc(s.title)}</span>
+           <span class="faq-item-chevron">›</span>
+         </button>`
+      ).join("") + `
+        <div class="faq-other">
+          <div class="faq-other-title">Нет нужного вопроса?</div>
+          <div class="faq-other-desc">Не нашли ответ среди готовых вопросов? Напишите оператору — ответим в этом же чате.</div>
+          <button type="button" class="btn-primary faq-contact-btn" data-faq-open-other>Написать оператору</button>
+        </div>`;
+    }
+
+    panel.innerHTML = `
+      <div class="faq-header">
+        ${showBack ? '<button type="button" class="icon-btn faq-back-btn" data-faq-back title="Назад">←</button>' : ""}
+        <div class="faq-header-title">${esc(title)}</div>
+        <button type="button" class="icon-btn faq-close-btn" data-faq-close title="Свернуть и писать оператору">✕</button>
+      </div>
+      <div class="faq-body">${body}</div>`;
+  }
+
+  function updateFaqState() {
+    const chatActive = $("chat-active");
+    if (!chatActive) return;
+    const isSupport = !!(
+      typeof activeChatId !== "undefined" && activeChatId &&
+      typeof activeChatData !== "undefined" && activeChatData &&
+      activeChatData.type === "SUPPORT" &&
+      typeof isAdmin !== "undefined" && !isAdmin
+    );
+    // При (пере)открытии чата поддержки FAQ снова развёрнут и показывает разделы.
+    if (isSupport && activeChatId !== lastFaqChatId) {
+      lastFaqChatId = activeChatId;
+      faqCollapsed = false;
+      faqView = { screen: "sections" };
+      renderFaqPanel();
+    }
+    if (!isSupport && lastFaqChatId) lastFaqChatId = null;
+    chatActive.classList.toggle("faq-open", isSupport && !faqCollapsed);
+    chatActive.classList.toggle("faq-collapsed", isSupport && faqCollapsed);
+  }
+
+  function collapseFaq() {
+    faqCollapsed = true;
+    updateFaqState();
+    const input = $("message-input");
+    if (input) input.focus();
+  }
+
+  // Делегирование кликов: панель перерисовывается innerHTML, слушатель один.
+  panel.addEventListener("click", (e) => {
+    if (e.target.closest("[data-faq-close]") || e.target.closest("[data-faq-contact]")) {
+      collapseFaq();
+      return;
+    }
+    if (e.target.closest("[data-faq-open-other]")) {
+      faqView = { screen: "other" };
+      renderFaqPanel();
+      return;
+    }
+    const sectionBtn = e.target.closest("[data-faq-section]");
+    if (sectionBtn) {
+      faqView = { screen: "questions", sectionId: sectionBtn.dataset.faqSection };
+      renderFaqPanel();
+      return;
+    }
+    const questionBtn = e.target.closest("[data-faq-question]");
+    if (questionBtn) {
+      faqView = { screen: "answer", sectionId: faqView.sectionId, questionId: questionBtn.dataset.faqQuestion };
+      renderFaqPanel();
+      return;
+    }
+    if (e.target.closest("[data-faq-back]")) {
+      if (faqView.screen === "answer") faqView = { screen: "questions", sectionId: faqView.sectionId };
+      else faqView = { screen: "sections" };
+      renderFaqPanel();
+    }
+  });
+
+  reopenBtn.addEventListener("click", () => {
+    faqCollapsed = false;
+    faqView = { screen: "sections" };
+    renderFaqPanel();
+    updateFaqState();
+  });
+
+  // Мгновенное обновление при открытии чата — обёртка над openChat;
+  // интервал ниже — страховка для остальных переходов (кнопка «Назад» и т.п.).
+  try {
+    if (typeof openChat === "function") {
+      const originalOpenChat = openChat;
+      openChat = function (chatId) {
+        const result = originalOpenChat(chatId);
+        updateFaqState();
+        return result;
+      };
+    }
+  } catch (e) { /* если openChat нельзя переприсвоить — достаточно интервала */ }
+
+  renderFaqPanel();
+  updateFaqState();
+  setInterval(updateFaqState, 300);
+})();
