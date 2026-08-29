@@ -75,7 +75,10 @@ import javax.inject.Singleton
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    // НОВОЕ (закрепление официального канала): локальный пин канала — правила
+    // Firestore не позволяют обычному пользователю писать в его документ.
+    private val userSettingsPreferences: app.yodo.messenger.data.local.UserSettingsPreferences
 ) : ChatRepository {
 
     override fun observeChatList(): Flow<ChatListResult> = callbackFlow {
@@ -190,11 +193,26 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
+        // НОВОЕ (закрепление официального канала): локальный пин у текущего
+        // пользователя — канал всё равно обязан быть первым в списке, но пин
+        // сохраняет его наверху даже при появлении новых сообщений в других чатах.
+        val channelPinnedJob = launch {
+            try {
+                userSettingsPreferences.officialChannelPinned.collect { pinned ->
+                    officialChannel = officialChannel?.copy(isPinned = pinned)
+                    emitList()
+                }
+            } catch (e: Exception) { }
+        }
+
         // Listener на официальный канал
         val channelListener = firestore.collection("chats")
             .document(ChatRepository.OFFICIAL_CHANNEL_ID)
             .addSnapshotListener { channelSnapshot, _ ->
                 if (channelSnapshot != null && channelSnapshot.exists()) {
+                    // БАГ-ФИКС: не затираем локальный пин канала пришедшим с сервера
+                    // значением (на сервере поле pinned пишут только админы канала).
+                    val keepPinned = officialChannel?.isPinned ?: false
                     officialChannel = ChatPreview(
                         chatId = channelSnapshot.id,
                         title = channelSnapshot.getString("title") ?: "YodoMessenger",
@@ -210,7 +228,7 @@ class ChatRepositoryImpl @Inject constructor(
                         isOnline = false,
                         isVerified = channelSnapshot.getBoolean("isVerified") ?: true,
                         type = ChatType.CHANNEL,
-                        isPinned = false,
+                        isPinned = keepPinned,
                         isMuted = false,
                         otherUserId = null
                     )
@@ -269,6 +287,12 @@ class ChatRepositoryImpl @Inject constructor(
                         val otherUserId = if (type == ChatType.PRIVATE) {
                             participantIds.firstOrNull { it != uid }
                         } else null
+                        // БАГ-ФИКС (превью шифрованных чатов): для E2EE-личных чатов
+                        // lastMessage хранит "🔒 Сообщение", а открытый текст последнего
+                        // сообщения — в lastMessagePlain (пишется отправителем).
+                        val rawLastMessage = doc.getString("lastMessage") ?: ""
+                        val lastMessagePlain = doc.getString("lastMessagePlain")
+                        val isEncryptedPreview = rawLastMessage == "🔒 Сообщение" && lastMessagePlain != null
                         ChatPreview(
                             chatId = doc.id,
                             title = title,
@@ -277,7 +301,7 @@ class ChatRepositoryImpl @Inject constructor(
                             // У каналов и групп аватарка лежит в самом документе чата
                             // (поле avatarBase64), а не в профиле пользователя.
                             avatarBase64 = if (type == ChatType.CHANNEL || type == ChatType.GROUP) doc.getString("avatarBase64") else null,
-                            lastMessage = doc.getString("lastMessage") ?: "",
+                            lastMessage = if (isEncryptedPreview) lastMessagePlain!! else rawLastMessage,
                             lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
                             lastMessageSenderId = doc.getString("lastMessageSenderId"),
                             lastMessageStatus = doc.getString("lastMessageStatus"),
@@ -289,7 +313,8 @@ class ChatRepositoryImpl @Inject constructor(
                             isMuted = mutedMap?.get(uid) as? Boolean ?: false,
                             otherUserId = otherUserId,
                             subscriberCount = if (type == ChatType.CHANNEL) participantIds.size else 0,
-                            isArchived = archivedMap?.get(uid) as? Boolean ?: false
+                            isArchived = archivedMap?.get(uid) as? Boolean ?: false,
+                            isEncryptedPreview = isEncryptedPreview
                         )
                     } catch (e: Exception) { null }
                 }
@@ -375,6 +400,7 @@ class ChatRepositoryImpl @Inject constructor(
         awaitClose {
             timeoutJob.cancel()
             emitJob?.cancel()
+            channelPinnedJob.cancel()
             listener.remove()
             channelListener.remove()
             presenceListeners.values.forEach { it.remove() }
@@ -1545,7 +1571,13 @@ class ChatRepositoryImpl @Inject constructor(
                 batch.commit().await()
             }
             firestore.collection("chats").document(chatId).update(
-                mapOf("lastMessage" to "", "lastMessageTimestamp" to System.currentTimeMillis())
+                // lastMessagePlain тоже очищаем — иначе в списке чатов осталось бы
+                // открытое превью удалённого сообщения.
+                mapOf(
+                    "lastMessage" to "",
+                    "lastMessagePlain" to FieldValue.delete(),
+                    "lastMessageTimestamp" to System.currentTimeMillis()
+                )
             ).await()
         } catch (e: Exception) { throw e }
     }
@@ -1553,16 +1585,56 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun deleteChat(chatId: String) {
         val uid = firebaseAuth.currentUser?.uid ?: return
         try {
-            val messagesRef = firestore.collection("chats").document(chatId).collection("messages")
-            val snapshot = messagesRef.get().await()
-            // Firestore batch ограничен 500 операциями — делим на чанки.
-            snapshot.documents.chunked(500).forEach { chunk ->
-                val batch = firestore.batch()
-                chunk.forEach { doc -> batch.delete(doc.reference) }
-                batch.commit().await()
+            val chatDoc = firestore.collection("chats").document(chatId).get().await()
+            val isOwner = chatDoc.getString("createdBy") == uid
+            val type = chatDoc.getString("type") ?: "PRIVATE"
+            if (isOwner) {
+                // Владелец: удаляем историю сообщений и выходим из чата.
+                val messagesRef = firestore.collection("chats").document(chatId).collection("messages")
+                val snapshot = messagesRef.get().await()
+                // Firestore batch ограничен 500 операциями — делим на чанки.
+                snapshot.documents.chunked(500).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { doc -> batch.delete(doc.reference) }
+                    batch.commit().await()
+                }
+                firestore.collection("chats").document(chatId)
+                    .update("participantIds", FieldValue.arrayRemove(uid)).await()
+            } else if (type == "GROUP" || type == "CHANNEL") {
+                // БАГ-ФИКС («Удалить чат» не работал): правила Firestore запрещают
+                // не-владельцу менять participantIds — молча падало. Для группы/канала
+                // «удалить» для участника — это выйти (leaveGroup тоже пишет participantIds,
+                // но ветка правил для join-запросов её покрывает не всегда — ловим и это).
+                try {
+                    firestore.collection("chats").document(chatId)
+                        .update("participantIds", FieldValue.arrayRemove(uid)).await()
+                } catch (e: Exception) {
+                    throw IllegalStateException("Недостаточно прав: вы не владелец этого чата")
+                }
+            } else {
+                // Личный чат (PRIVATE), пользователь не владелец (или поле createdBy
+                // отсутствует у старых чатов): очистить переписку и свои счётчики —
+                // сам документ чата не трогаем (правила запрещают).
+                val messagesRef = firestore.collection("chats").document(chatId).collection("messages")
+                val snapshot = messagesRef.get().await()
+                snapshot.documents.chunked(500).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { doc ->
+                        // Правила позволяют удалять только свои сообщения, чужие
+                        // пропускаем (иначе batch целиком отклоняется).
+                        if (doc.getString("senderId") == uid) batch.delete(doc.reference)
+                    }
+                    if (chunk.any { it.getString("senderId") == uid }) batch.commit().await()
+                }
+                firestore.collection("chats").document(chatId).update(
+                    mapOf(
+                        "lastMessage" to "",
+                        "lastMessagePlain" to FieldValue.delete(),
+                        "lastMessageTimestamp" to System.currentTimeMillis(),
+                        "unreadCounts.$uid" to 0
+                    )
+                ).await()
             }
-            firestore.collection("chats").document(chatId)
-                .update("participantIds", FieldValue.arrayRemove(uid)).await()
         } catch (e: Exception) { throw e }
     }
 

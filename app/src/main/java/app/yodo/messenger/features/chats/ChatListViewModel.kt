@@ -1,5 +1,10 @@
 package app.yodo.messenger.features.chats
 
+import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.core.crypto.CryptoManager
@@ -58,10 +63,60 @@ class ChatListViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val draftsPreferences: DraftsPreferences,
     private val userSettingsPreferences: UserSettingsPreferences,
-    private val cryptoManager: CryptoManager
+    private val cryptoManager: CryptoManager,
+    private val application: Application
 ) : ViewModel() {
     private val _uiState = MutableStateFlow<ChatListUiState>(ChatListUiState.Loading)
     val uiState: StateFlow<ChatListUiState> = _uiState
+
+    // БАГ-ФИКС (заголовок главного экрана): показываем честный статус в топбаре —
+    // «Обновление…» пока грузится первый снапшот чатов, и «Нет сети…» когда
+    // устройство офлайн. Раньше там всегда висело «Yodo Messenger», даже при
+    // полном отсутствии соединения.
+    private val _isNetworkAvailable = MutableStateFlow(true)
+    val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable
+
+    private val connectivityManager =
+        application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+
+    init {
+        observeNetworkState()
+        observeChats()
+        syncFcmToken()
+        // НОВОЕ (сквозное шифрование): гарантируем ключи и публикуем публичный ключ после входа
+        // (список чатов открывается всегда после авторизации, в т.ч. сразу после регистрации).
+        viewModelScope.launch { runCatching { cryptoManager.ensureInitialized() } }
+    }
+
+    /** БАГ-ФИКС: live-отслеживание сети через ConnectivityManager + начальное значение. */
+    private fun observeNetworkState() {
+        val cm = connectivityManager ?: return
+        fun currentStatus(): Boolean {
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
+        _isNetworkAvailable.value = currentStatus()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                _isNetworkAvailable.value = true
+            }
+
+            override fun onLost(network: Network) {
+                _isNetworkAvailable.value = currentStatus()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                _isNetworkAvailable.value =
+                    networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        }
+        runCatching {
+            cm.registerDefaultNetworkCallback(callback)
+        }
+    }
 
     // НОВОЕ (AF): состояние pull-to-refresh для жеста "потянуть вниз — обновить чаты".
     private val _isRefreshing = MutableStateFlow(false)
@@ -111,14 +166,6 @@ class ChatListViewModel @Inject constructor(
     // НОВОЕ (чат поддержки): является ли текущий пользователь админом поддержки —
     // тогда в меню показывается пункт "Админ-панель поддержки".
     val isSupportAdmin: Boolean get() = chatRepository.isSupportAdmin()
-
-    init {
-        observeChats()
-        syncFcmToken()
-        // НОВОЕ (сквозное шифрование): гарантируем ключи и публикуем публичный ключ после входа
-        // (список чатов открывается всегда после авторизации, в т.ч. сразу после регистрации).
-        viewModelScope.launch { runCatching { cryptoManager.ensureInitialized() } }
-    }
 
     fun setFilter(filter: ChatFilter) {
         _activeFilter.value = filter
@@ -191,7 +238,20 @@ class ChatListViewModel @Inject constructor(
                         } else {
                             chatsWithDrafts
                         }
-                        val (archived, active) = visibleChats.partition { it.isArchived }
+                        // БАГ-ФИКС (пустые чаты): личный чат, в котором нет ни одного
+                        // сообщения, автоматически скрывается из списка (как в Telegram:
+                        // «мусорные» пустые диалоги не должны висеть в списке). Папки
+                        // «Избранное», «Поддержка» и группы/каналы (в них есть хоть
+                        // какое-то содержимое/описание) не скрываются.
+                        val chatsWithContent = visibleChats.filter { chat ->
+                            chat.type != ChatType.PRIVATE ||
+                                chat.otherUserId == null || // «Избранное» и служебные
+                                chat.chatId.startsWith("support_") ||
+                                chat.lastMessage.isNotBlank() ||
+                                chat.draftText.isNotBlank() ||
+                                chat.lastMessageTimestamp == 0L
+                        }
+                        val (archived, active) = chatsWithContent.partition { it.isArchived }
                         
                         // Применяем фильтр
                         val filtered = when (filter) {
@@ -226,28 +286,50 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
+    // БАГ-ФИКС (действия меню долгого нажатия): раньше все ошибки пина/мьюта/
+    // архива/удаления молча глотались пустыми catch — «ничего не происходит».
+    // Теперь каждая ошибка показывается пользователю снекбаром.
+    private val _actionError = kotlinx.coroutines.flow.MutableSharedFlow<String>()
+    val actionError: kotlinx.coroutines.flow.SharedFlow<String> = _actionError
+
+    private fun launchAction(errorPrefix: String, action: suspend () -> Unit) {
+        viewModelScope.launch {
+            runCatching { action() }.onFailure { e ->
+                _actionError.emit(errorPrefix + (e.message?.let { ": $it" } ?: ""))
+            }
+        }
+    }
+
     fun togglePinChat(chatId: String) {
-        viewModelScope.launch { chatRepository.togglePinChat(chatId) }
+        // БАГ-ФИКС (закрепление официального канала): правила Firestore разрешают писать
+        // в документ канала только главным админам, поэтому обычный пользователь
+        // закрепляет его локально (у себя на устройстве) — иначе пин молча падал.
+        if (chatId == app.yodo.messenger.domain.repository.ChatRepository.OFFICIAL_CHANNEL_ID) {
+            viewModelScope.launch {
+                runCatching {
+                    val pinned = kotlinx.coroutines.flow.first(userSettingsPreferences.officialChannelPinned)
+                    userSettingsPreferences.setOfficialChannelPinned(!pinned)
+                }
+            }
+            return
+        }
+        launchAction("Не удалось закрепить чат") { chatRepository.togglePinChat(chatId) }
     }
 
     fun toggleMuteChat(chatId: String) {
-        viewModelScope.launch { chatRepository.toggleMuteChat(chatId) }
+        launchAction("Не удалось изменить уведомления") { chatRepository.toggleMuteChat(chatId) }
     }
 
     fun toggleArchiveChat(chatId: String) {
-        viewModelScope.launch { chatRepository.toggleArchiveChat(chatId) }
+        launchAction("Не удалось переместить чат в архив") { chatRepository.toggleArchiveChat(chatId) }
     }
 
     fun deleteChat(chatId: String) {
-        viewModelScope.launch {
-            try { chatRepository.deleteChat(chatId) } catch (e: Exception) { }
-        }
+        launchAction("Не удалось удалить чат") { chatRepository.deleteChat(chatId) }
     }
 
     fun clearChatHistory(chatId: String) {
-        viewModelScope.launch {
-            try { chatRepository.clearChatHistory(chatId) } catch (e: Exception) { }
-        }
+        launchAction("Не удалось очистить историю") { chatRepository.clearChatHistory(chatId) }
     }
 
     // НОВОЕ (скрытые чаты): переключить скрытие чата.
