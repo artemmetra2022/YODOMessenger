@@ -143,7 +143,12 @@ class MessageRepositoryImpl @Inject constructor(
             if (ttlSeconds != null && ttlSeconds > 0) {
                 data["expiresAt"] = now + ttlSeconds * 1000L
             }
-            val previewText = if (data["encrypted"] == true) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
+            val isEncrypted = data["encrypted"] == true
+            // Транзитное поле _plainPreview кладётся tryEncryptTextData перед очисткой
+            // текста — здесь забираем его для открытого превью и сразу убираем,
+            // чтобы в документ сообщения оно не попало.
+            val plainPreview = data.remove("_plainPreview") as? String
+            val previewText = if (isEncrypted) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
                 ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
                 else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
                 else if (data.containsKey("imagesBase64")) "📷 Фото (${(data["imagesBase64"] as? List<*>)?.size ?: 1})"
@@ -155,6 +160,12 @@ class MessageRepositoryImpl @Inject constructor(
                 "lastMessage" to previewText, "lastMessageTimestamp" to now,
                 "lastMessageSenderId" to uid, "lastMessageStatus" to "SENT"
             )
+            // Открытое превью для списка чатов: для шифрованных сообщений — реальный
+            // текст (транзитный _plainPreview), для обычных lastMessage уже содержит
+            // текст и дублировать не нужно.
+            if (isEncrypted && !plainPreview.isNullOrBlank()) {
+                unreadUpdates["lastMessagePlain"] = plainPreview
+            }
             participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
                 unreadUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
             }
@@ -229,6 +240,9 @@ class MessageRepositoryImpl @Inject constructor(
             val encMap = cryptoManager.encryptForParticipants(participantIds, text) ?: return
             data["encByUid"] = encMap
             data["encrypted"] = true
+            // Транзитное поле для открытого превью в списке чатов: sendRawMessage
+            // заберёт его при формировании lastMessagePlain и удалит из data.
+            data["_plainPreview"] = text.take(120)
             data["text"] = ""
         } catch (e: Exception) {
             android.util.Log.w("MessageRepositoryImpl", "tryEncryptTextData failed; sending plaintext", e)

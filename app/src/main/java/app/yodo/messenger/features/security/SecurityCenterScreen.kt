@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -51,6 +54,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SecurityCenterScreen(
     onBackClick: () -> Unit,
+    onOpenQrLogin: () -> Unit = {},
     viewModel: SecurityViewModel = hiltViewModel()
 ) {
     val colorTheme = LocalColorTheme.current
@@ -176,6 +180,31 @@ fun SecurityCenterScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Отмена") }
                     }
+                }
+            }
+
+            // НОВОЕ (вход по QR-коду): сканирование QR с веб-версии для быстрого
+            // входа на сайте без набора пароля на клавиатуре компьютера.
+            SectionCard("Вход по QR-коду") {
+                Text(
+                    "Откройте YODO в браузере и отсканируйте показанный там QR-код, " +
+                        "чтобы войти в аккаунт на компьютере.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenQrLogin,
+                    colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Filled.QrCodeScanner,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Сканировать QR-код")
                 }
             }
 

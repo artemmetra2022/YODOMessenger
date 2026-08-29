@@ -84,6 +84,8 @@ class UserSettingsPreferences @Inject constructor(
     private val decoyPinHashKey = stringPreferencesKey("decoy_pin_hash")
     private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
     private val hiddenChatIdsKey = stringSetPreferencesKey("hidden_chat_ids")
+    // НОВОЕ (закрепление официального канала): см. officialChannelPinned.
+    private val officialChannelPinnedKey = booleanPreferencesKey("official_channel_pinned")
     private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
     // НОВОЕ: тихие часы, пауза уведомлений (snooze) и скрытие текста в уведомлениях.
     private val quietHoursEnabledKey = booleanPreferencesKey("quiet_hours_enabled")
@@ -138,6 +140,12 @@ class UserSettingsPreferences @Inject constructor(
     val hiddenChatIds: Flow<Set<String>> = context.settingsDataStore.data.map { it[hiddenChatIdsKey] ?: emptySet() }
     /** НОВОЕ (скрытые чаты): активен ли сейчас режим ложного PIN (только runtime). */
     val decoyMode: kotlinx.coroutines.flow.StateFlow<Boolean> = appLockState.decoyMode
+
+    // НОВОЕ (закрепление официального канала): локальный пин канала yodo_official_channel
+    // — правила Firestore разрешают писать в документ канала только главным админам,
+    // поэтому обычные пользователи закрепляют его локально (у себя на устройстве).
+    val officialChannelPinned: Flow<Boolean> =
+        context.settingsDataStore.data.map { it[officialChannelPinnedKey] ?: false }
 
     val notificationPermissionAsked: Flow<Boolean> =
         context.settingsDataStore.data.map { it[notificationPermissionAskedKey] ?: false }
@@ -247,6 +255,11 @@ class UserSettingsPreferences @Inject constructor(
             val current = prefs[hiddenChatIdsKey] ?: emptySet()
             prefs[hiddenChatIdsKey] = if (hidden) current + chatId else current - chatId
         }
+    }
+
+    // НОВОЕ (закрепление официального канала): локальный пин yodo_official_channel.
+    suspend fun setOfficialChannelPinned(pinned: Boolean) {
+        context.settingsDataStore.edit { it[officialChannelPinnedKey] = pinned }
     }
 
     suspend fun setPinRequirement(requirement: PinRequirement) {

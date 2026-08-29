@@ -116,6 +116,63 @@ service cloud.firestore {
       allow write: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ (вход по QR-коду): временный "мостик" между веб-версией (не авторизована)
+    // и приложением на телефоне (уже авторизовано), через который телефон передаёт
+    // сайту e2e-зашифрованные учётные данные для автоматического входа.
+    //
+    // Протокол (см. QrLoginScreen.kt / qr-login.js):
+    //  1. Сайт генерирует одноразовую ECDH-пару (WebCrypto, P-256) ЛОКАЛЬНО в браузере
+    //     (приватный ключ никогда никуда не отправляется) и создаёт документ со своим
+    //     публичным ключом и статусом "pending". sessionId — криптостойкий случайный ID,
+    //     закодированный в QR; его секретность — часть защиты (никто посторонний его не
+    //     узнает), но НЕ единственная: см. п.3.
+    //  2. Телефон сканирует QR, пользователь подтверждает вход в диалоге, после чего
+    //     телефон шифрует свои сохранённые email+пароль под публичным ключом сайта
+    //     (ECDH + HKDF + AES-256-GCM) и обновляет документ: encryptedPayload + статус
+    //     "approved". Установить статус "approved" может только автор действия —
+    //     сам факт того, что он держит камеру и подтвердил диалог, уже служит фактором
+    //     подтверждения, а поле approvedBy ниже дополнительно фиксирует, кто это сделал.
+    //  3. Сайт (слушая документ через onSnapshot) видит "approved", расшифровывает
+    //     полезную нагрузку своим приватным ключом (никогда не покидавшим вкладку) и
+    //     логинится через signInWithEmailAndPassword. Документ удаляется сразу после
+    //     использования (а "зависшие" — по TTL policy на поле createdAt в консоли Firebase).
+    //
+    // Пароль пользователя нигде не хранится на сервере открытым текстом ни на одном
+    // из шагов — только шифротекст, читаемый исключительно приватным ключом, который
+    // существует лишь в памяти конкретной вкладки браузера, создавшей QR.
+    match /qrLogins/{sessionId} {
+      // Публичное чтение по конкретному id — сайт слушает "свой" документ ещё до входа.
+      // list запрещён (правило ниже не даёт списочных запросов), так что перечислить
+      // чужие сессии нельзя, только знать её конкретный sessionId, зашитый в QR.
+      allow get: if true;
+
+      // Создать может кто угодно (сайт ещё не авторизован) — но строго "пустой" pending-
+      // документ без полезной нагрузки и с фиксированной структурой полей.
+      allow create: if request.resource.data.status == 'pending' &&
+        request.resource.data.keys().hasOnly(['publicKey', 'createdAt', 'status']) &&
+        request.resource.data.publicKey is string &&
+        request.resource.data.publicKey.size() > 0 &&
+        request.resource.data.createdAt == request.time;
+
+      // Подтвердить вход может только авторизованный пользователь (телефон), и только
+      // переводя pending -> approved, не трогая publicKey/createdAt и не отменяя approved
+      // обратно. approvedBy пишется телефоном для аудита (кто именно подтвердил).
+      allow update: if isSignedIn() &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'approved' &&
+        request.resource.data.approvedBy == request.auth.uid &&
+        request.resource.data.publicKey == resource.data.publicKey &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.keys().hasOnly(['publicKey', 'createdAt', 'status', 'encryptedPayload', 'approvedBy']) &&
+        request.resource.data.encryptedPayload is string &&
+        request.resource.data.encryptedPayload.size() > 0;
+
+      // Удалить (после использования сайтом, или отменить со стороны телефона) может
+      // кто угодно — документ к этому моменту либо уже использован (одноразовый), либо
+      // ещё не содержит ничего чувствительнее эфемерного публичного ключа.
+      allow delete: if true;
+    }
+
     match /users/{userId} {
       // Публичное чтение нужно для входа по username (email резолвится ДО
       // авторизации в FirebaseAuth) и для профилей пользователей.

@@ -340,6 +340,13 @@ fun YodoNavGraph(
         }
         composable(Routes.SecurityCenter.route) {
             app.yodo.messenger.features.security.SecurityCenterScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenQrLogin = { navController.navigate(Routes.QrLogin.route) }
+            )
+        }
+        // НОВОЕ (вход по QR-коду): сканер QR с веб-версии.
+        composable(Routes.QrLogin.route) {
+            app.yodo.messenger.features.security.QrLoginScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }

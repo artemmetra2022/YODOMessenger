@@ -146,9 +146,20 @@ fun ChatListScreen(
     // НОВОЕ (скрытые чаты): список скрытых чатов и признак PIN для шторки "потянуть вниз".
     val hiddenChats by viewModel.hiddenChats.collectAsState()
     val isPinSet by viewModel.isPinSet.collectAsState()
+    // БАГ-ФИКС (заголовок главного экрана): состояние сети для «Нет сети…» в топбаре.
+    val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
+    // НОВОЕ (AF): состояние обновления и жест "потянуть вниз — обновить чаты".
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val colorTheme = LocalColorTheme.current
     var showFabMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
+    // БАГ-ФИКС (действия меню): снекбар с ошибкой операции (пин/мьют/архив/удаление).
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.actionError.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
     // НОВОЕ (папки): чат, для которого открыт выбор папки (добавить/убрать из папок).
     var folderPickerChatId by remember { mutableStateOf<String?>(null) }
     // НОВОЕ (папки): id папки, которую редактируем (переименовать/удалить/состав).
@@ -162,8 +173,6 @@ fun ChatListScreen(
     var showEmptyWindow by remember { mutableStateOf(false) }
     var pullAccum by remember { mutableFloatStateOf(0f) }
     val pullThreshold = 240f
-    // НОВОЕ (AF): состояние обновления и жест "потянуть вниз — обновить чаты".
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
     // Жест "потянуть сверху вниз" на самом верху списка → ОБНОВИТЬ список чатов
     // (раньше здесь открывался список скрытых чатов — по просьбе убрано, сама функция
     // скрытия чатов осталась в меню долгого нажатия).
@@ -187,6 +196,9 @@ fun ChatListScreen(
     }
 
     Scaffold(
+        snackbarHost = {
+            androidx.compose.material3.SnackbarHost(hostState = snackbarHostState)
+        },
         topBar = {
             Column(
                 modifier = Modifier
@@ -200,10 +212,26 @@ fun ChatListScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // БАГ-ФИКС (заголовок главного экрана): во время загрузки чатов с
+                    // сервера показываем «Обновление…» вместо «Yodo Messenger»,
+                    // а без сети — «Нет сети…» — пользователь сразу видит реальный
+                    // статус приложения, а не вечное имя приложения.
+                    val isInitialLoading = uiState is ChatListUiState.Loading
+                    val headerText = when {
+                        !isNetworkAvailable -> "Нет сети…"
+                        isInitialLoading || isRefreshing -> "Обновление…"
+                        else -> "Yodo Messenger"
+                    }
+                    val headerColor = if (!isNetworkAvailable || isInitialLoading || isRefreshing) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
                     Text(
-                        text = "Yodo Messenger",
+                        text = headerText,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
+                        color = headerColor,
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = onSearchClick, modifier = Modifier.size(40.dp)) {
@@ -973,7 +1001,37 @@ internal fun SwipeableChatListItem(
         label = "swipeTrackColor"
     )
 
-    Box(modifier = modifier) {
+    // БАГ-ФИКС (свайп-удаление чата): детектор горизонтального свайпа раньше висел
+    // на пустом Box-сиблинге нулевой высоты — жест физически не мог сработать,
+    // поэтому и строка не сдвигалась, и удаление свайпом не работало. Теперь
+    // pointerInput стоит на основном Box, в котором лежит контент строки.
+    Box(
+        modifier = modifier
+            .pointerInput(chat.chatId) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        scope.launch {
+                            if (offsetX.value < deleteThreshold) {
+                                // НОВОЕ (motion): улетает влево за край экрана перед удалением,
+                                // а не исчезает мгновенно — глаз успевает связать жест с результатом.
+                                offsetX.animateTo(-1000f, animationSpec = YodoMotion.exit(YodoMotion.DURATION_FAST))
+                                onDelete()
+                            } else {
+                                offsetX.animateTo(0f, animationSpec = YodoMotion.drag())
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        scope.launch { offsetX.animateTo(0f, animationSpec = YodoMotion.drag()) }
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        scope.launch {
+                            offsetX.snapTo((offsetX.value + dragAmount).coerceIn(maxDrag, 0f))
+                        }
+                    }
+                )
+            }
+    ) {
         if (revealProgress > 0.02f) {
             Box(
                 modifier = Modifier.fillMaxSize().background(trackColor),
@@ -1011,32 +1069,6 @@ internal fun SwipeableChatListItem(
             DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_delete), color = Color.Red) }, onClick = { showMenu = false; onDelete() })
         }
     }
-    Box(
-        modifier = Modifier.fillMaxWidth().pointerInput(chat.chatId) {
-            detectHorizontalDragGestures(
-                onDragEnd = {
-                    scope.launch {
-                        if (offsetX.value < deleteThreshold) {
-                            // НОВОЕ (motion): улетает влево за край экрана перед удалением,
-                            // а не исчезает мгновенно — глаз успевает связать жест с результатом.
-                            offsetX.animateTo(-1000f, animationSpec = YodoMotion.exit(YodoMotion.DURATION_FAST))
-                            onDelete()
-                        } else {
-                            offsetX.animateTo(0f, animationSpec = YodoMotion.drag())
-                        }
-                    }
-                },
-                onDragCancel = {
-                    scope.launch { offsetX.animateTo(0f, animationSpec = YodoMotion.drag()) }
-                },
-                onHorizontalDrag = { _, dragAmount ->
-                    scope.launch {
-                        offsetX.snapTo((offsetX.value + dragAmount).coerceIn(maxDrag, 0f))
-                    }
-                }
-            )
-        }
-    ) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,18 +1311,34 @@ private fun ChatListItem(
                         modifier = Modifier.weight(1f)
                     )
                 } else {
-                    Text(
-                        chat.lastMessage.ifBlank { if (isChannel) stringResource(R.string.chat_list_channel_label) else "" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        // НОВОЕ (иерархия): превью последнего сообщения — вторичный текст.
-                        // У непрочитанных чуть темнее (78% альфы), у прочитанных заметно
-                        // приглушённей (55%), так список "расслаивается" на то, что важно
-                        // прямо сейчас, и то, что уже обработано.
-                        color = previewColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    // БАГ-ФИКС (превью шифрованного чата): текст последнего сообщения
+                    // показывается открыто (lastMessagePlain), а замок — отдельной
+                    // приглушённой иконкой перед текстом, только у E2EE-личных чатов.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        if (chat.isEncryptedPreview) {
+                            Icon(
+                                Icons.Filled.Lock,
+                                contentDescription = "Зашифрованный чат",
+                                modifier = Modifier.size(12.dp).padding(end = 3.dp),
+                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                            )
+                        }
+                        Text(
+                            chat.lastMessage.ifBlank { if (isChannel) stringResource(R.string.chat_list_channel_label) else "" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            // НОВОЕ (иерархия): превью последнего сообщения — вторичный текст.
+                            // У непрочитанных чуть темнее (78% альфы), у прочитанных заметно
+                            // приглушённей (55%), так список "расслаивается" на то, что важно
+                            // прямо сейчас, и то, что уже обработано.
+                            color = previewColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
                 }
                 // НОВОЕ (админ-функции групп): бейдж ожидающих заявок на вступление —
                 // виден только владельцу/админам группы (у остальных поле всегда 0).
