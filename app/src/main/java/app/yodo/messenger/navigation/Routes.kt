@@ -41,6 +41,8 @@ sealed class Routes(val route: String) {
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
     data object Tools : Routes("tools")
     data object SecurityCenter : Routes("security_center")
+    // НОВОЕ (вход по QR-коду): сканер QR из веб-версии в «Центре безопасности».
+    data object QrLogin : Routes("qr_login")
     // НОВОЕ (Y): смена аккаунта и добавление нового аккаунта.
     data object SwitchAccount : Routes("switch_account")
     data object AddAccount : Routes("add_account")

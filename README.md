@@ -129,7 +129,7 @@
 | **Архитектура** | MVVM |
 | **DI** | Hilt |
 | **Async** | Coroutines, Flow |
-| **Backend** | Firebase (Firestore, Auth, Storage, FCM) — проект `yodomessenger` (переход со старого проекта `claudemessenger` совершён 28.08.2026, данные начаты с нуля) |
+| **Backend** | Firebase (Firestore, Auth, Storage, Cloud Functions, FCM) — проект `yodomessenger` (переход со старого проекта `claudemessenger` совершён 28.08.2026, данные начаты с нуля) |
 | **Local DB** | Room, DataStore Preferences |
 | **Navigation** | Navigation Compose |
 | **Network** | Retrofit + OkHttp (Link Preview и др.) |

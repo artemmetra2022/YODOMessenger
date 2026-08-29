@@ -99,6 +99,26 @@ body {
 .verify-text { color: var(--text-dim); font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
 #screen-verify .auth-card { display: flex; flex-direction: column; gap: 10px; }
 
+/* ===== Вход по QR-коду ===== */
+#screen-qr-login .auth-card { display: flex; flex-direction: column; gap: 10px; }
+#qr-login-canvas-wrap {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 232px;
+}
+#qr-login-canvas { display: block; }
+.qr-login-status {
+  color: var(--text-dim);
+  font-size: 13px;
+  min-height: 18px;
+}
+.qr-login-status.qr-login-approved { color: var(--accent); font-weight: 600; }
+.qr-login-status.qr-login-error { color: var(--danger); }
+
 /* ===== Главное приложение ===== */
 #screen-app { flex-direction: row; }
 
@@ -193,11 +213,79 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 10px 16px;
   background: var(--bg-panel);
   border-bottom: 1px solid #101921;
   font-weight: 600;
 }
+#chat-header .chat-avatar { width: 38px; height: 38px; font-size: 15px; }
+#chat-header-info { display: flex; flex-direction: column; min-width: 0; }
+#chat-title { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chat-subtitle { font-size: 12px; color: var(--text-dim); font-weight: 400; }
+#chat-subtitle.online { color: var(--accent); }
+
+#typing-indicator {
+  padding: 2px 16px 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+#btn-load-more {
+  align-self: center;
+  margin-bottom: 8px;
+}
+
+#btn-attach {
+  flex-shrink: 0;
+}
+
+#image-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid #101921;
+}
+#image-preview img {
+  max-height: 64px;
+  border-radius: 8px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.modal-actions .btn-primary, .modal-actions .btn-secondary { flex: 0 0 auto; }
+
+#group-selected-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.member-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-input);
+  border-radius: 14px;
+  padding: 5px 10px 5px 6px;
+  font-size: 13px;
+}
+.member-chip .chat-avatar { width: 22px; height: 22px; font-size: 11px; }
+.member-chip button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.msg-status.read { color: var(--accent); }
+
+.verified-badge { color: var(--accent); font-size: 12px; }
 
 #messages {
   flex: 1;

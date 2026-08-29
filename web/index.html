@@ -18,7 +18,23 @@
         <button type="submit" class="btn-primary">Войти</button>
       </form>
       <div class="auth-error" id="login-error"></div>
+      <button type="button" id="btn-show-qr-login" class="btn-link">Войти по QR-коду</button>
       <div class="auth-switch">Нет аккаунта? <a href="#" id="link-to-register">Зарегистрироваться</a></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Вход по QR-коду -->
+  <div id="screen-qr-login" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Вход по QR-коду</div>
+      <p class="verify-text">
+        Откройте приложение YODO на телефоне → «Настройки» → «Центр безопасности» →
+        «Сканировать QR-код» и наведите камеру на код ниже.
+      </p>
+      <div id="qr-login-canvas-wrap"><canvas id="qr-login-canvas"></canvas></div>
+      <div id="qr-login-status" class="qr-login-status">Ожидание сканирования…</div>
+      <button id="btn-cancel-qr-login" class="btn-link">Войти по паролю</button>
     </div>
   </div>
 
@@ -67,6 +83,8 @@
     <aside id="sidebar">
       <header id="sidebar-header">
         <span class="app-title">YODO</span>
+        <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
+        <button id="btn-new-group" class="icon-btn" title="Новая группа">👥</button>
         <button id="btn-new-chat" class="icon-btn" title="Новый чат">＋</button>
         <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
       </header>
@@ -80,13 +98,26 @@
       <div id="chat-active" class="hidden">
         <header id="chat-header">
           <button id="btn-back" class="icon-btn mobile-only">←</button>
-          <div id="chat-title"></div>
+          <div class="chat-avatar" id="chat-header-avatar">?</div>
+          <div id="chat-header-info">
+            <div id="chat-title"></div>
+            <div id="chat-subtitle"></div>
+          </div>
         </header>
-        <div id="messages"></div>
+        <div id="messages">
+          <button id="btn-load-more" class="btn-secondary hidden">Загрузить ещё</button>
+        </div>
+        <div id="typing-indicator" class="hidden">печатает…</div>
         <form id="form-send">
+          <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
+          <input type="file" id="file-input" accept="image/*" class="hidden">
           <input type="text" id="message-input" placeholder="Сообщение..." autocomplete="off">
           <button type="submit" class="btn-send">➤</button>
         </form>
+        <div id="image-preview" class="hidden">
+          <img id="image-preview-img" src="" alt="">
+          <button type="button" id="btn-cancel-image" class="icon-btn">✕</button>
+        </div>
       </div>
     </main>
 
@@ -99,9 +130,25 @@
         <button class="btn-secondary" id="btn-close-modal">Отмена</button>
       </div>
     </div>
+
+    <!-- Модалка: новая группа -->
+    <div id="modal-new-group" class="modal hidden">
+      <div class="modal-card">
+        <h3 id="group-modal-title">Новая группа</h3>
+        <input type="text" id="group-title-input" placeholder="Название группы" autocomplete="off">
+        <input type="text" id="group-search-input" placeholder="Добавить участника: имя или @username..." autocomplete="off">
+        <div id="group-search-results"></div>
+        <div id="group-selected-members"></div>
+        <div class="auth-error" id="group-error"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="btn-close-group-modal">Отмена</button>
+          <button class="btn-primary" id="btn-create-group">Создать</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script src="firebase-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

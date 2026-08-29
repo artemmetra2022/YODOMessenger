@@ -27,19 +27,49 @@ import {
   where,
   orderBy,
   limit,
+  limitToLast,
+  endBefore,
   onSnapshot,
   updateDoc,
   writeBatch,
   increment,
+  serverTimestamp,
+  deleteField,
+  deleteDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initQrLogin } from "./qr-login.js";
 
 /* ------------------------------------------------------------------ */
 /* Firebase init                                                       */
 /* ------------------------------------------------------------------ */
 
-const app = initializeApp(window.FIREBASE_CONFIG);
+const firebaseConfig = {
+  apiKey: "AIzaSyBN0R6R54f1Dah3vp7WrYrsY95e5NgMZA4",
+  authDomain: "yodomessenger.firebaseapp.com",
+  projectId: "yodomessenger",
+  storageBucket: "yodomessenger.firebasestorage.app",
+  messagingSenderId: "509907567167",
+  appId: "1:509907567167:web:b7ea079acbf1ab2272ae8a",
+  measurementId: "G-YGGHJ2BWEM",
+};
+
+const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+/* ------------------------------------------------------------------ */
+/* Константы официального канала / поддержки (см. ChatRepository.kt)   */
+/* ------------------------------------------------------------------ */
+
+const OFFICIAL_CHANNEL_ID = "yodo_official_channel";
+const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru"];
+const SUPPORT_CHAT_PREFIX = "support_";
+const SUPPORT_TITLE = "Поддержка YodoMessenger";
+const supportChatIdFor = (uid) => SUPPORT_CHAT_PREFIX + uid;
+
+function isAdminEmail(email) {
+  return !!email && ADMIN_EMAILS.includes(email.toLowerCase());
+}
 
 /* ------------------------------------------------------------------ */
 /* Утилиты DOM / форматирование                                        */
@@ -57,6 +87,22 @@ function esc(text) {
   div.textContent = text ?? "";
   return div.innerHTML;
 }
+
+/* ------------------------------------------------------------------ */
+/* Вход по QR-коду (см. web/qr-login.js)                               */
+/* ------------------------------------------------------------------ */
+
+initQrLogin({
+  auth,
+  db,
+  firestoreFns: { doc, setDoc, onSnapshot, deleteDoc, serverTimestamp },
+  signInWithEmailAndPassword,
+  showScreen,
+  $,
+  onError: (message) => {
+    $("login-error").textContent = message;
+  },
+});
 
 function formatTime(ms) {
   if (!ms) return "";
@@ -84,6 +130,61 @@ async function getErrorMessage(error) {
 }
 
 /* ------------------------------------------------------------------ */
+/* RateLimiter — порт core/util/RateLimiter.kt (sliding window)         */
+/* ------------------------------------------------------------------ */
+
+class RateLimiter {
+  constructor(maxEvents, windowMillis) {
+    this.maxEvents = maxEvents;
+    this.windowMillis = windowMillis;
+    this.timestamps = [];
+  }
+  tryAcquire(now = Date.now()) {
+    while (this.timestamps.length && now - this.timestamps[0] > this.windowMillis) {
+      this.timestamps.shift();
+    }
+    if (this.timestamps.length >= this.maxEvents) return false;
+    this.timestamps.push(now);
+    return true;
+  }
+  retryAfterMillis(now = Date.now()) {
+    while (this.timestamps.length && now - this.timestamps[0] > this.windowMillis) {
+      this.timestamps.shift();
+    }
+    if (this.timestamps.length < this.maxEvents) return 0;
+    const remaining = this.windowMillis - (now - this.timestamps[0]);
+    return remaining > 0 ? remaining : 0;
+  }
+}
+
+// Как в Android: не больше 5 отправок за 10 секунд.
+const sendRateLimiter = new RateLimiter(5, 10_000);
+
+/* ------------------------------------------------------------------ */
+/* Уведомления браузера                                                 */
+/* ------------------------------------------------------------------ */
+
+let notificationsEnabled = false;
+
+async function ensureNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") { notificationsEnabled = true; return true; }
+  if (Notification.permission === "denied") return false;
+  const perm = await Notification.requestPermission();
+  notificationsEnabled = perm === "granted";
+  return notificationsEnabled;
+}
+
+function notifyNewMessage(title, body, chatId) {
+  if (!notificationsEnabled) return;
+  if (document.visibilityState === "visible" && activeChatId === chatId) return;
+  try {
+    const n = new Notification(title, { body, tag: "yodo-" + chatId, icon: undefined });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch (e) { /* игнорируем */ }
+}
+
+/* ------------------------------------------------------------------ */
 /* Состояние приложения                                                */
 /* ------------------------------------------------------------------ */
 
@@ -91,12 +192,47 @@ let currentUser = null; // { uid, email, displayName, username }
 let chatsUnsub = null; // отписка слушателя списка чатов
 let messagesUnsub = null; // отписка слушателя сообщений
 let blockedUnsub = null; // отписка слушателя блокировки
+let presenceUnsub = null; // отписка слушателя presence собеседника (личные чаты)
+let typingUnsub = null; // отписка слушателя "печатает..." в активном чате
+let myPresenceInterval = null; // periodic heartbeat для собственного presence
 let isBlocked = false;
 let activeChatId = null;
 let activeChatData = null;
 let chatsCache = new Map(); // chatId -> данные чата
 let userNamesCache = new Map(); // uid -> displayName (для групп)
 let searchTimer = null;
+
+// Групповой чат: выбранные участники в модалке создания
+let groupSelectedMembers = new Map(); // uid -> { displayName, username }
+let groupSearchTimer = null;
+
+// Пагинация истории сообщений
+const MESSAGES_PAGE_SIZE = 30;
+let oldestLoadedMessageDoc = null;
+let allMessagesLoaded = false;
+
+// Вложение (фото) для следующей отправки
+let pendingImageBase64 = null;
+
+// Индикатор "печатает..." — троттлинг собственных апдейтов
+let lastTypingSentAt = 0;
+let typingClearTimer = null;
+
+// Онлайн-статус текущего пользователя, обновляемый раз в 25с (presence)
+const PRESENCE_STALE_THRESHOLD_MILLIS = 60_000;
+
+// Официальный канал и чат поддержки — отдельные листенеры, т.к. не участвуют
+// в общем participantIds-запросе (официальный канал виден всем, поддержка
+// детерминирована по uid и доступна ещё и админам).
+let officialChannelUnsub = null;
+let officialChannelData = null;
+let supportChatUnsub = null;
+let supportChatData = null;
+let isAdmin = false;
+// Для админов: список всех бесед поддержки (простая админ-панель).
+let supportConversationsUnsub = null;
+let supportConversationsCache = new Map();
+let viewingSupportInbox = false;
 
 /* ------------------------------------------------------------------ */
 /* Роутинг экранов авторизации                                         */
@@ -276,10 +412,47 @@ function resetSessionState() {
   if (chatsUnsub) { chatsUnsub(); chatsUnsub = null; }
   if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
   if (blockedUnsub) { blockedUnsub(); blockedUnsub = null; }
+  if (presenceUnsub) { presenceUnsub(); presenceUnsub = null; }
+  if (typingUnsub) { typingUnsub(); typingUnsub = null; }
+  if (myPresenceInterval) { clearInterval(myPresenceInterval); myPresenceInterval = null; }
+  if (officialChannelUnsub) { officialChannelUnsub(); officialChannelUnsub = null; }
+  if (supportChatUnsub) { supportChatUnsub(); supportChatUnsub = null; }
+  if (supportConversationsUnsub) { supportConversationsUnsub(); supportConversationsUnsub = null; }
+  officialChannelData = null;
+  supportChatData = null;
+  supportConversationsCache.clear();
+  viewingSupportInbox = false;
+  isAdmin = false;
   activeChatId = null;
   activeChatData = null;
   isBlocked = false;
   chatsCache.clear();
+  oldestLoadedMessageDoc = null;
+  allMessagesLoaded = false;
+  pendingImageBase64 = null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Presence: онлайн-статус текущего пользователя                       */
+/* ------------------------------------------------------------------ */
+
+async function pingMyPresence(online) {
+  if (!currentUser) return;
+  try {
+    await setDoc(doc(db, "users", currentUser.uid), {
+      isOnline: online,
+      lastSeen: Date.now(),
+    }, { merge: true });
+  } catch (e) { /* best-effort, как в Android */ }
+}
+
+function startPresenceHeartbeat() {
+  pingMyPresence(true);
+  myPresenceInterval = setInterval(() => pingMyPresence(true), 25_000);
+  window.addEventListener("beforeunload", () => pingMyPresence(false));
+  document.addEventListener("visibilitychange", () => {
+    pingMyPresence(document.visibilityState === "visible");
+  });
 }
 
 onAuthStateChanged(auth, async (user) => {
@@ -335,8 +508,230 @@ async function enterApp() {
       currentUser.username = snap.data().username || "";
     }
   } catch (e) { /* профиль может отсутствовать для Google-аккаунтов */ }
+
+  isAdmin = isAdminEmail(currentUser.email);
+
   showScreen("screen-app");
   listenChats();
+  listenOfficialChannel();
+  startPresenceHeartbeat();
+  ensureNotificationPermission();
+
+  if (isAdmin) {
+    // Админ: гарантируем существование официального канала, показываем кнопку "Поддержка".
+    ensureOfficialChannelExists();
+    listenSupportConversations();
+    $("btn-support-inbox").classList.remove("hidden");
+  } else {
+    // Обычный пользователь: гарантируем существование его беседы поддержки.
+    getOrCreateSupportChat();
+  }
+  listenSupportChat();
+}
+
+/* ------------------------------------------------------------------ */
+/* Официальный канал (yodo_official_channel)                           */
+/* ------------------------------------------------------------------ */
+
+async function ensureOfficialChannelExists() {
+  try {
+    const ref = doc(db, "chats", OFFICIAL_CHANNEL_ID);
+    const snap = await getDoc(ref);
+    if (snap.exists()) return;
+    const now = Date.now();
+    await setDoc(ref, {
+      participantIds: [currentUser.uid],
+      type: "CHANNEL",
+      title: "YodoMessenger",
+      titleLowercase: "yodomessenger",
+      createdAt: now,
+      isVerified: true,
+      lastMessage: "",
+      lastMessageTimestamp: now,
+      lastMessageSenderId: currentUser.uid,
+      lastMessageStatus: "SENT",
+      unreadCounts: { [currentUser.uid]: 0 },
+      isOnline: false,
+      createdBy: currentUser.uid,
+    });
+  } catch (e) { /* best-effort, как в Android */ }
+}
+
+function listenOfficialChannel() {
+  if (officialChannelUnsub) officialChannelUnsub();
+  officialChannelUnsub = onSnapshot(
+    doc(db, "chats", OFFICIAL_CHANNEL_ID),
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        data.id = snap.id;
+        officialChannelData = data;
+      } else {
+        officialChannelData = null;
+      }
+      renderChatList();
+      // Если сейчас открыт официальный канал — обновим шапку/список сообщений идёт своим слушателем.
+      if (activeChatId === OFFICIAL_CHANNEL_ID) {
+        activeChatData = officialChannelData;
+        updateChatHeader();
+      }
+    },
+    () => { officialChannelData = null; renderChatList(); }
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Чат поддержки (support_<uid>)                                       */
+/* ------------------------------------------------------------------ */
+
+async function getOrCreateSupportChat() {
+  const chatId = supportChatIdFor(currentUser.uid);
+  try {
+    const ref = doc(db, "chats", chatId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) return chatId;
+
+    const now = Date.now();
+    const welcomeText =
+      "Здравствуйте, это аккаунт поддержки. Задавайте вопросы именно в него — " +
+      "мы отвечаем в этом же чате. Опишите проблему подробно и, если есть, приложите " +
+      "скриншот — так мы разберёмся быстрее.";
+
+    await setDoc(ref, {
+      participantIds: [currentUser.uid],
+      type: "SUPPORT",
+      title: SUPPORT_TITLE,
+      isVerified: true,
+      supportUserId: currentUser.uid,
+      supportUserName: currentUser.displayName || "Пользователь",
+      supportUserEmail: currentUser.email || "",
+      lastMessage: welcomeText,
+      lastMessageTimestamp: now,
+      lastMessageSenderId: "support_system",
+      lastMessageStatus: "SENT",
+      unreadCounts: { [currentUser.uid]: 1 },
+      isOnline: false,
+      createdBy: currentUser.uid,
+      createdAt: now,
+    });
+
+    // Приветственное сообщение с фиксированным id — разрешено правилами ровно один раз.
+    try {
+      await setDoc(doc(db, "chats", chatId, "messages", "support_welcome"), {
+        senderId: "support_system",
+        text: welcomeText,
+        timestamp: now,
+        status: "SENT",
+        notified: true,
+      });
+    } catch (e) { /* не критично, чат уже создан */ }
+
+    return chatId;
+  } catch (e) {
+    console.error("Не удалось открыть чат поддержки:", e);
+    return chatId;
+  }
+}
+
+function listenSupportChat() {
+  if (supportChatUnsub) supportChatUnsub();
+  const chatId = isAdmin ? null : supportChatIdFor(currentUser.uid);
+  if (!chatId) return; // админы видят список бесед поддержки отдельно (listenSupportConversations)
+  supportChatUnsub = onSnapshot(
+    doc(db, "chats", chatId),
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        data.id = snap.id;
+        supportChatData = data;
+      } else {
+        supportChatData = null;
+      }
+      renderChatList();
+      if (activeChatId === chatId) {
+        activeChatData = supportChatData;
+        updateChatHeader();
+      }
+    },
+    () => { supportChatData = null; renderChatList(); }
+  );
+}
+
+// Для админов: список всех бесед поддержки (собираем через chats where type == SUPPORT).
+function listenSupportConversations() {
+  if (supportConversationsUnsub) supportConversationsUnsub();
+  const q = query(collection(db, "chats"), where("type", "==", "SUPPORT"));
+  supportConversationsUnsub = onSnapshot(q, (snap) => {
+    supportConversationsCache.clear();
+    snap.forEach((d) => {
+      const data = d.data();
+      data.id = d.id;
+      supportConversationsCache.set(d.id, data);
+    });
+    if (viewingSupportInbox) renderSupportInbox();
+  });
+}
+
+// Экран "Входящие поддержки" (для админов) — переиспользуем список чатов,
+// открытие элемента ведёт в конкретный support_<uid> как обычный чат.
+$("btn-support-inbox").addEventListener("click", () => {
+  viewingSupportInbox = true;
+  activeChatId = null;
+  activeChatData = null;
+  $("chat-active").classList.add("hidden");
+  $("chat-empty").classList.remove("hidden");
+  document.getElementById("screen-app").classList.remove("chat-open");
+  renderSupportInbox();
+});
+
+function renderSupportInbox() {
+  const listEl = $("chat-list");
+  listEl.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "search-empty";
+  header.style.padding = "10px 16px";
+  header.textContent = "Обращения в поддержку (" + supportConversationsCache.size + ")";
+  listEl.appendChild(header);
+
+  const conversations = Array.from(supportConversationsCache.values())
+    .sort((a, b) => {
+      // Ожидающие ответа (последнее сообщение от пользователя) — выше.
+      const aWaiting = a.lastMessageSenderId === a.supportUserId ? 1 : 0;
+      const bWaiting = b.lastMessageSenderId === b.supportUserId ? 1 : 0;
+      if (aWaiting !== bWaiting) return bWaiting - aWaiting;
+      return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+    });
+
+  for (const conv of conversations) {
+    const item = document.createElement("div");
+    const awaitingReply = conv.lastMessageSenderId === conv.supportUserId &&
+      (conv.lastMessage || "").trim() !== "";
+    item.className = "chat-item" + (conv.id === activeChatId ? " selected" : "");
+    const letter = (conv.supportUserName || "?")[0].toUpperCase();
+    item.innerHTML = `
+      <div class="chat-avatar">${esc(letter)}</div>
+      <div class="chat-item-info">
+        <div class="chat-item-top">
+          <span class="chat-item-name">${esc(conv.supportUserName || "Пользователь")}</span>
+          <span class="chat-item-time">${esc(formatTime(conv.lastMessageTimestamp))}</span>
+        </div>
+        <div class="chat-item-bottom">
+          <span class="chat-item-preview">${esc(conv.lastMessage || "")}</span>
+          ${awaitingReply ? '<span class="chat-badge">!</span>' : ""}
+        </div>
+      </div>`;
+    item.addEventListener("click", () => openChat(conv.id));
+    listEl.appendChild(item);
+  }
+
+  if (conversations.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "search-empty";
+    empty.style.padding = "10px 16px";
+    empty.textContent = "Обращений пока нет";
+    listEl.appendChild(empty);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -377,12 +772,13 @@ function buildChatListItem(chat) {
   item.className = "chat-item" + (chat.id === activeChatId ? " selected" : "");
   const unread = (chat.unreadCounts && chat.unreadCounts[currentUser.uid]) || 0;
   const letter = (chatDisplayName(chat)[0] || "?").toUpperCase();
+  const verified = chat.isVerified ? ' <span class="verified-badge" title="Официальный">✓</span>' : "";
 
   item.innerHTML = `
     <div class="chat-avatar">${esc(letter)}</div>
     <div class="chat-item-info">
       <div class="chat-item-top">
-        <span class="chat-item-name">${esc(chatDisplayName(chat))}</span>
+        <span class="chat-item-name">${esc(chatDisplayName(chat))}${verified}</span>
         <span class="chat-item-time">${esc(formatTime(chat.lastMessageTimestamp))}</span>
       </div>
       <div class="chat-item-bottom">
@@ -398,10 +794,21 @@ function buildChatListItem(chat) {
 function renderChatList() {
   const listEl = $("chat-list");
   const chats = Array.from(chatsCache.values())
-    .filter((c) => c.id !== "yodo_official_channel")
+    .filter((c) => c.id !== OFFICIAL_CHANNEL_ID && c.type !== "SUPPORT")
     .sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0));
 
   listEl.innerHTML = "";
+
+  // Официальный канал — всегда сверху, если существует.
+  if (officialChannelData) {
+    listEl.appendChild(buildChatListItem(officialChannelData));
+  }
+
+  // Собственная беседа поддержки (для обычных пользователей).
+  if (!isAdmin && supportChatData) {
+    listEl.appendChild(buildChatListItem(supportChatData));
+  }
+
   for (const chat of chats) {
     listEl.appendChild(buildChatListItem(chat));
   }
@@ -411,42 +818,188 @@ function renderChatList() {
 /* Открытие чата / сообщения                                           */
 /* ------------------------------------------------------------------ */
 
+function findChatData(chatId) {
+  if (chatId === OFFICIAL_CHANNEL_ID) return officialChannelData;
+  if (chatId.startsWith(SUPPORT_CHAT_PREFIX)) {
+    if (!isAdmin) return supportChatData;
+    return supportConversationsCache.get(chatId) || null;
+  }
+  return chatsCache.get(chatId) || null;
+}
+
+function canSendInActiveChat() {
+  if (!activeChatId) return false;
+  if (activeChatId === OFFICIAL_CHANNEL_ID) return isAdmin;
+  return true;
+}
+
+function updateChatHeader() {
+  if (!activeChatId) return;
+  const verified = activeChatData && activeChatData.isVerified
+    ? ' <span class="verified-badge" title="Официальный">✓</span>' : "";
+  $("chat-title").innerHTML = (activeChatData ? esc(chatDisplayName(activeChatData)) : "Чат") + verified;
+  $("chat-header-avatar").textContent = activeChatData ? (chatDisplayName(activeChatData)[0] || "?").toUpperCase() : "?";
+
+  // Форма отправки скрыта для не-админов в официальном канале (read-only рассылка).
+  const canSend = canSendInActiveChat();
+  $("form-send").classList.toggle("hidden", !canSend);
+  $("btn-attach").classList.toggle("hidden", !canSend);
+  if (!canSend) {
+    $("chat-subtitle").textContent = "Только для чтения — официальные объявления";
+    $("chat-subtitle").classList.remove("online");
+  }
+}
+
 function openChat(chatId) {
   activeChatId = chatId;
-  activeChatData = chatsCache.get(chatId) || null;
-  $("chat-title").textContent = activeChatData ? chatDisplayName(activeChatData) : "Чат";
+  activeChatData = findChatData(chatId);
+  viewingSupportInbox = false;
+  $("chat-subtitle").textContent = "";
+  $("chat-subtitle").classList.remove("online");
+  updateChatHeader();
   $("chat-empty").classList.add("hidden");
   $("chat-active").classList.remove("hidden");
   document.getElementById("screen-app").classList.add("chat-open");
   $("messages").innerHTML = "";
+  $("typing-indicator").classList.add("hidden");
+  cancelPendingImage();
+  oldestLoadedMessageDoc = null;
+  allMessagesLoaded = false;
   renderChatList();
 
-  // Сброс непрочитанных: dot-notation, как markChatAsRead в Android
+  // Сброс непрочитанных: dot-notation, как markChatAsRead в Android.
+  // Для официального канала — только у себя, доступно всем читателям.
   updateDoc(doc(db, "chats", chatId), {
     ["unreadCounts." + currentUser.uid]: 0,
   }).catch(() => {});
 
+  if (presenceUnsub) { presenceUnsub(); presenceUnsub = null; }
+  if (typingUnsub) { typingUnsub(); typingUnsub = null; }
+
+  // Presence собеседника — только для личных чатов
+  if (activeChatData && activeChatData.type === "PRIVATE") {
+    const otherUid = (activeChatData.participantIds || []).find((u) => u !== currentUser.uid);
+    if (otherUid) {
+      presenceUnsub = onSnapshot(doc(db, "users", otherUid), (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const isStale = Date.now() - (data.lastSeen || 0) > PRESENCE_STALE_THRESHOLD_MILLIS;
+        const online = !!data.isOnline && !isStale;
+        const subEl = $("chat-subtitle");
+        if (online) {
+          subEl.textContent = "в сети";
+          subEl.classList.add("online");
+        } else {
+          subEl.classList.remove("online");
+          subEl.textContent = data.lastSeen ? "был(а) " + formatTime(data.lastSeen) : "";
+        }
+      });
+    }
+  }
+
+  // "Печатает..." — слушаем typing-подколлекцию чата (не для официального канала).
+  if (chatId !== OFFICIAL_CHANNEL_ID) {
+    typingUnsub = onSnapshot(doc(db, "chats", chatId, "typing", "state"), (snap) => {
+      const indicator = $("typing-indicator");
+      if (!snap.exists()) { indicator.classList.add("hidden"); return; }
+      const data = snap.data() || {};
+      const othersTyping = Object.entries(data)
+        .filter(([uid, ts]) => uid !== currentUser.uid && ts && Date.now() - ts < 6000);
+      indicator.classList.toggle("hidden", othersTyping.length === 0);
+    }, () => { /* нет прав / нет коллекции — молча игнорируем */ });
+  }
+
+  listenActiveMessages();
+}
+
+function listenActiveMessages() {
   if (messagesUnsub) messagesUnsub();
+  const chatId = activeChatId;
+
   const q = query(
     collection(db, "chats", chatId, "messages"),
-    orderBy("timestamp", "asc")
+    orderBy("timestamp", "asc"),
+    limitToLast(MESSAGES_PAGE_SIZE)
   );
   messagesUnsub = onSnapshot(q, (snap) => {
     const container = $("messages");
+    const wasNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+
+    // Сохраняем кнопку "Загрузить ещё" при перерисовке
+    const loadMoreBtn = $("btn-load-more");
     container.innerHTML = "";
+    container.appendChild(loadMoreBtn);
+    loadMoreBtn.classList.toggle("hidden", allMessagesLoaded || snap.size < MESSAGES_PAGE_SIZE);
+
+    if (snap.docs.length > 0) oldestLoadedMessageDoc = snap.docs[0];
+
     snap.forEach((d) => {
       const msg = d.data();
       msg.id = d.id;
       container.appendChild(renderMessage(msg));
+
+      // Помечаем чужие сообщения как READ, если ещё не прочитаны (как в Android).
+      // Не пытаемся это делать в официальном канале/чужой беседе поддержки (админ,
+      // просматривающий чужой support-чат) — там правила Firestore это не разрешают
+      // (обновлять status может только сам получатель личного/группового чата).
+      const readableHere = chatId !== OFFICIAL_CHANNEL_ID &&
+        !(isAdmin && chatId.startsWith(SUPPORT_CHAT_PREFIX) && chatId !== supportChatIdFor(currentUser.uid));
+      if (readableHere && msg.senderId !== currentUser.uid && msg.status && msg.status !== "READ") {
+        updateDoc(doc(db, "chats", chatId, "messages", d.id), { status: "READ" }).catch(() => {});
+      }
     });
-    container.scrollTop = container.scrollHeight;
+
+    if (wasNearBottom) container.scrollTop = container.scrollHeight;
+
+    // Уведомление о новом входящем сообщении
+    snap.docChanges().forEach((change) => {
+      if (change.type !== "added") return;
+      const msg = change.doc.data();
+      if (msg.senderId && msg.senderId !== currentUser.uid && Date.now() - (msg.timestamp || 0) < 5000) {
+        const name = activeChatData ? chatDisplayName(activeChatData) : "YODO";
+        notifyNewMessage(name, msg.text || (msg.imageBase64 ? "📷 Фото" : "Новое сообщение"), chatId);
+      }
+    });
   });
 }
 
+$("btn-load-more").addEventListener("click", async () => {
+  if (!activeChatId || !oldestLoadedMessageDoc || allMessagesLoaded) return;
+  const container = $("messages");
+  const prevHeight = container.scrollHeight;
+
+  const q = query(
+    collection(db, "chats", activeChatId, "messages"),
+    orderBy("timestamp", "asc"),
+    endBefore(oldestLoadedMessageDoc),
+    limitToLast(MESSAGES_PAGE_SIZE)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) { allMessagesLoaded = true; $("btn-load-more").classList.add("hidden"); return; }
+
+  const loadMoreBtn = $("btn-load-more");
+  const frag = document.createDocumentFragment();
+  snap.forEach((d) => {
+    const msg = d.data();
+    msg.id = d.id;
+    frag.appendChild(renderMessage(msg));
+  });
+  loadMoreBtn.after(frag);
+  oldestLoadedMessageDoc = snap.docs[0];
+  if (snap.size < MESSAGES_PAGE_SIZE) { allMessagesLoaded = true; loadMoreBtn.classList.add("hidden"); }
+
+  // Сохраняем позицию скролла относительно новой высоты
+  container.scrollTop = container.scrollHeight - prevHeight;
+});
+
 $("btn-back").addEventListener("click", () => {
+  clearTypingState();
   activeChatId = null;
   activeChatData = null;
   if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
+  if (presenceUnsub) { presenceUnsub(); presenceUnsub = null; }
+  if (typingUnsub) { typingUnsub(); typingUnsub = null; }
+  cancelPendingImage();
   $("chat-active").classList.add("hidden");
   $("chat-empty").classList.remove("hidden");
   document.getElementById("screen-app").classList.remove("chat-open");
@@ -461,6 +1014,10 @@ function statusIconFor(status) {
   if (status === "READ") return "✓✓";
   if (status === "DELIVERED") return "✓✓";
   return "✓";
+}
+
+function statusClassFor(status) {
+  return status === "READ" ? "msg-status read" : "msg-status";
 }
 
 function buildDeletedBubbleContent() {
@@ -509,6 +1066,7 @@ function buildMessageMeta(msg) {
 
   if (msg.senderId === currentUser.uid) {
     const statusSpan = document.createElement("span");
+    statusSpan.className = statusClassFor(msg.status);
     statusSpan.textContent = statusIconFor(msg.status);
     div.appendChild(statusSpan);
   }
@@ -525,7 +1083,9 @@ function renderMessage(msg) {
   if (msg.isDeleted) {
     bubble.appendChild(buildDeletedBubbleContent());
   } else {
-    if (msg.senderId !== currentUser.uid && activeChatData && activeChatData.type !== "PRIVATE") {
+    const isGroupLike = activeChatData && (activeChatData.type === "GROUP" || activeChatData.type === "CHANNEL");
+    const isSupportLike = activeChatData && activeChatData.type === "SUPPORT";
+    if (msg.senderId !== currentUser.uid && (isGroupLike || isSupportLike)) {
       bubble.appendChild(buildSenderLabel(msg.senderId));
     }
     if (msg.imageBase64) {
@@ -544,8 +1104,9 @@ function renderMessage(msg) {
   return wrap;
 }
 
-// Имена отправителей для групп: подгружаем лениво
+// Имена отправителей для групп/поддержки: подгружаем лениво
 function senderNameFor(uid) {
+  if (uid === "support_system") return "Поддержка YODO";
   if (userNamesCache.has(uid)) return userNamesCache.get(uid);
   getDoc(doc(db, "users", uid))
     .then((snap) => {
@@ -566,37 +1127,55 @@ $("form-send").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $("message-input");
   const text = input.value.trim();
-  if (!text || !activeChatId) return;
+  const imageBase64 = pendingImageBase64;
+  if ((!text && !imageBase64) || !activeChatId) return;
+  if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
+
+  // Rate limiting: не больше 5 отправок за 10 секунд (порт RateLimiter.kt)
+  if (!sendRateLimiter.tryAcquire()) {
+    const waitSec = Math.ceil(sendRateLimiter.retryAfterMillis() / 1000);
+    alert("Слишком много сообщений подряд. Подождите " + waitSec + " сек.");
+    return;
+  }
+
   input.value = "";
+  cancelPendingImage();
+  clearTypingState();
 
   try {
     const now = Date.now();
-    const chat = activeChatData || chatsCache.get(activeChatId);
+    const chat = activeChatData || findChatData(activeChatId);
 
     // WriteBatch: сообщение + обновление чата (как sendRawMessage в Android)
     const batch = writeBatch(db);
     const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
-    batch.set(msgRef, {
+    const msgData = {
       senderId: currentUser.uid,
-      text: text,
       timestamp: now,
       status: "SENT",
       notified: false,
-    });
+    };
+    if (text) msgData.text = text;
+    if (imageBase64) msgData.imageBase64 = imageBase64;
+    batch.set(msgRef, msgData);
 
     const chatRef = doc(db, "chats", activeChatId);
     const chatUpdate = {
-      lastMessage: text,
+      lastMessage: text || "📷 Фото",
       lastMessageTimestamp: now,
       lastMessageSenderId: currentUser.uid,
       lastMessageStatus: "SENT",
     };
 
-    // Инкремент непрочитанных у всех участников, кроме себя (dot-notation)
-    for (const uid of (chat.participantIds || [])) {
-      if (uid !== currentUser.uid) {
-        chatUpdate["unreadCounts." + uid] = increment(1);
-      }
+    // Получатели непрочитанных: обычно все participantIds, кроме себя. Для беседы
+    // поддержки, когда отвечает админ, реальный получатель — владелец беседы
+    // (supportUserId), который в participantIds чата поддержки уже присутствует —
+    // но на случай расхождения схемы подстрахуемся им явно.
+    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
+    if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
+    recipients.delete(currentUser.uid);
+    for (const uid of recipients) {
+      chatUpdate["unreadCounts." + uid] = increment(1);
     }
 
     batch.update(chatRef, chatUpdate);
@@ -606,6 +1185,91 @@ $("form-send").addEventListener("submit", async (e) => {
     input.value = text; // возвращаем текст в поле, чтобы не потерять
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* Индикатор "печатает..." (собственный, отправляем в chats/{id}/typing/state) */
+/* ------------------------------------------------------------------ */
+
+function clearTypingState() {
+  if (typingClearTimer) { clearTimeout(typingClearTimer); typingClearTimer = null; }
+  if (!activeChatId || !currentUser) return;
+  updateDoc(doc(db, "chats", activeChatId, "typing", "state"), {
+    [currentUser.uid]: deleteField(),
+  }).catch(() => {});
+}
+
+$("message-input").addEventListener("input", () => {
+  if (!activeChatId || !currentUser) return;
+  const now = Date.now();
+  if (now - lastTypingSentAt < 2000) return; // троттлинг: не чаще раза в 2с
+  lastTypingSentAt = now;
+  setDoc(doc(db, "chats", activeChatId, "typing", "state"), {
+    [currentUser.uid]: now,
+  }, { merge: true }).catch(() => {});
+
+  if (typingClearTimer) clearTimeout(typingClearTimer);
+  typingClearTimer = setTimeout(clearTypingState, 4000);
+});
+
+/* ------------------------------------------------------------------ */
+/* Вложение изображения                                                 */
+/* ------------------------------------------------------------------ */
+
+function cancelPendingImage() {
+  pendingImageBase64 = null;
+  $("image-preview").classList.add("hidden");
+  $("image-preview-img").src = "";
+  $("file-input").value = "";
+}
+
+$("btn-attach").addEventListener("click", () => $("file-input").click());
+$("btn-cancel-image").addEventListener("click", cancelPendingImage);
+
+$("file-input").addEventListener("change", async () => {
+  const file = $("file-input").files[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    alert("Выберите файл изображения");
+    return;
+  }
+  try {
+    const base64 = await downscaleImageToBase64(file, 1280, 0.8);
+    pendingImageBase64 = base64;
+    $("image-preview-img").src = "data:image/jpeg;base64," + base64;
+    $("image-preview").classList.remove("hidden");
+  } catch (err) {
+    console.error("Ошибка обработки изображения:", err);
+    alert("Не удалось обработать изображение");
+  }
+});
+
+function downscaleImageToBase64(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Не удалось загрузить изображение"));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl.split(",")[1]);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Новый чат: поиск пользователей                                       */
@@ -736,4 +1400,137 @@ async function createPrivateChat(otherUid, otherName) {
 // Модалка закрывается по клику на фон
 $("modal-new-chat").addEventListener("click", (e) => {
   if (e.target === $("modal-new-chat")) $("btn-close-modal").click();
+});
+
+/* ------------------------------------------------------------------ */
+/* Групповые чаты (createGroupChat из Android ChatRepositoryImpl)       */
+/* ------------------------------------------------------------------ */
+
+$("btn-new-group").addEventListener("click", () => {
+  groupSelectedMembers.clear();
+  $("group-title-input").value = "";
+  $("group-search-input").value = "";
+  $("group-error").textContent = "";
+  renderGroupSelectedMembers();
+  $("group-search-results").innerHTML = '<div class="search-empty">Начните вводить имя или @username</div>';
+  $("modal-new-group").classList.remove("hidden");
+  $("group-title-input").focus();
+});
+
+$("btn-close-group-modal").addEventListener("click", () => {
+  $("modal-new-group").classList.add("hidden");
+});
+
+$("modal-new-group").addEventListener("click", (e) => {
+  if (e.target === $("modal-new-group")) $("btn-close-group-modal").click();
+});
+
+$("group-search-input").addEventListener("input", () => {
+  clearTimeout(groupSearchTimer);
+  groupSearchTimer = setTimeout(runGroupSearch, 300);
+});
+
+async function runGroupSearch() {
+  const term = $("group-search-input").value.trim().toLowerCase();
+  const resultsEl = $("group-search-results");
+  if (term.length < 2) {
+    resultsEl.innerHTML = '<div class="search-empty">Минимум 2 символа</div>';
+    return;
+  }
+  try {
+    const byUsername = await searchUsersByField("usernameLowercase", term);
+    const byName = await searchUsersByField("displayNameLowercase", term);
+    const seen = new Set();
+    const users = [];
+    for (const d of byUsername.docs) { if (!seen.has(d.id)) { seen.add(d.id); users.push(d); } }
+    for (const d of byName.docs) { if (!seen.has(d.id)) { seen.add(d.id); users.push(d); } }
+
+    resultsEl.innerHTML = "";
+    const filtered = users.filter((d) => d.id !== currentUser.uid && !groupSelectedMembers.has(d.id));
+    if (filtered.length === 0) {
+      resultsEl.innerHTML = '<div class="search-empty">Никого не найдено</div>';
+      return;
+    }
+    for (const d of filtered) {
+      const u = d.data();
+      const item = document.createElement("div");
+      item.className = "user-result";
+      item.innerHTML = `
+        <div class="chat-avatar">${esc((u.displayName || "?")[0].toUpperCase())}</div>
+        <div>
+          <div class="user-result-name">${esc(u.displayName || "")}</div>
+          <div class="user-result-username">@${esc(u.username || "")}</div>
+        </div>`;
+      item.addEventListener("click", () => {
+        groupSelectedMembers.set(d.id, { displayName: u.displayName || u.username || "Участник" });
+        $("group-search-input").value = "";
+        resultsEl.innerHTML = '<div class="search-empty">Начните вводить имя или @username</div>';
+        renderGroupSelectedMembers();
+      });
+      resultsEl.appendChild(item);
+    }
+  } catch (err) {
+    console.error("Поиск участников группы:", err);
+    resultsEl.innerHTML = '<div class="search-empty">Ошибка поиска</div>';
+  }
+}
+
+function renderGroupSelectedMembers() {
+  const container = $("group-selected-members");
+  container.innerHTML = "";
+  for (const [uid, info] of groupSelectedMembers) {
+    const chip = document.createElement("div");
+    chip.className = "member-chip";
+    chip.innerHTML = `
+      <div class="chat-avatar">${esc((info.displayName[0] || "?").toUpperCase())}</div>
+      <span>${esc(info.displayName)}</span>
+      <button type="button" title="Убрать">✕</button>`;
+    chip.querySelector("button").addEventListener("click", () => {
+      groupSelectedMembers.delete(uid);
+      renderGroupSelectedMembers();
+    });
+    container.appendChild(chip);
+  }
+}
+
+$("btn-create-group").addEventListener("click", async () => {
+  const errorEl = $("group-error");
+  errorEl.textContent = "";
+  const title = $("group-title-input").value.trim();
+
+  if (!title) { errorEl.textContent = "Введите название группы"; return; }
+  // Как в Android: минимум 2 участника + сам создатель = 3 в participantIds
+  if (groupSelectedMembers.size < 2) {
+    errorEl.textContent = "Выберите хотя бы 2 участников";
+    return;
+  }
+
+  try {
+    const memberIds = Array.from(groupSelectedMembers.keys());
+    const allParticipants = Array.from(new Set([currentUser.uid, ...memberIds]));
+    const now = Date.now();
+    const unreadCounts = {};
+    allParticipants.forEach((uid) => { unreadCounts[uid] = 0; });
+
+    const chatRef = doc(collection(db, "chats"));
+    await setDoc(chatRef, {
+      participantIds: allParticipants,
+      type: "GROUP",
+      title: title,
+      titleLowercase: title.toLowerCase(),
+      description: "",
+      lastMessage: "",
+      lastMessageTimestamp: now,
+      unreadCounts: unreadCounts,
+      isOnline: false,
+      createdBy: currentUser.uid,
+      createdAt: now,
+    });
+
+    $("modal-new-group").classList.add("hidden");
+    openChat(chatRef.id);
+  } catch (err) {
+    console.error("Создание группы:", err);
+    errorEl.textContent = "Не удалось создать группу: " + (err.message || "");
+  }
 });
