@@ -662,7 +662,7 @@ body {
 .search-empty { color: var(--text-dim); font-size: 13px; padding: 10px 8px; }
 
 /* ===== Настройки ===== */
-.settings-card { width: min(460px, 92vw); max-height: 86vh; }
+.settings-card { width: min(520px, 92vw); max-height: 86vh; }
 
 .settings-header {
   display: flex;
@@ -671,29 +671,17 @@ body {
 }
 .settings-header h3 { font-size: 18px; }
 
-.settings-tabs {
+.settings-body {
   display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--bg-input);
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  min-height: 0;
 }
-.settings-tab {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 13.5px;
-  font-weight: 600;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.settings-tab:hover { background: var(--bg-panel-2); color: var(--text); }
-.settings-tab.active { background: var(--accent); color: #fff; }
 
-.settings-panel { display: none; flex-direction: column; gap: 12px; overflow-y: auto; }
-.settings-panel.active { display: flex; }
+.settings-panel { display: flex; flex-direction: column; gap: 12px; }
+.settings-panel + .settings-panel { border-top: 1px solid var(--bg-input); padding-top: 14px; }
+.settings-section-title { font-size: 15px; font-weight: 700; }
 
 .settings-label { font-size: 12.5px; color: var(--text-dim); margin-bottom: -6px; }
 

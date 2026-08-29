@@ -260,16 +260,11 @@
           <button type="button" class="icon-btn" id="btn-close-settings-modal">✕</button>
         </div>
 
-        <div class="settings-tabs">
-          <button type="button" class="settings-tab active" data-tab="profile">Профиль</button>
-          <button type="button" class="settings-tab" data-tab="privacy">Приватность</button>
-          <button type="button" class="settings-tab" data-tab="security">Безопасность</button>
-          <button type="button" class="settings-tab" data-tab="notifications">Уведомления</button>
-          <button type="button" class="settings-tab" data-tab="theme">Тема</button>
-        </div>
+        <div class="settings-body">
 
-        <!-- Вкладка: профиль -->
-        <div class="settings-panel active" data-panel="profile">
+        <!-- Секция: профиль -->
+        <div class="settings-panel" data-panel="profile">
+          <div class="settings-section-title">Профиль</div>
           <div class="settings-avatar-row">
             <div class="chat-avatar settings-avatar-img-wrap" id="settings-avatar-preview">?</div>
             <div class="settings-avatar-info">
@@ -311,8 +306,9 @@
           </div>
         </div>
 
-        <!-- Вкладка: приватность -->
+        <!-- Секция: приватность -->
         <div class="settings-panel" data-panel="privacy">
+          <div class="settings-section-title">Приватность</div>
           <div class="settings-toggle-row">
             <div>
               <div class="settings-toggle-title">Онлайн-статус</div>
@@ -387,8 +383,9 @@
           <div id="settings-blocked-list" class="settings-blocked-list"></div>
         </div>
 
-        <!-- Вкладка: безопасность -->
+        <!-- Секция: безопасность -->
         <div class="settings-panel" data-panel="security">
+          <div class="settings-section-title">Безопасность</div>
           <div class="settings-subheading settings-subheading-first">Смена пароля</div>
           <label class="settings-label">Текущий пароль</label>
           <input type="password" id="settings-current-password" placeholder="Текущий пароль" autocomplete="current-password">
@@ -436,8 +433,9 @@
           </div>
         </div>
 
-        <!-- Вкладка: уведомления -->
+        <!-- Секция: уведомления -->
         <div class="settings-panel" data-panel="notifications">
+          <div class="settings-section-title">Уведомления</div>
           <div class="settings-toggle-row">
             <div>
               <div class="settings-toggle-title">Уведомления браузера</div>
@@ -451,8 +449,9 @@
           <div class="settings-hint" id="settings-notifications-hint"></div>
         </div>
 
-        <!-- Вкладка: тема -->
+        <!-- Секция: тема -->
         <div class="settings-panel" data-panel="theme">
+          <div class="settings-section-title">Тема</div>
           <div class="settings-theme-options">
             <button type="button" class="settings-theme-option" data-theme="dark">
               <span class="settings-theme-swatch settings-theme-swatch-dark"></span>
@@ -465,6 +464,7 @@
           </div>
 
         </div>
+        </div><!-- /settings-body -->
       </div>
     </div>
   </div>

@@ -2286,16 +2286,6 @@ document.querySelectorAll(".settings-theme-option").forEach((btn) => {
   });
 });
 
-// Переключение вкладок настроек
-document.querySelectorAll(".settings-tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".settings-tab").forEach((t) => t.classList.remove("active"));
-    document.querySelectorAll(".settings-panel").forEach((p) => p.classList.remove("active"));
-    tab.classList.add("active");
-    document.querySelector(`.settings-panel[data-panel="${tab.dataset.tab}"]`).classList.add("active");
-  });
-});
-
 /* ------------------------------------------------------------------ */
 /* Профиль пользователя: полный набор полей из Android (users/{uid})   */
 /* ------------------------------------------------------------------ */
@@ -2380,7 +2370,6 @@ function resetSettingsModalFields() {
 
 $("btn-open-settings").addEventListener("click", async () => {
   resetSettingsModalFields();
-  document.querySelectorAll(".settings-tab")[0].click();
   $("modal-settings").classList.remove("hidden");
   await fillSettingsProfile();
 });
