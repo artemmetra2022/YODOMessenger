@@ -147,10 +147,9 @@ export function initQrLogin({
 
   async function drawQrCode(text) {
     const wrap = $("qr-login-canvas-wrap");
+    // Библиотека qrcodejs сама создаёт canvas (и img-копию) внутри контейнера,
+    // поэтому передаём именно контейнер и ничего лишнего в него не добавляем.
     wrap.innerHTML = "";
-    const canvas = document.createElement("canvas");
-    wrap.appendChild(canvas);
-    // Библиотека QRCode (davidshimjs, UMD) регистрирует глобальный window.QRCode.
     // eslint-disable-next-line no-undef
     await new Promise((resolve, reject) => {
       try {

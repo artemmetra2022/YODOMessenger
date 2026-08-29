@@ -29,7 +29,7 @@ body {
 .screen { display: none; height: 100vh; }
 .screen.active { display: flex; }
 
-#screen-login, #screen-register, #screen-verify, #screen-blocked {
+#screen-login, #screen-register, #screen-verify, #screen-blocked, #screen-qr-login {
   align-items: center;
   justify-content: center;
 }
@@ -110,7 +110,7 @@ body {
   justify-content: center;
   min-height: 232px;
 }
-#qr-login-canvas { display: block; }
+#qr-login-canvas-wrap canvas, #qr-login-canvas-wrap img { display: block; max-width: 100%; }
 .qr-login-status {
   color: var(--text-dim);
   font-size: 13px;
