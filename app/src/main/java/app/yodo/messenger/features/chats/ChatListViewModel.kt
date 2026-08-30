@@ -90,6 +90,14 @@ class ChatListViewModel @Inject constructor(
     val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // ФИКС КРАША (продолжение): _activeFilter тоже читается из observeChats() (внутри
+    // init{}), но в отличие от chatFolders оставался объявлен ПОСЛЕ блока init — из-за
+    // чего при синхронном запуске корутины combine() мог получить ещё не инициализированное
+    // значение и упасть с NPE. Переносим его наверх, до init{}, вместе с chatFolders.
+    /** Текущий выбранный фильтр */
+    private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
+    val activeFilter: StateFlow<ChatFilter> = _activeFilter
+
     init {
         observeNetworkState()
         observeChats()
@@ -143,10 +151,6 @@ class ChatListViewModel @Inject constructor(
             _isRefreshing.value = false
         }
     }
-
-    /** Текущий выбранный фильтр */
-    private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
-    val activeFilter: StateFlow<ChatFilter> = _activeFilter
 
     // НОВОЕ (скрытые чаты): множество ID скрытых чатов (для пунктов меню).
     val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
