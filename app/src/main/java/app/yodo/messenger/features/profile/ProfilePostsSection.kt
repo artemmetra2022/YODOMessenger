@@ -349,7 +349,8 @@ private fun PostAction(
 
 @Composable
 private fun PostPhoto(base64: String, modifier: Modifier) {
-    val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+    // ИСПРАВЛЕНО (п.16, лаги прокрутки): декод через LRU-кеш с понижением разрешения.
+    val bitmap = remember(base64) { ImageUtils.decodeChatImageBitmapCached(base64) }
     if (bitmap != null) {
         Image(
             bitmap = bitmap.asImageBitmap(),

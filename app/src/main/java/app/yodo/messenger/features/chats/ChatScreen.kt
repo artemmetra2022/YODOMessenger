@@ -1409,12 +1409,13 @@ fun ChatScreen(
                     displayedMessages.forEachIndexed { messageIndex, message ->
                         val dateLabel = formatDateSeparator(message.timestamp)
                         if (dateLabel != previousDateLabel) {
-                            item(key = "date_${message.id}") {
+                            // НОВОЕ (п.16, оптимизация прокрутки): contentType для переиспользования.
+                            item(key = "date_${message.id}", contentType = "date_separator") {
                                 DateSeparator(dateLabel)
                             }
                             previousDateLabel = dateLabel
                         }
-                        item(key = message.id) {
+                        item(key = message.id, contentType = "message") {
                             val groupPosition = messageGroupPosition(displayedMessages, messageIndex)
                             val spacing = messageItemSpacing(displayedMessages, messageIndex)
                             Spacer(modifier = Modifier.height(spacing.dp))
@@ -2124,7 +2125,11 @@ private fun MessageBubble(
                     } else {
                         message.imageBase64?.let { base64 ->
                             if (revealImage) {
-                                val bitmap = remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+                                // ИСПРАВЛЕНО (п.16, лаги прокрутки): декод через LRU-кеш
+                                // с понижением разрешения под размер пузыря — раньше каждая
+                                // появляющаяся при прокрутке фотография декодировалась
+                                // целиком на главном потоке.
+                                val bitmap = remember(base64) { ImageUtils.decodeChatImageBitmapCached(base64) }
                                 bitmap?.let { bmp ->
                                     val aspectRatio = bmp.width.toFloat() / bmp.height.toFloat()
                                     Image(

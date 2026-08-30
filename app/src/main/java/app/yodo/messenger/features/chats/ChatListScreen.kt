@@ -414,7 +414,9 @@ fun ChatListScreen(
                                     }
                                 }
                             }
-                            items(state.chats, key = { it.chatId }) { chat ->
+                            // НОВОЕ (п.16, оптимизация прокрутки): contentType помогает
+                            // LazyColumn переиспользовать композиции однотипных строк.
+                            items(state.chats, key = { it.chatId }, contentType = { "chat_row" }) { chat ->
                                 SwipeableChatListItem(
                                     chat = chat,
                                     colorTheme = colorTheme,
