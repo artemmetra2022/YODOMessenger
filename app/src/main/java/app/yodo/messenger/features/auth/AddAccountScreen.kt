@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +15,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -63,6 +68,11 @@ fun AddAccountScreen(
     var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    // НОВОЕ (баг 17): генератор и проверка пароля при добавлении второго аккаунта —
+    // те же компоненты, что и в основной регистрации (PasswordStrength.kt/Indicator.kt).
+    val passwordStrength = remember(password) { evaluatePasswordStrength(password) }
+    val isPasswordAcceptable = passwordStrength.level == PasswordStrengthLevel.STRONG
 
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
@@ -157,9 +167,30 @@ fun AddAccountScreen(
             OutlinedTextField(
                 value = password, onValueChange = { password = it },
                 label = { Text("Пароль") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    // НОВОЕ (баг 17): генератор надёжного пароля + переключатель видимости —
+                    // как в основной регистрации.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { password = generateStrongPassword(); passwordVisible = true }) {
+                            Icon(Icons.Filled.AutoAwesome, contentDescription = "Сгенерировать надёжный пароль")
+                        }
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (passwordVisible) "Скрыть пароль" else "Показать пароль"
+                            )
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // НОВОЕ (баг 17): индикатор надёжности с чек-листом — только в режиме регистрации.
+            if (isRegister && password.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                PasswordStrengthIndicator(result = passwordStrength)
+            }
 
             (uiState as? AuthUiState.Error)?.let {
                 Spacer(Modifier.height(8.dp))
@@ -172,7 +203,10 @@ fun AddAccountScreen(
                     if (isRegister) viewModel.register(name, username, email, password)
                     else viewModel.login(email, password)
                 },
-                enabled = uiState !is AuthUiState.Loading,
+                // НОВОЕ (баг 17): при регистрации второго аккаунта кнопка активна только
+                // с надёжным паролем (STRONG) — та же политика, что в основной регистрации.
+                enabled = uiState !is AuthUiState.Loading &&
+                    (!isRegister || isPasswordAcceptable),
                 modifier = Modifier.fillMaxWidth().height(50.dp)
             ) {
                 if (uiState is AuthUiState.Loading) CircularProgressIndicator(modifier = Modifier.height(22.dp))
