@@ -554,6 +554,16 @@
     <string name="nearby_empty">Пока никого не видно поблизости.
 Попробуй позже — люди появляются, когда открывают этот экран.</string>
     <string name="nearby_you_here">Вы здесь</string>
+    <!-- НОВОЕ (баг 13): информативность экрана «Кто рядом» -->
+    <string name="nearby_refresh_cd">Обновить список</string>
+    <string name="nearby_found_count">Найдено: %1$d</string>
+    <string name="nearby_radius_km">Радиус: %1$s км</string>
+    <string name="nearby_updated_at">Обновлено: %1$s</string>
+    <string name="nearby_accuracy_m">Точность: ±%1$d м</string>
+    <string name="nearby_zoom_in_cd">Приблизить карту</string>
+    <string name="nearby_zoom_out_cd">Отдалить карту</string>
+    <string name="nearby_my_location_cd">Показать моё местоположение</string>
+    <string name="nearby_open_profile">Открыть профиль</string>
 
     <!-- Offline chat -->
     <string name="offline_chat_title">Офлайн-чат (Bluetooth)</string>

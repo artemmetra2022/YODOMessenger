@@ -60,6 +60,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,6 +81,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
 import app.yodo.messenger.data.local.HiddenPinResult
 import app.yodo.messenger.features.settings.PinCellsInput
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -97,6 +99,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
+import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.YodoMotion
@@ -1195,11 +1198,7 @@ private fun ChatListItem(
                     userId = chat.otherUserId ?: chat.chatId
                 )
                 if (chat.isOnline) {
-                    Box(
-                        modifier = Modifier.size(14.dp).align(Alignment.BottomEnd)
-                            .clip(CircleShape).background(MaterialTheme.colorScheme.background)
-                            .padding(2.dp).clip(CircleShape).background(YodoOnline)
-                    )
+                    OnlineStatusDot(chat)
                 }
             }
         }
@@ -1416,10 +1415,51 @@ private fun ChatListItem(
 // ---------------------------------------------------------------------------
 // Вспомогательные composable
 // ---------------------------------------------------------------------------
+
+/**
+ * НОВОЕ (баг 12): посекундный "тик" для статусов онлайн. Каждый элемент списка, где
+ * читается этот state, пересчитывается раз в секунду — подпись "был(а) N мин назад"
+ * обновляется в реальном времени, а "зависший" статус "в сети" (когда процесс
+ * собеседника убит системой без onStop) гаснет сам в пределах секунды после порога
+ * устаревания, не дожидаясь событий Firestore.
+ */
+@Composable
+private fun rememberNowTick(): Long {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+    return now
+}
+
+/** НОВОЕ (баг 12): зелёная точка с посекундной проверкой устаревания статуса. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.OnlineStatusDot(chat: ChatPreview) {
+    val now = rememberNowTick()
+    val effectivelyOnline = chat.isOnline &&
+        (chat.lastSeenMillis == 0L ||
+            (now - chat.lastSeenMillis) <= PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS)
+    if (effectivelyOnline) {
+        Box(
+            modifier = Modifier.size(14.dp).align(Alignment.BottomEnd)
+                .clip(CircleShape).background(MaterialTheme.colorScheme.background)
+                .padding(2.dp).clip(CircleShape).background(YodoOnline)
+        )
+    }
+}
+
 @Composable
 private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier) {
+    val now = rememberNowTick()
+    // НОВОЕ (баг 12): статус пересчитывается каждую секунду — и "в сети", и "был(а)…"...
+    val effectivelyOnline = chat.isOnline &&
+        (chat.lastSeenMillis == 0L ||
+            (now - chat.lastSeenMillis) <= PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS)
     when {
-        chat.isOnline -> Text(
+        effectivelyOnline -> Text(
             "в сети",
             style = MaterialTheme.typography.labelMedium,
             color = YodoOnline,
@@ -1438,7 +1478,10 @@ private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier)
 
 @Composable
 private fun formatLastSeen(millis: Long): String {
-    val diffMillis = (System.currentTimeMillis() - millis).coerceAtLeast(0L)
+    // НОВОЕ (баг 12): время отсчитывается от посекундного тика, а не от момента
+    // композиции — подпись "N сек/мин назад" живая и обновляется каждую секунду.
+    val now = rememberNowTick()
+    val diffMillis = (now - millis).coerceAtLeast(0L)
     val diffSeconds = diffMillis / 1_000
     val diffMinutes = diffSeconds / 60
     return when {

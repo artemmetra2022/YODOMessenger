@@ -140,7 +140,10 @@ class ChatRepositoryImpl @Inject constructor(
                     val cached = chat.otherUserId?.let { avatarCache[it] }
                     val presence = chat.otherUserId?.let { presenceCache[it] }
                     val online = isEffectivelyOnline(presence)
-                    val lastSeen = if (online || presence == null || presence.hidden) 0L else presence.lastSeen
+                    // НОВОЕ (баг 12): lastSeen передаётся ВСЕГДА реальный (и для онлайн-статуса),
+                    // а не 0 — UI каждую секунду сам пересчитывает устаревание статуса
+                    // (PresenceStatusText/OnlineStatusDot), не дожидаясь новых событий Firestore.
+                    val lastSeen = if (presence == null || presence.hidden) 0L else presence.lastSeen
                     chat.copy(
                         avatarUrl = cached?.first ?: chat.avatarUrl,
                         avatarBase64 = cached?.second ?: chat.avatarBase64,
