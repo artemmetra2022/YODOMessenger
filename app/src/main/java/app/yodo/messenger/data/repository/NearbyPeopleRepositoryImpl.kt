@@ -44,19 +44,23 @@ class NearbyPeopleRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun clearMyLocation() {
+    override fun clearMyLocationNow() {
         val uid = firebaseAuth.currentUser?.uid ?: return
-        try {
-            firestore.collection("users").document(uid).update(
+        // Fire-and-forget (баг 14): вызывается в т.ч. из onCleared() уже уничтожаемой
+        // ViewModel, где viewModelScope отменён — suspend + await() здесь нельзя.
+        // Firestore-запрос уходит собственным потоком и завершается сам.
+        firestore.collection("users").document(uid)
+            .update(
                 mapOf(
                     "latitude" to FieldValue.delete(),
                     "longitude" to FieldValue.delete(),
                     "locationUpdatedAt" to FieldValue.delete()
                 )
-            ).await()
-        } catch (e: Exception) {
-            // Не критично
-        }
+            )
+            .addOnFailureListener {
+                // Не критично — координаты перестанут показываться по истечении
+                // 15-минутного окна активности (ACTIVE_WINDOW_MILLIS).
+            }
     }
 
     override suspend fun findNearbyPeople(myLat: Double, myLng: Double, radiusKm: Double): List<NearbyPerson> {

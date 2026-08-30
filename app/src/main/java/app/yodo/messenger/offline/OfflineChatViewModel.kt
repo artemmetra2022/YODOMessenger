@@ -181,6 +181,19 @@ class OfflineChatViewModel @Inject constructor(
         nearbyManager.disconnect()
     }
 
+    /**
+     * ИСПРАВЛЕНО (баг 14): полная остановка Bluetooth-активности (реклама, сканирование,
+     * beacon-цикл, все соединения) при ВЫХОДЕ с экрана офлайн-чата.
+     *
+     * Раньше выход вызывал disconnect(), который, несмотря на название, ПЕРЕЗАПУСКАЛ
+     * рекламу/скан/цикл маячков — Bluetooth оставался активным после закрытия экрана.
+     * Кнопка «Отключиться» внутри чата по-прежнему использует disconnect() — там
+     * пользователь остаётся в режиме и поиск соседей должен продолжиться.
+     */
+    fun shutdown() {
+        nearbyManager.stopAll()
+    }
+
     override fun onCleared() {
         super.onCleared()
         nearbyManager.stopAll()

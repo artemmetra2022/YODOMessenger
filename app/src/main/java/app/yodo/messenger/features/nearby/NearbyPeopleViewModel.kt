@@ -73,12 +73,16 @@ class NearbyPeopleViewModel @Inject constructor(
     }
 
     fun stopSharingLocation() {
-        viewModelScope.launch { nearbyPeopleRepository.clearMyLocation() }
+        // ИСПРАВЛЕНО (баг 14): fire-and-forget без viewModelScope — очистка гарантированно
+        // уходит в Firestore при выходе с экрана, а не зависит от жизненного цикла корутин.
+        nearbyPeopleRepository.clearMyLocationNow()
     }
 
     override fun onCleared() {
         super.onCleared()
-        // По умолчанию не публикуем геопозицию дольше, чем экран открыт — приватность прежде всего
-        viewModelScope.launch { nearbyPeopleRepository.clearMyLocation() }
+        // По умолчанию не публикуем геопозицию дольше, чем экран открыт — приватность прежде всего.
+        // ИСПРАВЛЕНО (баг 14): раньше запуск корутины в уже отменённый viewModelScope —
+        // очистка из onCleared() молча не выполнялась. Теперь вызываем напрямую.
+        nearbyPeopleRepository.clearMyLocationNow()
     }
 }
