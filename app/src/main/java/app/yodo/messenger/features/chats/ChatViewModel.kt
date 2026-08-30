@@ -793,14 +793,16 @@ class ChatViewModel @Inject constructor(
 
     fun deleteMessage(message: Message) {
         viewModelScope.launch {
-            when (val result = messageRepository.deleteMessage(chatId, message.id)) {
+            // НОВОЕ (баг 10): удаление чужого сообщения модератором/админом помечается
+            // флагом deletedByAdmin — в чате показывается «Сообщение удалено администратором».
+            val deletingOthersMessage = message.senderId != null && message.senderId != currentUserId
+            when (val result = messageRepository.deleteMessage(chatId, message.id, deletedByAdmin = deletingOthersMessage)) {
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
                 else -> {
                     // НОВОЕ (модерация): удаление чужого сообщения фиксируем в журнале
                     // администраторов ТОЛЬКО после успеха — иначе отказ правил (например,
                     // у снятого модератора) оставлял бы в журнале несуществующие действия.
-                    val myUid = currentUserId
-                    if (message.senderId != null && message.senderId != myUid) {
+                    if (deletingOthersMessage) {
                         chatRepository.logAdminAction(
                             chatId = chatId,
                             actionType = AdminActionType.MESSAGE_DELETED,
@@ -825,7 +827,9 @@ class ChatViewModel @Inject constructor(
         val ids = (mine + others).map { it.id }
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            when (val result = messageRepository.deleteMessages(chatId, ids)) {
+            // НОВОЕ (баг 10): если среди удаляемых есть чужие сообщения (модерация) —
+            // вся пачка помечается как административное удаление.
+            when (val result = messageRepository.deleteMessages(chatId, ids, deletedByAdmin = others.isNotEmpty())) {
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
                 else -> {
                     if (others.isNotEmpty()) {

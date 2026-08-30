@@ -1276,10 +1276,10 @@ function statusClassFor(status) {
   return status === "READ" ? "msg-status read" : "msg-status";
 }
 
-function buildDeletedBubbleContent() {
+function buildDeletedBubbleContent(msg) {
   const span = document.createElement("span");
   span.className = "msg-deleted";
-  span.textContent = "Сообщение удалено";
+  span.textContent = (msg && msg.deletedByAdmin) ? "Сообщение удалено администратором" : "Сообщение удалено";
   return span;
 }
 
@@ -1546,7 +1546,7 @@ function renderMessage(msg) {
   bubble.className = "msg-bubble";
 
   if (msg.isDeleted) {
-    bubble.appendChild(buildDeletedBubbleContent());
+    bubble.appendChild(buildDeletedBubbleContent(msg));
   } else {
     const isGroupLike = activeChatData && (activeChatData.type === "GROUP" || activeChatData.type === "CHANNEL");
     const isSupportLike = activeChatData && activeChatData.type === "SUPPORT";

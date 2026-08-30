@@ -25,10 +25,10 @@ import java.util.Date
 import java.util.Locale
 import kotlin.coroutines.resume
 
-// НОВОЕ: "Сделать скриншот" — пункт меню чата (3 точки). Захватывает ТОЛЬКО область
-// сообщений (без клавиатуры и поля ввода — см. requirement), накладывает сверху справа
-// полупрозрачный логотип мессенджера и сохраняет получившееся изображение в галерею
-// через MediaStore (без нужды в WRITE_EXTERNAL_STORAGE на Android 10+).
+// НОВОЕ: "Сделать скриншот" — пункт меню чата (3 точки). Захватывает ВЕСЬ экран чата —
+// включая шапку с контактом и статус-бар, но БЕЗ поля ввода (см. requirement), —
+// накладывает сверху справа полупрозрачный логотип мессенджера и сохраняет получившееся
+// изображение в галерею через MediaStore (без нужды в WRITE_EXTERNAL_STORAGE на Android 10+).
 object ChatScreenshotUtils {
 
     /**
@@ -76,20 +76,20 @@ object ChatScreenshotUtils {
     }
 
     /**
-     * Снимает область сообщений чата (координаты передаются вызывающей стороной — Compose-модификатор
-     * .onGloballyPositioned на Box, оборачивающем LazyColumn с лентой сообщений), накладывает
+     * Снимает весь экран чата — от верхнего края окна (шапка с контактом + статус-бар)
+     * до нижней границы, вычисленной вызывающей стороной (верх поля ввода). Накладывает
      * логотип мессенджера в правом верхнем углу и сохраняет итоговый Bitmap в галерею устройства.
      *
      * @param window текущее окно Activity (для PixelCopy)
-     * @param messagesAreaBoundsInWindow границы области сообщений в координатах окна (без поля ввода/клавиатуры)
+     * @param screenBoundsInWindow границы области скриншота в координатах окна (без поля ввода/клавиатуры)
      * @return true, если скриншот успешно сделан и сохранён
      */
     suspend fun captureAndSaveChatScreenshot(
         context: Context,
         window: Window,
-        messagesAreaBoundsInWindow: Rect
+        screenBoundsInWindow: Rect
     ): Boolean {
-        val captured = captureWindowRegion(window, messagesAreaBoundsInWindow) ?: return false
+        val captured = captureWindowRegion(window, screenBoundsInWindow) ?: return false
         val withLogo = try {
             overlayLogoWatermark(context, captured)
         } catch (e: Exception) {

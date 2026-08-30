@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.FullscreenDialog
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -50,9 +51,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -240,7 +243,7 @@ fun ChatScreen(
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
     var inputText by remember { mutableStateOf("") }
-    // НОВОЕ (система жало��): сообщени��, на которое сейчас ��ткрыт диалог "Пожаловаться".
+    // НОВОЕ (система жало): сообщени, на которое сейчас ткрыт диалог "Пожаловаться".
     var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -382,7 +385,7 @@ fun ChatScreen(
 
     var showAttachMenu by remember { mutableStateOf(false) }
 
-    // НОВОЕ (картинки из буф����ра): читаем изображение из системного буфера обмена.
+    // НОВОЕ (картинки из буфра): читаем изображение из системного буфера обмена.
     fun pasteImageFromClipboard() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
         val clip = cm?.primaryClip
@@ -698,7 +701,7 @@ fun ChatScreen(
                                             onClick = { showChatMenu = false; showDisappearingDialog = true }
                                         )
                                     }
-                                    // НОВОЕ (поделиться контактом аб��нента): делимся QR-кодом контакта ��обеседника, а не своего.
+                                    // НОВОЕ (поделиться контактом абнента): делимся QR-кодом контакта обеседника, а не своего.
                                     if (uiState.chatType == "PRIVATE" && uiState.otherUserId != null) {
                                         DropdownMenuItem(
                                             text = { Text("Поделиться контактом абонента (QR)") },
@@ -714,15 +717,19 @@ fun ChatScreen(
                                         leadingIcon = { Icon(Icons.Filled.CameraAlt, contentDescription = null) },
                                         onClick = {
                                             showChatMenu = false
-                                            val bounds = messagesAreaWindowBounds
+                                            val contentBounds = messagesAreaWindowBounds
                                             val window = ChatScreenshotUtils.findActivity(context)?.window
-                                            if (bounds == null || window == null) {
+                                            if (contentBounds == null || window == null) {
                                                 coroutineScope.launch { snackbarHostState.showSnackbar("Не удалось сделать скриншот") }
                                             } else {
+                                                // ИСПРАВЛЕНО (баг 8): снимаем ВЕСЬ экран чата — от верхнего края окна
+                                                // (статус-бар + шапка с контактом) до нижней границы области сообщений,
+                                                // которая заканчивается ровно над полем ввода. Поле ввода в кадр не попадает.
+                                                val screenBounds = android.graphics.Rect(0, 0, contentBounds.right, contentBounds.bottom)
                                                 coroutineScope.launch {
-                                                    val success = ChatScreenshotUtils.captureAndSaveChatScreenshot(context, window, bounds)
+                                                    val success = ChatScreenshotUtils.captureAndSaveChatScreenshot(context, window, screenBounds)
                                                     snackbarHostState.showSnackbar(
-                                                        if (success) "Скриншот сохр��нён в галерею" else "Не удалось сделать скриншот"
+                                                        if (success) "Скриншот сохранён в галерею" else "Не удалось сделать скриншот"
                                                     )
                                                 }
                                             }
@@ -808,7 +815,7 @@ fun ChatScreen(
                         Icon(Icons.Filled.PushPin, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(16.dp))
                         Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                             Text("Закреплённое сообщение", style = MaterialTheme.typography.labelSmall, color = colorTheme.primary, fontWeight = FontWeight.Bold)
-                            Text(pinned.text.ifBlank { "📷 Фо��о" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(pinned.text.ifBlank { "📷 Фоо" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Icon(
                             Icons.Filled.Close,
@@ -827,7 +834,7 @@ fun ChatScreen(
                     if (showUnpinConfirm) {
                         AlertDialog(
                             onDismissRequest = { showUnpinConfirm = false },
-                            title = { Text("От��репить сообщение?") },
+                            title = { Text("Отрепить сообщение?") },
                             text = { Text("Сообщение будет откреплено из этого чата.") },
                             confirmButton = {
                                 TextButton(onClick = {
@@ -1495,10 +1502,10 @@ fun ChatScreen(
     // НОВОЕ (одноразовые медиа): полноэкранный показ view-once фото поверх чата.
     // Не переиспользует ImageViewerHolder/ImageViewerScreen намеренно — там доступны
     // сохранение/шеринг и повторный показ, а у view-once фото не должно быть ни того,
-    // ни другого. Как только пользователь открыл экран, сразу п��мечаем сообщение как
+    // ни другого. Как только пользователь открыл экран, сразу пмечаем сообщение как
     // просмотренное и стираем imageBase64 на сервере — повторно открыть уже нельзя,
     // в т.ч. если сообщение отправил сам пользователь себе на другое устройство.
-    // НОВОЕ (детектор скриншотов): защита от повторной отправки уведомле��ия, если
+    // НОВОЕ (детектор скриншотов): защита от повторной отправки уведомлеия, если
     // ContentObserver.onChange сработает несколько раз на один и тот же файл скриншота
     // (типично для MediaStore — сначала PENDING-запись, потом финализация).
     var screenshotNoticeSent by remember(viewOnceOverlayMessage?.id) { mutableStateOf(false) }
@@ -1555,15 +1562,26 @@ private fun ViewOnceImageOverlay(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        // Диалог Compose открывает СВОЁ окно поверх ок��а Activity — FLAG_SECURE, выставленный
+        // Диалог Compose открывает СВОЁ окно поверх ока Activity — FLAG_SECURE, выставленный
         // только на activity.window, не наследуется на него автоматически, поэтому дублируем
         // флаг на окно самого диалога через DialogWindowProvider.
         val dialogWindowProvider = LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider
         DisposableEffect(Unit) {
-            dialogWindowProvider?.window?.setFlags(
-                android.view.WindowManager.LayoutParams.FLAG_SECURE,
-                android.view.WindowManager.LayoutParams.FLAG_SECURE
-            )
+            dialogWindowProvider?.window?.apply {
+                setFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                    android.view.WindowManager.LayoutParams.FLAG_SECURE
+                )
+                // ИСПРАВЛЕНО (баг 9): растягиваем окно диалога на весь экран (edge-to-edge),
+                // иначе сверху/снизу остаются полоски с предыдущим экраном.
+                setLayout(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    setDecorFitsSystemWindows(false)
+                }
+            }
             onDispose { }
         }
         Box(
@@ -1582,7 +1600,7 @@ private fun ViewOnceImageOverlay(
             }
             IconButton(
                 onClick = onDismiss,
-                modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+                modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp)
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Закрыть", tint = Color.White)
             }
@@ -1590,7 +1608,7 @@ private fun ViewOnceImageOverlay(
                 "Это фото исчезнет после закрытия",
                 color = Color.White.copy(alpha = 0.8f),
                 style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp)
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(24.dp)
             )
         }
     }
@@ -1615,7 +1633,7 @@ private fun DateSeparator(label: String) {
 }
 
 // НОВОЕ (несколько фото): сетка-коллаж для нескольких фото в одном сообщении.
-// Фото показываются по 2 в ряд (при нечётном количестве последнее занимает всю ширин��).
+// Фото показываются по 2 в ряд (при нечётном количестве последнее занимает всю ширин).
 @Composable
 private fun ImageAlbumGrid(
     images: List<String>,
@@ -1765,7 +1783,7 @@ private fun SwipeableMessageBubble(
                         onDragEnd = {
                             when {
                                 offsetX > replyThresholdPx -> onReply()
-                                // Свайп влево — переслать любое сообщение (в т.ч. чуж��е в личном
+                                // Свайп влево — переслать любое сообщение (в т.ч. чуже в личном
                                 // чате). Раньше длинный свайп влево срабатывал как "назад" и мешал
                                 // пересылке; теперь за "назад" отвечает только краевой свайп (swipeToGoBack).
                                 // view-once сообщения пересылать нельзя.
@@ -1901,7 +1919,13 @@ private fun MessageBubble(
     var showDeleteOthersConfirm by remember { mutableStateOf(false) }
     if (message.isDeleted) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-            Text("Сообщение удалено", style = MaterialTheme.typography.bodyMedium, color = Color.Gray, modifier = Modifier.padding(8.dp))
+            // НОВОЕ (баг 10): административное удаление показываем отдельной пометкой.
+            Text(
+                if (message.deletedByAdmin) "Сообщение удалено администратором" else "Сообщение удалено",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.Gray,
+                modifier = Modifier.padding(8.dp)
+            )
         }
         return
     }
@@ -2124,7 +2148,7 @@ private fun MessageBubble(
                                         .background(textColor.copy(alpha = 0.12f))
                                         .clickable { revealImage = true },
                                     contentAlignment = Alignment.Center
-                                ) { Text("Тап, чтобы загру��ить фото", color = textColor) }
+                                ) { Text("Тап, чтобы загруить фото", color = textColor) }
                             }
                         }
                     }
@@ -2526,7 +2550,7 @@ private fun MessageBubble(
                 // ИСПРАВЛЕНО (кнопка комментариев и текст одной ширины): раньше кнопка
                 // оборачивалась по содержимому и была узкой, текст переносился. Теперь кнопка
                 // занимает ту же максимальную ширину, что и пузырь сообщения (280dp),
-                // а текст не сжимает��я (в одну строку, по центру).
+                // а текст не сжимаетя (в одну строку, по центру).
                 // ИСПРАВЛЕНО (AI): без fillMaxWidth — кнопка по ширине содержимого,
                 // чтобы не выпирать за короткое сообщение (верхний предел 280dp).
                 Row(
@@ -2599,10 +2623,9 @@ private fun PostFullscreenDialog(
     onDismiss: () -> Unit
 ) {
     var justCopied by remember { mutableStateOf(false) }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    // ИСПРАВЛЕНО (баг 9): полноэкранный диалог с edge-to-edge-окном — без полосок
+    // сверху/снизу, где просвечивал предыдущий экран.
+    FullscreenDialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -2610,7 +2633,7 @@ private fun PostFullscreenDialog(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Icon(Icons.Filled.Fullscreen, contentDescription = null, tint = colorTheme.primary)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -2641,6 +2664,7 @@ private fun PostFullscreenDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
                     .padding(20.dp)
             ) {
                 // НОВОЕ: выделение произвольной части текста для копирования отрывка.
@@ -2678,10 +2702,9 @@ private fun TextSelectionDialog(
     text: String,
     onDismiss: () -> Unit
 ) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    // ИСПРАВЛЕНО (баг 9): полноэкранный диалог с edge-to-edge-окном — без полосок
+    // сверху/снизу, где просвечивал предыдущий экран.
+    FullscreenDialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -2689,7 +2712,7 @@ private fun TextSelectionDialog(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Icon(Icons.Filled.ContentCut, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -2734,15 +2757,16 @@ private fun NewsFullscreenDialog(
 ) {
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     var justCopied by remember { mutableStateOf(false) }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    // ИСПРАВЛЕНО (баг 9): полноэкранный диалог с edge-to-edge-окном — без полосок
+    // сверху/снизу, где просвечивал предыдущий экран.
+    FullscreenDialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
+                .navigationBarsPadding()
                 .padding(20.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -2910,7 +2934,7 @@ private fun ReplyPreviewBar(message: Message, isOwn: Boolean, onCancel: () -> Un
 }
 
 private val COMMON_EMOJIS = listOf(
-    "😀", "😂", "����", "��", "😊", "😉", "😎", "🤔",
+    "😀", "😂", "", "", "😊", "😉", "😎", "🤔",
     "😢", "😭", "😡", "🥳", "👍", "👎", "❤️", "🔥",
     "🎉", "🙏", "👏", "😴", "🤗", "😅", "😱", "🤷",
     "✅", "❌", "⭐", "💯", "😇", "🤝", "👀", "💔"
@@ -2938,7 +2962,7 @@ private fun EmojiPickerPanel(onEmojiSelected: (String) -> Unit) {
 }
 
 // НОВОЕ (реальная блокировка): плашка вместо поля ввода.
-// Если собеседник заблокировал меня �� пишем об этом и не даём писать.
+// Если собеседник заблокировал меня  пишем об этом и не даём писать.
 // Если я заблокировал собеседника — предлагаем разблокировать.
 @Composable
 private fun BlockedInputBanner(
@@ -3081,11 +3105,11 @@ private fun MessageInputBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Mic, contentDescription = "Удерживай��е для записи голосового сообщения", tint = Color.White, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Filled.Mic, contentDescription = "Удерживайе для записи голосового сообщения", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 } else {
                     // ИСПРАВЛЕНО (таймер и запланированные сообщения): убрали отдельные кнопки
-                    // рядом с отправкой. Теперь при ЗАЖАТИИ к��опки отправки ����ткрывается меню
+                    // рядом с отправкой. Теперь при ЗАЖАТИИ копки отправки ткрывается меню
                     // с таймером (исчезающие) и запланированной отправкой.
                     var showSendOptions by remember { mutableStateOf(false) }
                     Box {
@@ -3129,7 +3153,7 @@ private fun MessageInputBar(
                                 leadingIcon = { Icon(Icons.Filled.Bolt, contentDescription = null, tint = colorTheme.primary) },
                                 onClick = { showSendOptions = false; onQuickReplyClick() }
                             )
-                            // ПЕРЕНЕ��ЕНО (X): выбор обычной/тихой публикации для каналов.
+                            // ПЕРЕНЕЕНО (X): выбор обычной/тихой публикации для каналов.
                             if (isChannel) {
                                 DropdownMenuItem(
                                     text = { Text(if (silentMode) "Тихая публикация: без уведомления" else "Обычная публикация") },
@@ -3430,10 +3454,10 @@ private fun ChannelBottomBar(
     }
 }
 
-// ���═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════
 // VoiceRecordingBar (находится внутри этого файла, не является отдельным файлом)
 // ИСПРАВЛЕНО: используем Animatable вместо infiniteTransition.animateFloat 
-// для ��бхода бага компилятора Compose с выводом типов.
+// для бхода бага компилятора Compose с выводом типов.
 // ══════════════════════════════════════════════════════════════════
 @Composable
 private fun VoiceRecordingBar(
@@ -3459,7 +3483,7 @@ private fun VoiceRecordingBar(
             }
             Spacer(modifier = Modifier.width(10.dp))
             
-            // Пульсирующая точка-индикатор записи (исправлено чер��з Animatable)
+            // Пульсирующая точка-индикатор записи (исправлено черз Animatable)
             val alphaAnim = remember { androidx.compose.animation.core.Animatable(1f) }
             LaunchedEffect(Unit) {
                 while (true) {
@@ -3711,7 +3735,7 @@ private fun ScheduledMessagesDialog(
                                 )
                             }
                             IconButton(onClick = { onCancel(item.id) }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Отменить отправк��")
+                                Icon(Icons.Filled.Delete, contentDescription = "Отменить отправк")
                             }
                         }
                         HorizontalDivider()
@@ -3820,7 +3844,7 @@ private fun formatCustomTtlLabel(ttlSeconds: Long): String {
         ttlSeconds % (24 * 60 * 60L) == 0L && days > 0 -> pluralizeRu(days, "день", "дня", "дней")
         ttlSeconds % (60 * 60L) == 0L && hours > 0 -> pluralizeRu(hours, "час", "часа", "часов")
         ttlSeconds % 60L == 0L && minutes > 0 -> pluralizeRu(minutes, "минута", "минуты", "минут")
-        else -> pluralizeRu(ttlSeconds, "��екунда", "секунды", "секунд")
+        else -> pluralizeRu(ttlSeconds, "екунда", "секунды", "секунд")
     }
 }
 
@@ -3840,7 +3864,7 @@ private fun subscriberCountLabel(count: Int): String {
     val mod100 = count % 100
     val mod10 = count % 10
     return when {
-        mod100 in 11..14 -> "подписчик��в"
+        mod100 in 11..14 -> "подписчикв"
         mod10 == 1 -> "подписчик"
         mod10 in 2..4 -> "подписчика"
         else -> "подписчиков"
@@ -3858,14 +3882,14 @@ private fun DisappearingMessagesDialog(
     val isCustomSelected = currentTtlSeconds != null && DISAPPEARING_TTL_OPTIONS.none { it.second == currentTtlSeconds }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (perMessage) "Т��ймер для этого сообщения" else "Исчезающие сообщения") },
+        title = { Text(if (perMessage) "Тймер для этого сообщения" else "Исчезающие сообщения") },
         text = {
             Column {
                 Text(
                     if (perMessage)
-                        "Сообщение будет автоматически удалено �� всех участников чата через выбранное время после отправки."
+                        "Сообщение будет автоматически удалено  всех участников чата через выбранное время после отправки."
                     else
-                        "Новые сообщения в этом чате будут по умолчанию автоматически удаляться через вы��ранное время после отправки. Таймер для ��тдельного сообщения можно изменить перед его отправкой (иконка часов рядом с полем ввода).",
+                        "Новые сообщения в этом чате будут по умолчанию автоматически удаляться через выранное время после отправки. Таймер для тдельного сообщения можно изменить перед его отправкой (иконка часов рядом с полем ввода).",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
@@ -3896,7 +3920,7 @@ private fun DisappearingMessagesDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("За��рыть") }
+            TextButton(onClick = onDismiss) { Text("Зарыть") }
         }
     )
     if (showCustomDialog) {
@@ -4175,13 +4199,13 @@ private fun AttachMenuDialog(
                         Text(label, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                // НОВОЕ (картинки ��з буфера): вставить изображение из буфера обмена (с подписью).
+                // НОВОЕ (картинки з буфера): вставить изображение из буфера обмена (с подписью).
                 AttachMenuRow(icon = Icons.Filled.ContentPaste, label = "Вставить из буфера", onClick = onPasteImage)
                 // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть
                 // полноэкранно только один раз — после этого оно стирается на сервере.
                 AttachMenuRow(icon = Icons.Filled.RemoveRedEye, label = "Фото на один просмотр", onClick = onPickViewOncePhoto)
                 AttachMenuRow(icon = Icons.Filled.InsertDriveFile, label = "Файл", onClick = onPickFile)
-                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопо��иция", onClick = onPickLocation)
+                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопоиция", onClick = onPickLocation)
                 AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)
                 Spacer(modifier = Modifier.height(4.dp))
             }
@@ -4332,15 +4356,14 @@ private fun LocationPickerDialog(
             }
         } catch (e: Exception) { }
     }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    // ИСПРАВЛЕНО (баг 9): полноэкранный диалог с edge-to-edge-окном — без полосок
+    // сверху/снизу, где просвечивал предыдущий экран.
+    FullscreenDialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -4383,7 +4406,7 @@ private fun LocationPickerDialog(
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
                         ) {
                             Text(
-                                "Определяем ваш�� местоположение…",
+                                "Определяем ваш местоположение…",
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelMedium
                             )
@@ -4391,12 +4414,12 @@ private fun LocationPickerDialog(
                     }
                 }
                 Text(
-                    "��ереместите карту, чтобы выбрать точку — она отправится как отметка в центре экран��",
+                    "ереместите карту, чтобы выбрать точку — она отправится как отметка в центре экран",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.Gray,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
                     TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Отмена") }
                     Spacer(modifier = Modifier.width(8.dp))
                     androidx.compose.material3.Button(
@@ -4601,7 +4624,7 @@ private fun PollMessageBubble(
                 }
             }
         }
-        // НОВОЕ (викторина): итог для проголосовавшего �� пояснение после голосования.
+        // НОВОЕ (викторина): итог для проголосовавшего  пояснение после голосования.
         if (poll.isQuiz && showResults) {
             Spacer(modifier = Modifier.height(6.dp))
             val answeredRight = currentUserId?.let { poll.answeredCorrectly(it) } ?: false
@@ -4659,7 +4682,7 @@ private fun PollCreationDialog(
     var isAnonymous by remember { mutableStateOf(true) }
     var allowMultiple by remember { mutableStateOf(false) }
     var closesInHours by remember { mutableStateOf<Int?>(null) }
-    // НОВОЕ (викторина): режим викт��рины с ����равильным ответом и пояснением.
+    // НОВОЕ (викторина): режим виктрины с равильным ответом и пояснением.
     var isQuiz by remember { mutableStateOf(false) }
     var correctIndex by remember { mutableStateOf<Int?>(null) }
     var explanation by remember { mutableStateOf("") }
@@ -4738,7 +4761,7 @@ private fun PollCreationDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Анонимный опрос", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Голоса не ��ривяз��ваются к именам в интерфейсе",
+                            "Голоса не ривязваются к именам в интерфейсе",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -4879,7 +4902,7 @@ private fun PollCreationDialog(
                             val closesAtMillis = closesInHours?.let {
                                 System.currentTimeMillis() + it.toLong() * 60 * 60 * 1000
                             }
-                            // Индекс правильного ответа нужн�� пересчитать относительно
+                            // Индекс правильного ответа нужн пересчитать относительно
                             // очищенного списка (без пустых вариантов).
                             val remappedCorrect = if (isQuiz) correctIndex?.let { ci ->
                                 if (options.getOrNull(ci)?.isBlank() != false) null
@@ -4952,10 +4975,9 @@ private fun LocationMessageBubble(lat: Double, lng: Double, textColor: Color) {
 @Composable
 private fun FullscreenLocationViewer(lat: Double, lng: Double, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    // ИСПРАВЛЕНО (баг 9): полноэкранный диалог с edge-to-edge-окном — без полосок
+    // сверху/снизу, где просвечивал предыдущий экран.
+    FullscreenDialog(onDismissRequest = onDismiss) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(
@@ -4985,6 +5007,7 @@ private fun FullscreenLocationViewer(lat: Double, lng: Double, onDismiss: () -> 
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
                         .padding(16.dp)
                         .clip(RoundedCornerShape(24.dp))
                         .background(MaterialTheme.colorScheme.surface)

@@ -540,10 +540,12 @@ service cloud.firestore {
             isViewOnceOpenUpdate() ||
             // Модератор: только форма «удаления» сообщения (isDeleted + очистка
             // медиа-полей), произвольно менять текст/автора/время нельзя.
+            // НОВОЕ (баг 10): в whitelist добавлен deletedByAdmin — пометка
+            // административного удаления («Сообщение удалено администратором»).
             (
               isChatModerator(chatId) &&
               request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['isDeleted', 'text', 'imageBase64', 'fileBase64', 'fileName',
+                .hasOnly(['isDeleted', 'deletedByAdmin', 'text', 'imageBase64', 'fileBase64', 'fileName',
                           'fileMimeType', 'fileSizeBytes', 'locationLat', 'locationLng'])
             ) ||
             // НОВОЕ (F1 реакции + F3 просмотры): любой авторизованный пользователь

@@ -115,10 +115,10 @@ class ReportDetailViewModel @Inject constructor(
         }
     }
 
-    fun resolve(resolution: ReportResolution, comment: String, deleteMessage: Boolean, banUser: Boolean) {
+    fun resolve(resolution: ReportResolution, comment: String, deleteMessage: Boolean, banUser: Boolean, silentDelete: Boolean = false) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSubmittingAction = true)
-            when (val result = reportRepository.resolveReport(chatId, reportId, resolution, comment, deleteMessage, banUser)) {
+            when (val result = reportRepository.resolveReport(chatId, reportId, resolution, comment, deleteMessage, banUser, silentDelete)) {
                 is ReportActionResult.Success -> { _actionCompleted.value = true }
                 is ReportActionResult.Error -> {
                     _uiState.value = _uiState.value.copy(isSubmittingAction = false)

@@ -623,12 +623,15 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отредактировать")) }
     }
 
-    override suspend fun deleteMessage(chatId: String, messageId: String): SendMessageResult {
+    override suspend fun deleteMessage(chatId: String, messageId: String, deletedByAdmin: Boolean): SendMessageResult {
         return try {
             firestore.collection("chats").document(chatId)
                 .collection("messages").document(messageId)
                 .update(mapOf(
                     "isDeleted" to true, "text" to "",
+                    // НОВОЕ (баг 10): административное удаление помечаем отдельным флагом,
+                    // чтобы в чате показать «Сообщение удалено администратором».
+                    "deletedByAdmin" to deletedByAdmin,
                     "imageBase64" to FieldValue.delete(),
                     "fileBase64" to FieldValue.delete(),
                     "fileName" to FieldValue.delete(),
@@ -641,7 +644,19 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось удалить")) }
     }
 
-    override suspend fun deleteMessages(chatId: String, messageIds: List<String>): SendMessageResult {
+    // НОВОЕ (баг 10): «тихое удаление» — документ сообщения удаляется из Firestore целиком.
+    // Snapshot-listener у всех участников мгновенно убирает сообщение из ленты, поэтому
+    // на его месте не остаётся заглушки «удалено» — сообщение просто исчезает.
+    override suspend fun hardDeleteMessage(chatId: String, messageId: String): SendMessageResult {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+                .delete().await()
+            SendMessageResult.Success()
+        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось удалить")) }
+    }
+
+    override suspend fun deleteMessages(chatId: String, messageIds: List<String>, deletedByAdmin: Boolean): SendMessageResult {
         if (messageIds.isEmpty()) return SendMessageResult.Success()
         return try {
             val refs = messageIds.map { id ->
@@ -653,6 +668,8 @@ class MessageRepositoryImpl @Inject constructor(
                     batch.update(ref, mapOf(
                         "isDeleted" to true,
                         "text" to "",
+                        // НОВОЕ (баг 10): как и в deleteMessage — флаг административного удаления.
+                        "deletedByAdmin" to deletedByAdmin,
                         "imageBase64" to FieldValue.delete(),
                         "fileBase64" to FieldValue.delete(),
                         "fileName" to FieldValue.delete(),
@@ -998,6 +1015,7 @@ class MessageRepositoryImpl @Inject constructor(
                 imagesBase64 = (doc.get("imagesBase64") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 isEdited = doc.getBoolean("isEdited") ?: false,
                 isDeleted = doc.getBoolean("isDeleted") ?: false,
+                deletedByAdmin = doc.getBoolean("deletedByAdmin") ?: false,
                 forwardedFromSenderName = doc.getString("forwardedFromSenderName"),
                 forwardedFromSenderId = doc.getString("forwardedFromSenderId"),
                 forwardedFromSenderPhotoUrl = doc.getString("forwardedFromSenderPhotoUrl"),

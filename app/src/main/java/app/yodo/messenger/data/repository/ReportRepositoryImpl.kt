@@ -209,19 +209,30 @@ class ReportRepositoryImpl @Inject constructor(
         resolution: ReportResolution,
         comment: String,
         deleteMessage: Boolean,
-        banUser: Boolean
+        banUser: Boolean,
+        silentDelete: Boolean
     ): ReportActionResult {
         val report = getReport(chatId, reportId)
             ?: return ReportActionResult.Error("Жалоба не найдена")
 
         if (deleteMessage && report.targetMessageId != null) {
-            val result = messageRepository.deleteMessage(chatId, report.targetMessageId)
+            // НОВОЕ (баг 10): два режима удаления по жалобе —
+            //  1) обычное административное удаление: isDeleted=true + deletedByAdmin=true,
+            //     в чате видно «Сообщение удалено администратором»;
+            //  2) «тихое удаление» (silentDelete): документ сообщения удаляется целиком,
+            //     сообщение бесследно исчезает у всех участников.
+            val result = if (silentDelete) {
+                messageRepository.hardDeleteMessage(chatId, report.targetMessageId)
+            } else {
+                messageRepository.deleteMessage(chatId, report.targetMessageId, deletedByAdmin = true)
+            }
             if (result is SendMessageResult.Error) {
                 return ReportActionResult.Error(result.message)
             }
             chatRepository.logAdminAction(
                 chatId, AdminActionType.MESSAGE_DELETED,
-                details = "По жалобе #$reportId", targetUserId = report.targetUserId, targetUserName = report.targetUserName
+                details = if (silentDelete) "По жалобе #$reportId (тихое удаление)" else "По жалобе #$reportId",
+                targetUserId = report.targetUserId, targetUserName = report.targetUserName
             )
         }
         if (banUser) {
