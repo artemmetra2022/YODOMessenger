@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YODO Messenger</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ЭКРАН: Логин -->
+  <div id="screen-login" class="screen active">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Мессенджер</div>
+      <form id="form-login">
+        <input type="text" id="login-identifier" placeholder="Email или @username" autocomplete="username">
+        <div class="password-field">
+          <input type="password" id="login-password" placeholder="Пароль" autocomplete="current-password">
+          <button type="button" class="password-toggle-btn" id="btn-toggle-login-password" title="Показать пароль">👁</button>
+        </div>
+        <div class="auth-forgot-row">
+          <button type="button" class="btn-link btn-link-inline" id="link-forgot-password">Забыли пароль?</button>
+        </div>
+        <button type="submit" class="btn-primary">Войти</button>
+      </form>
+      <div class="auth-error" id="login-error"></div>
+
+      <div class="auth-divider"><span>или</span></div>
+
+      <button type="button" class="auth-provider-btn" id="btn-login-google">
+        <span class="auth-provider-icon auth-provider-icon-google">G</span>
+        Войти через Google
+      </button>
+      <button type="button" class="auth-provider-btn" id="btn-login-phone">
+        <span class="auth-provider-icon">📱</span>
+        Войти по номеру телефона
+      </button>
+
+      <button type="button" id="btn-show-qr-login" class="btn-link">Войти по QR-коду</button>
+      <div class="auth-switch">Нет аккаунта? <a href="#" id="link-to-register">Зарегистрироваться</a></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Забыли пароль -->
+  <div id="screen-forgot-password" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Восстановление пароля</div>
+      <div id="forgot-password-form-wrap">
+        <p class="verify-text">Введите email или username, привязанный к аккаунту — мы отправим письмо со ссылкой для сброса пароля.</p>
+        <form id="form-forgot-password">
+          <input type="text" id="forgot-identifier" placeholder="Email или @username" autocomplete="username">
+          <button type="submit" class="btn-primary">Отправить письмо</button>
+        </form>
+        <div class="auth-error" id="forgot-password-error"></div>
+      </div>
+      <div id="forgot-password-success-wrap" class="hidden">
+        <div class="auth-success-icon">✉️</div>
+        <p class="verify-text">Если аккаунт с таким email существует, письмо со ссылкой для сброса пароля уже отправлено. Проверьте почту (в том числе папку «Спам»).</p>
+      </div>
+      <button type="button" class="btn-link" id="link-back-to-login-from-forgot">Вернуться ко входу</button>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Вход по QR-коду -->
+  <div id="screen-qr-login" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Вход по QR-коду</div>
+      <p class="verify-text">
+        Откройте приложение YODO на телефоне → «Настройки» → «Центр безопасности» →
+        «Сканировать QR-код» и наведите камеру на код ниже.
+      </p>
+      <div id="qr-login-canvas-wrap"></div>
+      <div id="qr-login-status" class="qr-login-status">Ожидание сканирования…</div>
+      <button id="btn-cancel-qr-login" class="btn-link">Войти по паролю</button>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Регистрация -->
+  <div id="screen-register" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Регистрация</div>
+      <form id="form-register">
+        <input type="text" id="reg-username" placeholder="Username (латиница, 3-20 символов)" autocomplete="off">
+        <input type="text" id="reg-displayname" placeholder="Отображаемое имя" autocomplete="off">
+        <input type="email" id="reg-email" placeholder="Email" autocomplete="email">
+        <div class="password-field">
+          <input type="password" id="reg-password" placeholder="Пароль" autocomplete="new-password">
+          <button type="button" class="password-generate-btn" id="btn-generate-password" title="Сгенерировать надёжный пароль">✨</button>
+          <button type="button" class="password-toggle-btn" id="btn-toggle-reg-password" title="Показать пароль">👁</button>
+        </div>
+
+        <div id="password-strength-wrap" class="password-strength-wrap hidden">
+          <div class="password-strength-row">
+            <span class="password-strength-label">Надёжность пароля</span>
+            <span class="password-strength-value" id="password-strength-value">Ненадёжный</span>
+          </div>
+          <div class="password-strength-bar">
+            <div class="password-strength-bar-fill" id="password-strength-bar-fill"></div>
+          </div>
+          <div class="password-checklist">
+            <div class="password-checklist-item" id="pw-check-length"><span class="pw-check-icon">○</span> Минимум 8 символов</div>
+            <div class="password-checklist-item" id="pw-check-special"><span class="pw-check-icon">○</span> Хотя бы один спецсимвол</div>
+            <div class="password-checklist-item" id="pw-check-digit"><span class="pw-check-icon">○</span> Хотя бы одна цифра</div>
+            <div class="password-checklist-item" id="pw-check-case"><span class="pw-check-icon">○</span> Заглавные и строчные буквы</div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" id="btn-submit-register">Создать аккаунт</button>
+      </form>
+      <div class="auth-error" id="register-error"></div>
+
+      <div class="auth-divider"><span>или</span></div>
+
+      <button type="button" class="auth-provider-btn" id="btn-register-google">
+        <span class="auth-provider-icon auth-provider-icon-google">G</span>
+        Регистрация через Google
+      </button>
+
+      <div class="auth-switch">Уже есть аккаунт? <a href="#" id="link-to-login">Войти</a></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Подтверждение email -->
+  <div id="screen-verify" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">✉️</div>
+      <div class="auth-subtitle">Подтвердите email</div>
+      <p class="verify-text">Мы отправили письмо со ссылкой подтверждения на <b id="verify-email"></b>. Откройте её, затем вернитесь сюда.</p>
+      <button id="btn-check-verified" class="btn-primary">Я подтвердил — проверить</button>
+      <button id="btn-resend-verification" class="btn-secondary">Отправить письмо ещё раз</button>
+      <button id="btn-logout-from-verify" class="btn-link">Выйти</button>
+      <div class="auth-error" id="verify-error"></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Подтверждение заблокирован -->
+  <div id="screen-blocked" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">🚫</div>
+      <div class="auth-subtitle">Аккаунт заблокирован</div>
+      <p class="verify-text" id="blocked-reason"></p>
+      <button id="btn-logout-from-blocked" class="btn-primary">Выйти</button>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Главное приложение -->
+  <div id="screen-app" class="screen">
+    <aside id="sidebar">
+      <header id="sidebar-header">
+        <span class="app-title">YODO</span>
+        <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
+        <button id="btn-new-channel" class="icon-btn" title="Новый канал">📢</button>
+        <button id="btn-new-group" class="icon-btn" title="Новая группа">👥</button>
+        <button id="btn-new-chat" class="icon-btn" title="Новый чат">＋</button>
+        <button id="btn-open-settings" class="icon-btn" title="Настройки">⚙️</button>
+        <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
+      </header>
+      <div id="chat-list"></div>
+    </aside>
+    <main id="chat-area">
+      <div id="chat-empty">
+        <div class="empty-icon">💬</div>
+        <div>Выберите чат или создайте новый</div>
+      </div>
+      <div id="chat-active" class="hidden">
+        <header id="chat-header">
+          <button id="btn-back" class="icon-btn mobile-only">←</button>
+          <div class="chat-avatar" id="chat-header-avatar">?</div>
+          <div id="chat-header-info">
+            <div id="chat-title"></div>
+            <div id="chat-subtitle"></div>
+          </div>
+        </header>
+        <button id="btn-load-more" class="btn-secondary hidden">Загрузить ещё</button>
+        <div id="messages"></div>
+        <div id="typing-indicator" class="hidden">печатает…</div>
+        <div id="reply-preview-bar" class="hidden">
+          <div id="reply-preview-content">
+            <div id="reply-preview-name"></div>
+            <div id="reply-preview-text"></div>
+          </div>
+          <button type="button" id="btn-cancel-reply" class="icon-btn">✕</button>
+        </div>
+        <!-- FAQ-бот поддержки: кнопочная панель вместо поля ввода (как в Android-приложении).
+             Наполняется и показывается кодом в конце app.js (класс faq-open на #chat-active). -->
+        <div id="support-faq-panel"></div>
+        <button type="button" id="btn-faq-reopen" class="faq-reopen-btn">Открыть список вопросов</button>
+        <form id="form-send">
+          <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
+          <input type="file" id="file-input" accept="image/*" class="hidden">
+          <input type="text" id="message-input" placeholder="Сообщение..." autocomplete="off">
+          <button type="submit" class="btn-send">➤</button>
+        </form>
+        <div id="image-preview" class="hidden">
+          <img id="image-preview-img" src="" alt="">
+          <button type="button" id="btn-cancel-image" class="icon-btn">✕</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Модалка: новый чат (поиск пользователя) -->
+    <div id="modal-new-chat" class="modal hidden">
+      <div class="modal-card">
+        <h3>Новый чат</h3>
+        <input type="text" id="search-input" placeholder="Имя или @username..." autocomplete="off">
+        <div id="search-results"></div>
+        <button class="btn-secondary" id="btn-close-modal">Отмена</button>
+      </div>
+    </div>
+
+    <!-- Модалка: новый канал -->
+    <div id="modal-new-channel" class="modal hidden">
+      <div class="modal-card">
+        <h3>Новый канал</h3>
+        <input type="text" id="channel-title-input" placeholder="Название канала" autocomplete="off">
+        <input type="text" id="channel-desc-input" placeholder="Описание (необязательно)" autocomplete="off">
+        <select id="channel-access-mode">
+          <option value="OPEN">Публичный открытый — виден всем, подписаться может каждый</option>
+          <option value="MODERATED">Публичный модерируемый — вступление по заявке</option>
+          <option value="HIDDEN">Скрытый — не виден в поиске</option>
+        </select>
+        <div class="auth-error" id="channel-error"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="btn-close-channel-modal">Отмена</button>
+          <button class="btn-primary" id="btn-create-channel">Создать</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модалка: переслать сообщение -->
+    <div id="modal-forward" class="modal hidden">
+      <div class="modal-card">
+        <h3>Переслать сообщение</h3>
+        <div id="forward-preview" class="forward-preview"></div>
+        <input type="text" id="forward-search-input" placeholder="Выберите чат..." autocomplete="off">
+        <div id="forward-results"></div>
+        <button class="btn-secondary" id="btn-close-forward-modal">Отмена</button>
+      </div>
+    </div>
+
+    <!-- Модалка: новая группа -->
+    <div id="modal-new-group" class="modal hidden">
+      <div class="modal-card">
+        <h3 id="group-modal-title">Новая группа</h3>
+        <input type="text" id="group-title-input" placeholder="Название группы" autocomplete="off">
+        <input type="text" id="group-search-input" placeholder="Добавить участника: имя или @username..." autocomplete="off">
+        <div id="group-search-results"></div>
+        <div id="group-selected-members"></div>
+        <div class="auth-error" id="group-error"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="btn-close-group-modal">Отмена</button>
+          <button class="btn-primary" id="btn-create-group">Создать</button>
+        </div>
+      </div>
+    </div>
+    <!-- Модалка: настройки -->
+    <div id="modal-settings" class="modal hidden">
+      <div class="modal-card settings-card">
+        <div class="settings-header">
+          <h3>Настройки</h3>
+          <button type="button" class="icon-btn" id="btn-close-settings-modal">✕</button>
+        </div>
+
+        <div class="settings-body">
+
+        <!-- Секция: профиль -->
+        <div class="settings-panel" data-panel="profile">
+          <div class="settings-section-title">Профиль</div>
+          <div class="settings-avatar-row">
+            <div class="chat-avatar settings-avatar-img-wrap" id="settings-avatar-preview">?</div>
+            <div class="settings-avatar-info">
+              <div id="settings-display-name-preview">—</div>
+              <div class="settings-username" id="settings-username-preview">—</div>
+              <div class="settings-avatar-actions">
+                <button type="button" class="btn-secondary settings-small-btn" id="btn-upload-avatar">Загрузить фото</button>
+                <input type="file" id="settings-avatar-input" accept="image/*" class="hidden">
+              </div>
+            </div>
+          </div>
+          <div class="auth-error" id="settings-avatar-error"></div>
+
+          <label class="settings-label">Отображаемое имя</label>
+          <input type="text" id="settings-displayname" placeholder="Отображаемое имя" autocomplete="off">
+
+          <label class="settings-label">Username</label>
+          <input type="text" id="settings-username-input" placeholder="username" autocomplete="off">
+
+          <label class="settings-label">Email</label>
+          <input type="text" id="settings-email" disabled>
+
+          <label class="settings-label">О себе</label>
+          <textarea id="settings-bio" rows="2" placeholder="Короткая подпись профиля" maxlength="300"></textarea>
+
+          <label class="settings-label">Дата рождения</label>
+          <input type="text" id="settings-birthdate" placeholder="ДД.ММ.ГГГГ" autocomplete="off">
+
+          <label class="settings-label">Местоположение</label>
+          <input type="text" id="settings-location" placeholder="Город, страна" autocomplete="off" maxlength="100">
+
+          <label class="settings-label">Сайт</label>
+          <input type="text" id="settings-website" placeholder="https://..." autocomplete="off" maxlength="200">
+
+          <div class="auth-error" id="settings-profile-error"></div>
+          <div class="settings-success" id="settings-profile-success"></div>
+          <div class="modal-actions">
+            <button class="btn-primary" id="btn-save-profile">Сохранить</button>
+          </div>
+        </div>
+
+        <!-- Секция: приватность -->
+        <div class="settings-panel" data-panel="privacy">
+          <div class="settings-section-title">Приватность</div>
+          <div class="settings-toggle-row">
+            <div>
+              <div class="settings-toggle-title">Онлайн-статус</div>
+              <div class="settings-toggle-desc">Показывать другим, когда вы в сети</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-online">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-toggle-row">
+            <div>
+              <div class="settings-toggle-title">Отметки о прочтении</div>
+              <div class="settings-toggle-desc">Показывать собеседникам, что сообщение прочитано</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-read-receipts">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="settings-subheading">Видимость полей профиля</div>
+          <div class="settings-toggle-row settings-toggle-row-compact">
+            <div class="settings-toggle-title">О себе</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-aboutme">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-toggle-row settings-toggle-row-compact">
+            <div class="settings-toggle-title">Дата рождения</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-birthdate">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-toggle-row settings-toggle-row-compact">
+            <div class="settings-toggle-title">Местоположение</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-location">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-toggle-row settings-toggle-row-compact">
+            <div class="settings-toggle-title">Сайт</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-website">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-toggle-row settings-toggle-row-compact">
+            <div class="settings-toggle-title">Номер телефона</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-phone">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-toggle-row settings-toggle-row-compact">
+            <div class="settings-toggle-title">Email</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-show-email">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="auth-error" id="settings-privacy-error"></div>
+          <div class="settings-success" id="settings-privacy-success"></div>
+          <div class="modal-actions">
+            <button class="btn-primary" id="btn-save-privacy">Сохранить</button>
+          </div>
+
+          <div class="settings-subheading">Заблокированные пользователи</div>
+          <div id="settings-blocked-list" class="settings-blocked-list"></div>
+        </div>
+
+        <!-- Секция: безопасность -->
+        <div class="settings-panel" data-panel="security">
+          <div class="settings-section-title">Безопасность</div>
+          <div class="settings-subheading settings-subheading-first">Смена пароля</div>
+          <label class="settings-label">Текущий пароль</label>
+          <input type="password" id="settings-current-password" placeholder="Текущий пароль" autocomplete="current-password">
+          <label class="settings-label">Новый пароль</label>
+          <input type="password" id="settings-new-password" placeholder="Новый пароль (мин. 6 символов)" autocomplete="new-password">
+          <label class="settings-label">Повторите новый пароль</label>
+          <input type="password" id="settings-new-password-confirm" placeholder="Повторите новый пароль" autocomplete="new-password">
+          <div class="auth-error" id="settings-security-error"></div>
+          <div class="settings-success" id="settings-security-success"></div>
+          <div class="modal-actions">
+            <button class="btn-primary" id="btn-change-password">Сменить пароль</button>
+          </div>
+
+          <div class="settings-subheading">PIN-код для этого браузера</div>
+          <div class="settings-hint">Дополнительный код, который будет запрашиваться при входе в YODO на этом устройстве. Хранится только локально, в этом браузере.</div>
+          <div id="settings-pin-status" class="settings-hint settings-pin-status"></div>
+          <label class="settings-label">Новый PIN (4-6 цифр)</label>
+          <input type="password" id="settings-pin-new" placeholder="••••" inputmode="numeric" maxlength="6" autocomplete="off">
+          <label class="settings-label">Повторите PIN</label>
+          <input type="password" id="settings-pin-confirm" placeholder="••••" inputmode="numeric" maxlength="6" autocomplete="off">
+          <div class="auth-error" id="settings-pin-error"></div>
+          <div class="settings-success" id="settings-pin-success"></div>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="btn-clear-pin">Отключить PIN</button>
+            <button class="btn-primary" id="btn-save-pin">Сохранить PIN</button>
+          </div>
+
+          <div class="settings-subheading">Автоудаление аккаунта</div>
+          <div class="settings-hint">Если вы не будете заходить в YODO указанное число дней, аккаунт будет помечен на удаление.</div>
+          <div class="settings-toggle-row">
+            <div class="settings-toggle-title">Включить автоудаление</div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-autodelete-toggle">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div id="settings-autodelete-days-row">
+            <label class="settings-label">Период неактивности: <span id="settings-autodelete-days-value">30</span> дней</label>
+            <input type="range" id="settings-autodelete-days" min="7" max="365" step="1" value="30">
+          </div>
+          <div class="auth-error" id="settings-autodelete-error"></div>
+          <div class="settings-success" id="settings-autodelete-success"></div>
+          <div class="modal-actions">
+            <button class="btn-primary" id="btn-save-autodelete">Сохранить</button>
+          </div>
+        </div>
+
+        <!-- Секция: уведомления -->
+        <div class="settings-panel" data-panel="notifications">
+          <div class="settings-section-title">Уведомления</div>
+          <div class="settings-toggle-row">
+            <div>
+              <div class="settings-toggle-title">Уведомления браузера</div>
+              <div class="settings-toggle-desc">Показывать всплывающие уведомления о новых сообщениях</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-notifications-toggle">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-hint" id="settings-notifications-hint"></div>
+        </div>
+
+        <!-- Секция: тема -->
+        <div class="settings-panel" data-panel="theme">
+          <div class="settings-section-title">Тема</div>
+          <div class="settings-theme-options">
+            <button type="button" class="settings-theme-option" data-theme="dark">
+              <span class="settings-theme-swatch settings-theme-swatch-dark"></span>
+              Тёмная
+            </button>
+            <button type="button" class="settings-theme-option" data-theme="light">
+              <span class="settings-theme-swatch settings-theme-swatch-light"></span>
+              Светлая
+            </button>
+          </div>
+
+        </div>
+        </div><!-- /settings-body -->
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="faq-data.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

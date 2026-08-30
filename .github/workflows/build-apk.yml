@@ -1,0 +1,106 @@
+name: Build Debug APK
+
+on:
+  workflow_dispatch:        # запуск вручную кнопкой "Run workflow" на вкладке Actions
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # В проекте нет закоммиченного gradlew/gradle-wrapper.jar (бинарный файл),
+      # поэтому используем официальный action, который сам скачивает и запускает Gradle.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+          # Отключаем сохранение/восстановление Gradle build cache между запусками CI.
+          # KSP/Hilt инкрементальная компиляция иногда ломается при восстановлении
+          # устаревшего кэша между ревизиями (ложная ошибка Dagger superficial validation
+          # вида "X is not a sub type of the class/interface that contains ..."),
+          # поэтому каждая сборка на CI должна быть полностью чистой.
+          cache-disabled: true
+
+      # google-services.json нельзя хранить в открытом репозитории (там ключи Firebase-проекта).
+      # Секрет может быть либо base64-строкой, либо вставленным как есть JSON — обрабатываем оба случая.
+      - name: Restore google-services.json from secret
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::Secret GOOGLE_SERVICES_JSON пустой или не задан. Добавь его в Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+          TRIMMED=$(echo "$GOOGLE_SERVICES_JSON" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+          if [[ "$TRIMMED" == "{"* ]]; then
+            # Секрет — это сырой JSON, а не base64
+            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          else
+            # Секрет — это base64-строка
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > app/google-services.json
+          fi
+
+          echo "--- Проверка валидности JSON ---"
+          python3 -c "import json; json.load(open('app/google-services.json'))" && echo "OK: google-services.json валиден"
+
+      # Версия берётся из последнего GitHub-релиза (тег вида v1.2.3 → versionName=1.2.3,
+      # versionCode=10203). Если релиза нет или тег не в формате vX.Y.Z — fallback на дефолт.
+      - name: Get latest release version
+        id: release
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, urllib.request
+
+          tag = ""
+          try:
+              with urllib.request.urlopen(
+                  "https://api.github.com/repos/artemmetra2022/YODOMessenger/releases/latest",
+                  timeout=15,
+              ) as resp:
+                  tag = json.load(resp).get("tag_name", "")
+          except Exception:
+              pass
+
+          m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag or "")
+          if m:
+              major, minor, patch = map(int, m.groups())
+              version_name = f"{major}.{minor}.{patch}"
+              version_code = major * 10000 + minor * 100 + patch
+          else:
+              version_name = "0.1.0-mvp"
+              version_code = 1
+          print(f"Latest release tag: {tag!r} -> versionName={version_name}, versionCode={version_code}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version_name={version_name}\n")
+              f.write(f"version_code={version_code}\n")
+          EOF
+
+      - name: Build debug APK
+        run: gradle assembleDebug -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
+
+      # Отпечатки подписи нужны для Google Sign-In и Phone Auth — получить их без
+      # компьютера (без `./gradlew signingReport`) больше неоткуда. Берём напрямую
+      # из собранного APK через apksigner (не зависит от alias/расположения keystore).
+      - name: Print APK signing SHA-1 / SHA-256
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME" -name apksigner -type f | head -1)
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256"
+     
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yodo-messenger-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

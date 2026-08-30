@@ -1,0 +1,598 @@
+<resources>
+    <string name="app_name">Yodo Messenger</string>
+
+    <!-- Общее -->
+    <string name="app_tagline">Быстрый. Безопасный. Твой.</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_save">Сохранить</string>
+    <string name="action_back">Назад</string>
+
+    <!-- Welcome -->
+    <string name="welcome_start">Начать</string>
+    <string name="welcome_no_account">Ещё нет аккаунта? Регистрация</string>
+    <string name="welcome_or">— или —</string>
+    <string name="welcome_offline_mode">Режим без интернета</string>
+    <string name="welcome_offline_description">Общайтесь с людьми рядом через Bluetooth — без регистрации и без сети</string>
+
+    <!-- Общее для Auth (Login/Register) -->
+    <string name="auth_tab_login">Вход</string>
+    <string name="auth_tab_register">Регистрация</string>
+    <string name="auth_or_divider">или</string>
+    <string name="auth_login_with_phone">Войти по номеру телефона</string>
+    <string name="auth_login_with_google">Войти через Google</string>
+    <string name="auth_google_error">Ошибка Google-входа: %1$s</string>
+    <string name="auth_show_password">Показать пароль</string>
+    <string name="auth_hide_password">Скрыть пароль</string>
+
+    <!-- Login -->
+    <string name="login_email_or_username">Email или username</string>
+    <string name="login_password">Пароль</string>
+    <string name="login_submit">Войти</string>
+    <string name="login_no_account">Ещё нет аккаунта? Регистрация</string>
+    <string name="login_forgot_password">Забыли пароль?</string>
+    <string name="reset_password_title">Сброс пароля</string>
+    <string name="reset_password_description">Введите email или username — мы отправим ссылку для сброса пароля на привязанную почту.</string>
+    <string name="reset_password_input_label">Email или username</string>
+    <string name="reset_password_submit">Отправить письмо</string>
+    <string name="reset_password_success">Письмо для сброса пароля отправлено. Проверьте почту (в том числе папку «Спам»).</string>
+    <string name="reset_password_back_to_login">Вернуться ко входу</string>
+
+    <!-- Register -->
+    <string name="register_name">Имя</string>
+    <string name="register_username">Username</string>
+    <string name="register_username_hint">3-20 символов: латиница, цифры, \"_\"</string>
+    <string name="register_email">Email</string>
+    <string name="register_password">Пароль (минимум 6 символов)</string>
+    <string name="register_advanced_polls_title">Расширенные опросы</string>
+    <string name="register_advanced_polls_subtitle">Множественный выбор и авто-закрытие голосования</string>
+    <string name="register_submit">Зарегистрироваться</string>
+    <string name="register_have_account">Уже есть аккаунт? Войти</string>
+
+    <!-- Onboarding (обучение при первой регистрации) -->
+    <string name="onboarding_skip">Пропустить</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_start">Начать общение</string>
+    <string name="onboarding_welcome_title">Добро пожаловать в Yodo!</string>
+    <string name="onboarding_welcome_desc">Спасибо за регистрацию. Покажем за пару шагов, как всё устроено.</string>
+    <string name="onboarding_chats_title">Чаты и группы</string>
+    <string name="onboarding_chats_desc">Переписывайтесь один на один, создавайте группы и каналы для общения с друзьями и сообществами.</string>
+    <string name="onboarding_nearby_title">Люди рядом</string>
+    <string name="onboarding_nearby_desc">Находите и добавляйте в контакты пользователей поблизости — удобно для новых знакомств.</string>
+    <string name="onboarding_offline_title">Без интернета</string>
+    <string name="onboarding_offline_desc">Режим Bluetooth-чата позволяет общаться даже без сети и мобильного интернета.</string>
+    <string name="onboarding_settings_title">Настройки под себя</string>
+    <string name="onboarding_settings_desc">Настройте тему, конфиденциальность и уведомления в разделе «Настройки» — всё в ваших руках.</string>
+
+    <!-- Настройки -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_profile">Профиль</string>
+    <string name="settings_section_appearance">Оформление</string>
+    <string name="settings_dark_theme">Тёмная тема</string>
+    <string name="settings_dark_theme_subtitle">Тёмное оформление интерфейса</string>
+    <string name="settings_section_customization">Кастомизация</string>
+    <string name="settings_color_theme">Цветовая тема</string>
+    <string name="settings_font_size">Размер шрифта</string>
+    <string name="settings_section_language">Язык</string>
+    <string name="settings_language_title">Язык приложения</string>
+    <string name="settings_language_system">Системный</string>
+    <string name="settings_language_ru">Русский</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_section_chats">Чаты</string>
+    <string name="settings_send_on_enter">Отправка по Enter</string>
+    <string name="settings_send_on_enter_subtitle">Enter отправляет сообщение</string>
+    <string name="settings_hide_keyboard">Скрывать клавиатуру</string>
+    <string name="settings_hide_keyboard_subtitle">Закрывается после отправки</string>
+    <string name="settings_auto_download">Автозагрузка фото</string>
+    <string name="settings_auto_download_subtitle">Показывать изображения сразу</string>
+    <string name="settings_section_privacy">Конфиденциальность</string>
+    <string name="settings_online_status">Статус «в сети»</string>
+    <string name="settings_online_status_subtitle">Другие видят, когда ты онлайн</string>
+    <string name="settings_read_receipts">Статус прочтения</string>
+    <string name="settings_read_receipts_subtitle">Собеседник видит двойную галочку</string>
+    <string name="settings_pin_set">PIN-код установлен</string>
+    <string name="settings_pin_set_up">Установить PIN-код</string>
+    <string name="settings_pin_never">Защита не активна</string>
+    <string name="settings_pin_on_close">Запрашивается при закрытии</string>
+    <string name="settings_pin_on_background">Запрашивается при сворачивании</string>
+    <string name="settings_blocked_users">Заблокированные пользователи</string>
+    <string name="settings_blocked_users_subtitle">Управление блокировками</string>
+    <string name="settings_extended_profile">Расширенный профиль</string>
+    <string name="settings_extended_profile_subtitle">Что видят другие пользователи</string>
+    <string name="settings_about_me">Заметки «О себе»</string>
+    <string name="settings_about_me_subtitle">Показывать текст в расширенном профиле</string>
+    <string name="settings_birth_date">Дата рождения</string>
+    <string name="settings_show_to_others">Показывать другим пользователям</string>
+    <string name="settings_location">Местоположение</string>
+    <string name="settings_website">Сайт / ссылка</string>
+    <string name="settings_phone_number">Номер телефона</string>
+    <string name="settings_show_in_profile">Показывать в профиле другим</string>
+    <string name="settings_email">Email</string>
+    <string name="settings_section_notifications">Уведомления</string>
+    <string name="settings_mute_all">Отключить все уведомления</string>
+    <string name="settings_mute_all_subtitle">Полностью выключить push</string>
+    <string name="settings_sound">Звук</string>
+    <string name="settings_sound_subtitle">Звуковой сигнал при сообщении</string>
+    <string name="settings_vibration">Вибрация</string>
+    <string name="settings_vibration_subtitle">Вибросигнал при сообщении</string>
+    <string name="settings_section_account">Аккаунт</string>
+    <string name="settings_logout">Выйти из аккаунта</string>
+    <string name="settings_logout_subtitle">Завершить текущую сессию</string>
+    <string name="settings_delete_account">Удалить аккаунт</string>
+    <string name="settings_delete_account_subtitle">Необратимое действие</string>
+    <string name="settings_delete_account_confirm_title">Удалить аккаунт?</string>
+    <string name="settings_delete_account_confirm_text">Это действие необратимо. Все данные будут потеряны.</string>
+    <string name="settings_not_authorized">Вы не авторизованы</string>
+    <string name="settings_delete_account_failed">Не удалось удалить аккаунт</string>
+
+    <!-- Диалог PIN-кода -->
+    <string name="pin_dialog_change_title">Изменить PIN-код</string>
+    <string name="pin_dialog_set_title">Установить PIN-код</string>
+    <string name="pin_dialog_new_pin">Новый PIN-код</string>
+    <string name="pin_dialog_repeat_pin">Повторите PIN-код</string>
+    <string name="pin_dialog_when_ask">Когда запрашивать PIN</string>
+    <string name="pin_dialog_min_digits">PIN должен содержать не менее 4 цифр</string>
+    <string name="pin_dialog_mismatch">PIN-коды не совпадают</string>
+    <string name="pin_dialog_disable">Отключить</string>
+
+    <!-- TwoFactorGate -->
+    <string name="two_factor_logout">Выйти из аккаунта</string>
+    <string name="two_factor_email_title">У вас включена двухфакторная аутентификация 🔒</string>
+    <string name="two_factor_email_subtitle">Мы отправили код на почту: %1$s. Введите его тут</string>
+    <string name="two_factor_email_code_label">Код из письма</string>
+    <string name="two_factor_email_continue">Подтвердить</string>
+    <string name="two_factor_email_resend">Отправить код ещё раз</string>
+    <string name="two_factor_email_wrong_code">Неверный или устаревший код</string>
+
+    <!-- PhoneLogin -->
+    <string name="phone_login_title">Вход по телефону</string>
+    <string name="phone_login_label">Телефон, например +79001234567</string>
+    <string name="phone_login_get_code">Получить код</string>
+    <string name="phone_login_code_sent">Код отправлен на %1$s</string>
+    <string name="phone_login_sms_label">Код из СМС</string>
+    <string name="phone_login_confirm">Подтвердить</string>
+    <string name="phone_login_resend">Отправить код повторно</string>
+    <string name="phone_login_use_email">Войти через email вместо этого</string>
+    <string name="phone_login_format_error">Введите номер в формате +7XXXXXXXXXX</string>
+    <string name="phone_login_request_code_first">Сначала запросите код</string>
+    <string name="phone_login_code_length_error">Код должен содержать 6 цифр</string>
+
+    <!-- AuthViewModel validation -->
+    <string name="auth_error_enter_email">Введите email или username</string>
+    <string name="auth_error_enter_password">Введите пароль</string>
+    <string name="auth_error_enter_name">Введите имя</string>
+    <string name="auth_error_enter_username">Введите username</string>
+    <string name="auth_error_invalid_email">Введите корректный email</string>
+    <string name="auth_error_password_length">Пароль должен содержать минимум 6 символов</string>
+
+    <!-- GroupInfo -->
+    <string name="group_info_title">Информация о группе</string>
+    <string name="group_info_not_found">Группа не найдена</string>
+    <string name="group_info_members">Участники (%1$d)</string>
+    <string name="group_info_creator">Создатель группы</string>
+    <string name="group_info_manage_roles">Роли и права</string>
+    <string name="group_info_forum_topics">Разделы форума</string>
+    <string name="group_info_leave">Покинуть группу</string>
+
+    <!-- ForumTopics -->
+    <string name="forum_topics_title">Разделы форума</string>
+    <string name="forum_topics_empty">Пока нет разделов</string>
+    <string name="forum_topics_create_cd">Создать раздел</string>
+    <string name="forum_topics_new_title">Новый раздел</string>
+    <string name="forum_topics_new_hint">Название раздела</string>
+    <string name="forum_topics_create">Создать</string>
+    <string name="forum_topics_cancel">Отмена</string>
+    <string name="forum_topics_closed">Закрыт</string>
+    <string name="forum_topics_no_messages">Пока нет сообщений</string>
+    <string name="forum_topics_pin">Закрепить</string>
+    <string name="forum_topics_unpin">Открепить</string>
+    <string name="forum_topics_pinned">Закреплено</string>
+    <string name="forum_topics_close">Закрыть раздел</string>
+    <string name="forum_topics_reopen">Открыть раздел</string>
+    <string name="forum_topics_delete">Удалить раздел</string>
+    <string name="forum_topics_delete_title">Удалить раздел?</string>
+    <string name="forum_topics_delete_message">Раздел «%1$s» и все сообщения в нём будут удалены безвозвратно.</string>
+    <string name="forum_topics_delete_confirm">Удалить</string>
+
+    <!-- InviteToChannel -->
+    <string name="invite_channel_title">Пригласить в канал</string>
+    <string name="invite_channel_subtitle">Выберите, кого подписать</string>
+    <string name="invite_channel_hint">Приглашённые сразу увидят посты канала</string>
+    <string name="invite_channel_selected">Выбрано: %1$d</string>
+    <string name="invite_channel_remove_cd">Убрать</string>
+    <string name="invite_channel_search_placeholder">Поиск по имени или @username</string>
+    <string name="invite_channel_clear_cd">Очистить</string>
+    <string name="invite_channel_start_typing">Начните вводить имя или @username, чтобы найти людей</string>
+    <string name="invite_channel_no_results">Никого не нашли</string>
+    <string name="invite_channel_btn">Пригласить</string>
+    <string name="invite_channel_btn_count">Пригласить (%1$d)</string>
+    <string name="invite_channel_tap_hint">Нажмите, чтобы пригласить</string>
+    <string name="invite_channel_add_cd">Добавить</string>
+
+    <!-- ChatStats -->
+    <string name="chat_stats_title">Статистика чата</string>
+    <string name="chat_stats_empty">В этом чате пока нет сообщений</string>
+    <string name="chat_stats_total">Всего сообщений: %1$d</string>
+    <string name="chat_stats_first_message">Первое сообщение: %1$s</string>
+    <string name="chat_stats_top_senders">Кто больше пишет</string>
+    <string name="chat_stats_content_types">Типы сообщений</string>
+    <string name="chat_stats_hourly">Активность по часам</string>
+    <string name="chat_stats_daily">Активность по дням</string>
+    <string name="chat_stats_type_text">Текст</string>
+    <string name="chat_stats_type_photo">Фото</string>
+    <string name="chat_stats_type_voice">Голосовые</string>
+    <string name="chat_stats_type_files">Файлы</string>
+    <string name="chat_stats_type_location">Геопозиция</string>
+    <string name="chat_stats_type_polls">Опросы</string>
+
+    <!-- ChatScreen -->
+    <string name="chat_search_placeholder">Поиск по сообщениям</string>
+    <string name="chat_verified_cd">Верифицирован</string>
+    <string name="chat_official_tooltip">Это официальный аккаунт, ему можно доверять.</string>
+    <string name="chat_typing">печатает...</string>
+    <string name="chat_online">в сети</string>
+    <string name="chat_was_online">был(а) %1$s</string>
+    <string name="chat_back_cd">Назад</string>
+    <string name="chat_search_cd">Поиск</string>
+    <string name="chat_menu_cd">Меню</string>
+    <string name="chat_invite_to_channel">Пригласить в канал</string>
+    <string name="chat_unsubscribe">Отписаться</string>
+    <string name="chat_subscribe">Подписаться</string>
+    <string name="chat_disappearing">Исчезающие сообщения</string>
+    <string name="chat_clear_history">Очистить историю</string>
+    <string name="chat_stats_menu">Статистика чата</string>
+    <string name="chat_export">Экспорт чата</string>
+    <string name="chat_screenshot">Сделать скриншот</string>
+    <string name="chat_screenshot_saved">Скриншот сохранён в галерею</string>
+    <string name="chat_screenshot_error">Не удалось сделать скриншот</string>
+    <string name="chat_delete_channel">Удалить канал</string>
+    <string name="chat_delete_chat">Удалить чат</string>
+    <string name="chat_delete_channel_title">Удалить канал?</string>
+    <string name="chat_delete_channel_text">Канал будет удалён безвозвратно для всех подписчиков. Это действие нельзя отменить.</string>
+    <string name="chat_delete_btn">Удалить</string>
+    <string name="chat_pinned_label">Закреплённое сообщение</string>
+    <string name="chat_pinned_photo">📷 Фото</string>
+    <string name="chat_unpin_title">Открепить сообщение?</string>
+    <string name="chat_unpin_text">Сообщение будет откреплено из этого чата.</string>
+    <string name="chat_unpin_btn">Открепить</string>
+    <string name="chat_msg_deleted">Сообщение удалено</string>
+    <string name="chat_msg_pinned_label">Закреплено</string>
+    <string name="chat_msg_edited">изменено </string>
+    <string name="chat_reply_default">Сообщение</string>
+    <string name="chat_reply_image">Картинка</string>
+    <string name="chat_tap_to_load">Тап, чтобы загрузить фото</string>
+    <string name="chat_msg_reply">Ответить</string>
+    <string name="chat_msg_comments">Комментарии</string>
+    <string name="chat_msg_pin">Закрепить</string>
+    <string name="chat_msg_unpin">Открепить</string>
+    <string name="chat_msg_favorite">В избранное</string>
+    <string name="chat_msg_copy">Копировать</string>
+    <string name="chat_msg_forward">Переслать</string>
+    <string name="chat_photo_error">Не удалось обработать фото</string>
+    <string name="chat_photo_quality">Качество фото</string>
+    <string name="chat_photo_quality_data_saver">Экономия</string>
+    <string name="chat_photo_quality_standard">Стандартное</string>
+    <string name="chat_photo_quality_high">Высокое</string>
+    <string name="chat_file_read_error">Не удалось прочитать файл</string>
+    <string name="chat_location_permission">Нужен доступ к геолокации, чтобы отправить точку на карте</string>
+    <string name="chat_cancel_btn">Отменить</string>
+
+    <!-- ChatList -->
+    <string name="chat_filter_all">Все</string>
+    <string name="chat_filter_private">Личные</string>
+    <string name="chat_filter_groups">Группы</string>
+    <!-- НОВОЕ (расширение интерфейса каналов): таб «Каналы» в своем статусе владельца/подписчика. -->
+    <string name="chat_filter_channels">Каналы</string>
+    <string name="chat_filter_unread">Непрочитанные</string>
+    <string name="chat_list_new_chat">Новый чат</string>
+    <string name="chat_list_new_group">Новая группа</string>
+    <string name="chat_list_new_channel">Новый канал</string>
+    <!-- НОВОЕ (расширение интерфейса каналов): пункт FAB-меню — каталог/рекомендации каналов. -->
+    <string name="chat_list_discover_channels">Каталог каналов</string>
+    <string name="chat_list_contacts">Контакты</string>
+    <string name="chat_list_empty_all">У вас пока нет чатов.
+Начните новый разговор!</string>
+    <string name="chat_list_empty_private">Нет личных чатов</string>
+    <string name="chat_list_empty_groups">Нет групп и каналов</string>
+    <!-- НОВОЕ (расширение интерфейса каналов): пустое состояние для таба «Каналы». -->
+    <string name="chat_list_empty_channels">Вы пока не владеете и не подписаны ни на один канал</string>
+    <string name="chat_list_empty_unread">Нет непрочитанных сообщений</string>
+    <string name="chat_list_load_error">Не удалось загрузить чаты</string>
+    <string name="chat_list_archive">Архив</string>
+    <string name="chat_list_delete_cd">Удалить</string>
+    <string name="chat_list_favorite_cd">Избранное</string>
+    <string name="chat_list_verified_cd">Верифицирован</string>
+    <string name="chat_list_read_cd">Прочитано</string>
+    <string name="chat_list_delivered_cd">Доставлено</string>
+    <string name="chat_list_draft_prefix">Черновик: </string>
+    <string name="chat_list_channel_label">Канал</string>
+    <string name="chat_list_online">в сети</string>
+    <string name="chat_list_was_online">был(а) %1$s</string>
+    <string name="chat_list_pin">Закрепить</string>
+    <string name="chat_list_unpin">Открепить</string>
+    <string name="chat_list_mute">Отключить уведомления</string>
+    <string name="chat_list_unmute">Включить уведомления</string>
+    <string name="chat_list_archive_action">В архив</string>
+    <string name="chat_list_unarchive">Достать из архива</string>
+    <string name="chat_list_clear">Очистить историю</string>
+    <string name="chat_list_delete">Удалить чат</string>
+    <string name="chat_list_just_now">только что</string>
+    <string name="chat_list_yesterday">Вчера</string>
+    <string name="chat_search_icon_cd">Поиск</string>
+    <string name="chat_profile_cd">Профиль</string>
+    <string name="chat_create_cd">Создать</string>
+
+    <!-- CreateGroup -->
+    <string name="create_group_title">Новая группа</string>
+    <string name="create_group_subtitle">Выберите минимум 2 участников</string>
+    <string name="create_group_avatar_cd">Аватарка группы</string>
+    <string name="create_group_remove_photo_cd">Убрать фото</string>
+    <string name="create_group_pick_photo_cd">Выбрать фото</string>
+    <string name="create_group_add_photo">Добавьте фото группы (необязательно)</string>
+    <string name="create_group_photo_chosen">Фото выбрано</string>
+    <string name="create_group_name_label">Название группы</string>
+    <string name="create_group_desc_label">Описание (необязательно)</string>
+    <string name="create_group_selected">Выбрано: %1$d</string>
+    <string name="create_group_chip_remove_cd">Убрать</string>
+    <string name="create_group_search_placeholder">Поиск по имени или @username</string>
+    <string name="create_group_clear_cd">Очистить</string>
+    <string name="create_group_start_typing">Начните вводить имя или @username, чтобы найти людей</string>
+    <string name="create_group_no_results">Никого не нашли</string>
+    <string name="create_group_btn">Создать группу</string>
+    <string name="create_group_tap_hint">Нажмите, чтобы добавить в группу</string>
+    <string name="create_group_add_cd">Добавить</string>
+
+    <!-- EditChannel -->
+    <string name="edit_channel_title">Редактировать канал</string>
+    <string name="edit_channel_change_photo_hint">Нажмите на фото, чтобы изменить аватарку</string>
+    <string name="edit_channel_name_label">Название канала</string>
+    <string name="edit_channel_desc_label">Описание</string>
+    <string name="edit_channel_save_btn">Сохранить изменения</string>
+    <string name="edit_channel_admins_title">Администраторы канала</string>
+    <string name="edit_channel_admins_hint">Админы могут публиковать посты от имени канала.</string>
+    <string name="edit_channel_owner_role">Владелец</string>
+    <string name="edit_channel_admin_role">Администратор</string>
+    <string name="edit_channel_admin_search">Найти пользователя по имени или @username</string>
+    <string name="edit_channel_add_admin_cd">Назначить админом</string>
+    <string name="edit_channel_remove_admin_cd">Снять админа</string>
+    <string name="edit_channel_change_photo_cd">Изменить фото</string>
+
+    <!-- ChannelProfile -->
+    <string name="channel_profile_title">О канале</string>
+    <string name="channel_profile_not_found">Канал не найден</string>
+    <string name="channel_profile_official">Официальный канал</string>
+    <string name="channel_profile_created">создан %1$s</string>
+    <string name="channel_profile_open_posts">Открыть посты</string>
+    <string name="channel_profile_unsubscribe">Отписаться</string>
+    <string name="channel_profile_subscribe">Подписаться</string>
+    <string name="channel_profile_latest_posts">Последние посты</string>
+    <string name="channel_profile_administration">Администрация</string>
+    <string name="channel_profile_edit">Редактировать канал</string>
+    <string name="channel_profile_delete">Удалить канал</string>
+    <string name="channel_profile_delete_title">Удалить канал?</string>
+    <string name="channel_profile_delete_text">Канал будет удалён безвозвратно для всех подписчиков. Это действие нельзя отменить.</string>
+    <string name="channel_profile_verified_cd">Верифицирован</string>
+
+    <!-- Comments -->
+    <string name="comments_title">Комментарии</string>
+    <string name="comments_delete_title">Удалить комментарий?</string>
+    <string name="comments_placeholder">Написать комментарий...</string>
+    <string name="comments_send_cd">Отправить</string>
+    <string name="comments_empty">Комментариев пока нет.
+Будьте первым!</string>
+    <string name="comments_you">Вы</string>
+    <string name="comments_channel_post_prefix">Пост канала · %1$s</string>
+
+    <!-- ArchivedChats -->
+    <string name="archived_chats_title">Архив</string>
+    <string name="archived_chats_empty">В архиве пока пусто</string>
+    <string name="archived_chats_load_error">Не удалось загрузить архив</string>
+
+    <!-- ForwardMessage -->
+    <string name="forward_title">Переслать сообщение</string>
+    <string name="forward_subtitle">Выберите чат для пересылки</string>
+    <string name="forward_search_placeholder">Поиск чатов</string>
+    <string name="forward_clear_cd">Очистить</string>
+    <string name="forward_no_chats">Нет доступных чатов</string>
+    <string name="forward_no_results">Ничего не найдено</string>
+    <string name="forward_forwarded_msg">Пересылаемое сообщение</string>
+    <string name="forward_section_pinned">Закреплённые</string>
+    <string name="forward_section_channels">Канал</string>
+    <string name="forward_section_groups">Группы</string>
+    <string name="forward_section_personal">Личные чаты</string>
+    <string name="forward_official_channel">Официальный канал · рассылка от админов</string>
+    <string name="forward_channel">Канал</string>
+    <string name="forward_saved_messages">Сохранённые сообщения</string>
+    <string name="forward_group_chat">Групповой чат</string>
+    <string name="forward_chat_default">Чат</string>
+    <string name="forward_yesterday">Вчера</string>
+    <string name="forward_just_now">только что</string>
+    <string name="forward_online">в сети</string>
+    <string name="forward_was_online">был(а) %1$s</string>
+
+    <!-- Profile -->
+    <string name="profile_title">Профиль</string>
+    <string name="profile_no_name">Без имени</string>
+    <string name="profile_online">В сети</string>
+    <string name="profile_edit_cd">Изменить</string>
+    <string name="profile_history_cd">История</string>
+    <string name="profile_more_cd">Ещё</string>
+    <string name="profile_about_label">О себе</string>
+    <string name="profile_about_placeholder">Расскажите о себе</string>
+    <string name="profile_name_field">Имя</string>
+    <string name="profile_username_field">Имя пользователя</string>
+    <string name="profile_phone_label">Номер телефона</string>
+    <string name="profile_favorites">Избранное</string>
+    <string name="profile_recent_calls">Недавние звонки</string>
+    <string name="profile_devices">Устройства</string>
+    <string name="profile_logout">Выйти из аккаунта</string>
+    <string name="profile_more_section">Дополнительно</string>
+    <string name="profile_birth_date_label">Дата рождения</string>
+    <string name="profile_birth_date_placeholder">дд.мм.гггг</string>
+    <string name="profile_change_photo_cd">Изменить фото</string>
+    <string name="profile_qr_code">QR-код</string>
+    <string name="profile_location_field">Местоположение</string>
+    <string name="profile_website_field">Сайт / ссылка</string>
+
+    <!-- UserProfile -->
+    <string name="user_profile_not_found">Пользователь не найден</string>
+    <string name="user_profile_online">в сети</string>
+    <string name="user_profile_last_seen">был(а) в сети недавно</string>
+    <string name="user_profile_send_message">Написать сообщение</string>
+    <string name="user_profile_about">О себе</string>
+    <string name="user_profile_birth_date">Дата рождения</string>
+    <string name="user_profile_location">Местоположение</string>
+    <string name="user_profile_website">Сайт</string>
+    <string name="user_profile_phone">Телефон</string>
+    <string name="user_profile_more">Подробнее</string>
+
+    <!-- QrCode -->
+    <string name="qr_hint">Покажите этот код другу — он откроет ваш профиль прямо в YODO</string>
+    <string name="qr_saved">Сохранено в галерею 📷</string>
+    <string name="qr_save_error">Не удалось сохранить</string>
+    <string name="qr_save_btn">Сохранить</string>
+    <string name="qr_saved_btn">Сохранено</string>
+    <string name="qr_share_btn">Поделиться</string>
+    <string name="qr_share_text">Мой профиль в YODO Messenger</string>
+    <string name="qr_share_chooser">Поделиться QR-кодом</string>
+    <string name="qr_back_cd">Назад</string>
+
+    <!-- Devices -->
+    <string name="devices_title">Устройства</string>
+    <string name="devices_hint">Ниже перечислены все устройства, на которых выполнен вход в ваш аккаунт YODO.</string>
+    <string name="devices_this_device">Это устройство</string>
+    <string name="devices_other">Другие устройства (%1$d)</string>
+    <string name="devices_terminate_all">Завершить все другие сеансы</string>
+    <string name="devices_only_one">Вы вошли только с этого устройства. Другие активные сеансы не обнаружены.</string>
+    <string name="devices_terminate_title">Завершить все другие сеансы?</string>
+    <string name="devices_terminate_text">Все устройства, кроме текущего, будут отключены от вашего аккаунта.</string>
+    <string name="devices_terminate_btn">Завершить</string>
+    <string name="devices_current_badge">Текущее</string>
+    <string name="devices_terminate_cd">Завершить сеанс</string>
+    <string name="devices_never">никогда</string>
+    <string name="devices_just_now">только что</string>
+    <string name="devices_yesterday">вчера</string>
+
+    <!-- AvatarCrop -->
+    <string name="avatar_crop_title">Новое фото профиля</string>
+    <string name="avatar_crop_cancel_cd">Отмена</string>
+    <string name="avatar_crop_save_cd">Сохранить</string>
+    <string name="avatar_crop_preview_cd">Предпросмотр аватарки</string>
+    <string name="avatar_crop_load_error">Не удалось загрузить изображение</string>
+    <string name="avatar_crop_hint">Перемещайте и масштабируйте фото пальцами</string>
+
+    <!-- Search -->
+    <string name="search_hint">Найдите людей по имени или @username —
+или группы и каналы по названию</string>
+    <string name="search_no_results">Никого и ничего не нашли</string>
+    <string name="search_channels_header">Каналы</string>
+    <!-- НОВОЕ (админ-функции групп): группы в выдаче общего поиска -->
+    <string name="search_groups_header">Группы</string>
+    <string name="search_member_of_group">Вы участник</string>
+    <plurals name="search_group_members">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участников</item>
+    </plurals>
+    <!-- НОВОЕ (админ-функции групп): число участников в профиле группы -->
+    <plurals name="group_profile_members">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участников</item>
+    </plurals>
+    <string name="search_people_header">Люди</string>
+    <!-- НОВОЕ (поиск по настройкам): результаты настроек в общем поиске -->
+    <string name="search_settings_header">Настройки</string>
+    <!-- НОВОЕ (поиск по настройкам): поле поиска и результаты внутри экрана настроек -->
+    <string name="settings_search_hint">Поиск по настройкам</string>
+    <string name="settings_search_no_results">Ничего не найдено</string>
+    <plurals name="settings_search_results_count">
+        <item quantity="one">Найден %d результат</item>
+        <item quantity="few">Найдено %d результата</item>
+        <item quantity="many">Найдено %d результатов</item>
+        <item quantity="other">Найдено %d результата</item>
+    </plurals>
+    <string name="search_placeholder">Имя, @username или канал</string>
+    <string name="search_clear_cd">Очистить</string>
+    <string name="search_verified_cd">Верифицирован</string>
+    <string name="search_subscribed">Подписан</string>
+    <string name="search_back_cd">Назад</string>
+
+    <!-- Contacts -->
+    <string name="contacts_title">Контакты</string>
+    <string name="contacts_permission_hint">Чтобы показать, кто из ваших контактов уже в Yodo, разрешите доступ к контактам</string>
+    <string name="contacts_permission_btn">Разрешить доступ</string>
+    <string name="contacts_no_phone">В телефонной книге не найдено контактов с номерами телефонов</string>
+    <string name="contacts_already_in_yodo">Уже в Yodo</string>
+    <string name="contacts_invite">Пригласить в Yodo</string>
+    <string name="contacts_not_found">Контакты не найдены</string>
+    <string name="contacts_not_registered">Не зарегистрирован в Yodo</string>
+
+    <!-- PinLock -->
+    <string name="pin_lock_enter">Введите PIN-код</string>
+    <string name="pin_lock_wrong">Неверный PIN. Осталось попыток: %1$d</string>
+    <string name="pin_lock_too_many">Слишком много попыток. Попробуйте позже.</string>
+    <string name="pin_lock_retry_seconds">Попробуйте снова через %1$d сек.</string>
+    <string name="pin_lock_backspace_cd">Стереть</string>
+
+    <!-- TwoFactor settings -->
+    <string name="two_factor_settings_title">Двухфакторная аутентификация</string>
+    <string name="two_factor_settings_enabled">Включена. При входе в аккаунт на новом устройстве мы отправим код на вашу почту.</string>
+    <string name="two_factor_settings_disabled">Включите двухфакторную аутентификацию по email. При входе в аккаунт на новом устройстве мы будем присылать 6-значный код на вашу почту — это защитит доступ, даже если кто-то узнает пароль от аккаунта.</string>
+    <string name="two_factor_settings_enable_btn">Включить</string>
+    <string name="two_factor_settings_disable_btn">Отключить</string>
+    <string name="two_factor_settings_disable_password_btn">Подтвердить отключение</string>
+    <string name="two_factor_settings_cancel">Отмена</string>
+
+    <!-- Nearby -->
+    <string name="nearby_title">Кто рядом</string>
+    <string name="nearby_list_tab">Список</string>
+    <string name="nearby_map_tab">Карта</string>
+    <string name="nearby_permission_hint">Нужен доступ к геолокации, чтобы найти людей рядом.</string>
+    <string name="nearby_location_error">Не удалось определить геопозицию. Проверь, включена ли геолокация на телефоне.</string>
+    <string name="nearby_empty">Пока никого не видно поблизости.
+Попробуй позже — люди появляются, когда открывают этот экран.</string>
+    <string name="nearby_you_here">Вы здесь</string>
+    <!-- НОВОЕ (баг 13): информативность экрана «Кто рядом» -->
+    <string name="nearby_refresh_cd">Обновить список</string>
+    <string name="nearby_found_count">Найдено: %1$d</string>
+    <string name="nearby_radius_km">Радиус: %1$s км</string>
+    <string name="nearby_updated_at">Обновлено: %1$s</string>
+    <string name="nearby_accuracy_m">Точность: ±%1$d м</string>
+    <string name="nearby_zoom_in_cd">Приблизить карту</string>
+    <string name="nearby_zoom_out_cd">Отдалить карту</string>
+    <string name="nearby_my_location_cd">Показать моё местоположение</string>
+    <string name="nearby_open_profile">Открыть профиль</string>
+
+    <!-- Offline chat -->
+    <string name="offline_chat_title">Офлайн-чат (Bluetooth)</string>
+    <string name="offline_chat_permissions">Нужны разрешения на Bluetooth и геолокацию (обязательна для поиска устройств поблизости на Android — данные никуда не отправляются).</string>
+    <string name="offline_name_question">Как вас называть?</string>
+    <string name="offline_name_hint">Вы не авторизованы в Yodo. Введите имя, которое увидят собеседники в офлайн-чате. Оно сохранится для следующего раза.</string>
+    <string name="offline_name_label">Ваше имя</string>
+    <string name="offline_name_placeholder">Например: Алексей</string>
+    <string name="offline_start_search">Начать поиск</string>
+    <string name="offline_searching">Ищем устройства поблизости...</string>
+    <string name="offline_radar_tab">Радар</string>
+    <string name="offline_list_tab">Список</string>
+    <string name="offline_range_hint">Работает без интернета — только с устройствами в радиусе Bluetooth/Wi-Fi (обычно 10-100 метров), у которых тоже открыт этот экран.</string>
+    <string name="offline_connecting">Подключение...</string>
+    <string name="offline_nobody_nearby">Пока никого не найдено рядом.</string>
+    <string name="offline_connected">Подключено: %1$s</string>
+    <string name="offline_message_placeholder">Сообщение...</string>
+    <string name="offline_send_cd">Отправить</string>
+    <string name="offline_disconnect">Отключиться</string>
+    <string name="offline_scanning">Сканирую эфир...</string>
+    <string name="offline_guest_default">Гость</string>
+    <string name="offline_interlocutor">Собеседник</string>
+    <string name="offline_yodo_user">Пользователь Yodo</string>
+
+    <!-- Main nav -->
+    <string name="nav_chats">Чаты</string>
+    <string name="nav_nearby">Рядом</string>
+    <string name="nav_offline">Офлайн</string>
+    <string name="nav_chats_cd">Чаты</string>
+    <string name="nav_nearby_cd">Рядом</string>
+    <string name="nav_offline_cd">Офлайн</string>
+</resources>

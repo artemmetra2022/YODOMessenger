@@ -1,0 +1,130 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "participantIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "lastMessageTimestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "participantIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "titleLowercase",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "adminLog",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actionType", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "adminLog",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actorId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "authorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "topicId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "notified",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "reports",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    }
+  ]
+}

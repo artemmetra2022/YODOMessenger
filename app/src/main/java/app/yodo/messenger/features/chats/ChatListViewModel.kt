@@ -1,0 +1,376 @@
+package app.yodo.messenger.features.chats
+
+import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import app.yodo.messenger.core.crypto.CryptoManager
+import app.yodo.messenger.data.local.DraftsPreferences
+import app.yodo.messenger.data.local.HiddenPinResult
+import app.yodo.messenger.data.local.UserSettingsPreferences
+import app.yodo.messenger.domain.model.ChatFolder
+import app.yodo.messenger.domain.model.ChatPreview
+import app.yodo.messenger.domain.model.ChatType
+import app.yodo.messenger.domain.repository.ChatListResult
+import app.yodo.messenger.domain.repository.ChatRepository
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.messaging.FirebaseMessaging
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import javax.inject.Inject
+
+/** Фильтр списка чатов (горизонтальные табы, как в Telegram) */
+sealed class ChatFilter {
+    data object ALL : ChatFilter()
+    data object PRIVATE : ChatFilter()
+    data object GROUPS : ChatFilter()
+    data object UNREAD : ChatFilter()
+    // НОВОЕ (расширение интерфейса каналов): отдельный таб «Каналы» — только чаты
+    // типа CHANNEL (в отличие от GROUPS, который смешивает группы и каналы).
+    data object CHANNELS : ChatFilter()
+    // НОВОЕ (п.4): пользовательская папка чатов
+    data class Folder(val folderId: String) : ChatFilter()
+}
+
+sealed class ChatListUiState {
+    data object Loading : ChatListUiState()
+    data object Empty : ChatListUiState()
+    data class Content(
+        val chats: List<ChatPreview>,
+        val archivedChats: List<ChatPreview> = emptyList(),
+        // Полный список (до применения фильтра) — нужен для подсчёта бейджей в табах
+        val allActiveChats: List<ChatPreview> = emptyList()
+    ) : ChatListUiState()
+    data class Error(val message: String) : ChatListUiState()
+}
+
+@HiltViewModel
+class ChatListViewModel @Inject constructor(
+    private val chatRepository: ChatRepository,
+    private val firebaseAuth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+    private val draftsPreferences: DraftsPreferences,
+    private val userSettingsPreferences: UserSettingsPreferences,
+    private val cryptoManager: CryptoManager,
+    private val application: Application
+) : ViewModel() {
+    private val _uiState = MutableStateFlow<ChatListUiState>(ChatListUiState.Loading)
+    val uiState: StateFlow<ChatListUiState> = _uiState
+
+    // БАГ-ФИКС (заголовок главного экрана): показываем честный статус в топбаре —
+    // «Обновление…» пока грузится первый снапшот чатов, и «Нет сети…» когда
+    // устройство офлайн. Раньше там всегда висело «Yodo Messenger», даже при
+    // полном отсутствии соединения.
+    private val _isNetworkAvailable = MutableStateFlow(true)
+    val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable
+
+    private val connectivityManager =
+        application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+
+    // ФИКС КРАША (NPE в combine() из-за порядка инициализации): chatFolders используется
+    // внутри observeChats(), которая раньше вызывалась из init{} ДО объявления этого поля
+    // в теле класса. На debug-сборке это проходило благодаря порядку байткода, но в
+    // релизе с R8-минификацией observeChats() иногда выполнялась до того, как chatFolders
+    // успевал получить значение (StateFlow ещё null) — combine() падал с NPE в CombineKt.
+    // Поле объявлено здесь, ДО init{}, чтобы гарантировать инициализацию первым.
+    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ФИКС КРАША (продолжение): _activeFilter тоже читается из observeChats() (внутри
+    // init{}), но в отличие от chatFolders оставался объявлен ПОСЛЕ блока init — из-за
+    // чего при синхронном запуске корутины combine() мог получить ещё не инициализированное
+    // значение и упасть с NPE. Переносим его наверх, до init{}, вместе с chatFolders.
+    /** Текущий выбранный фильтр */
+    private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
+    val activeFilter: StateFlow<ChatFilter> = _activeFilter
+
+    init {
+        observeNetworkState()
+        observeChats()
+        syncFcmToken()
+        // НОВОЕ (сквозное шифрование): гарантируем ключи и публикуем публичный ключ после входа
+        // (список чатов открывается всегда после авторизации, в т.ч. сразу после регистрации).
+        viewModelScope.launch { runCatching { cryptoManager.ensureInitialized() } }
+    }
+
+    /** БАГ-ФИКС: live-отслеживание сети через ConnectivityManager + начальное значение. */
+    private fun observeNetworkState() {
+        val cm = connectivityManager ?: return
+        fun currentStatus(): Boolean {
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
+        _isNetworkAvailable.value = currentStatus()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                _isNetworkAvailable.value = true
+            }
+
+            override fun onLost(network: Network) {
+                _isNetworkAvailable.value = currentStatus()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                _isNetworkAvailable.value =
+                    networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        }
+        runCatching {
+            cm.registerDefaultNetworkCallback(callback)
+        }
+    }
+
+    // НОВОЕ (AF): состояние pull-to-refresh для жеста "потянуть вниз — обновить чаты".
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing
+
+    // НОВОЕ (AF): обновление списка чатов. Список и так живой (Firestore в реальном
+    // времени), поэтому здесь мы пересинхронизируем токен и показываем короткий индикатор.
+    fun refresh() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            runCatching { syncFcmToken() }
+            kotlinx.coroutines.delay(600)
+            _isRefreshing.value = false
+        }
+    }
+
+    // НОВОЕ (скрытые чаты): множество ID скрытых чатов (для пунктов меню).
+    val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    // НОВОЕ (скрытые чаты): задан ли основной PIN (нужно для шторки со скрытыми чатами).
+    val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet
+    // НОВОЕ: скрывать ли системный статус-бар на этом экране (настраивается пользователем).
+    val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // НОВОЕ (скрытые чаты): полный список скрытых чатов (для отдельного окна).
+    val hiddenChats: StateFlow<List<ChatPreview>> = combine(
+        chatRepository.observeChatList(),
+        userSettingsPreferences.hiddenChatIds.onStart { emit(emptySet()) }
+    ) { result, hiddenIds ->
+        when (result) {
+            is ChatListResult.Success -> result.chats.filter { it.chatId in hiddenIds }
+            is ChatListResult.Error -> emptyList()
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // НОВОЕ (скрытые чаты): проверка пин-кода для шторки (без побочных эффектов).
+    suspend fun checkHiddenPin(pin: String): HiddenPinResult = userSettingsPreferences.checkHiddenPin(pin)
+
+    // НОВОЕ (чат поддержки): является ли текущий пользователь админом поддержки —
+    // тогда в меню показывается пункт "Админ-панель поддержки".
+    val isSupportAdmin: Boolean get() = chatRepository.isSupportAdmin()
+
+    fun setFilter(filter: ChatFilter) {
+        _activeFilter.value = filter
+    }
+
+    // НОВОЕ (п.4): управление папками чатов
+    fun addChatFolder(name: String) {
+        viewModelScope.launch {
+            val folder = ChatFolder(
+                id = java.util.UUID.randomUUID().toString(),
+                name = name,
+                order = chatFolders.value.size
+            )
+            userSettingsPreferences.addChatFolder(folder)
+        }
+    }
+
+    fun updateChatFolder(folder: ChatFolder) {
+        viewModelScope.launch { userSettingsPreferences.updateChatFolder(folder) }
+    }
+
+    fun deleteChatFolder(folderId: String) {
+        viewModelScope.launch { userSettingsPreferences.deleteChatFolder(folderId) }
+    }
+
+    fun addChatToFolder(folderId: String, chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.addChatToFolder(folderId, chatId) }
+    }
+
+    fun removeChatFromFolder(folderId: String, chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.removeChatFromFolder(folderId, chatId) }
+    }
+
+    private fun observeChats() {
+        viewModelScope.launch {
+            // combine() не эмитит НИЧЕГО, пока каждый источник не выдаст хотя бы одно значение.
+            // draftsPreferences.observeAllDrafts() и chatFolders читаются из DataStore (диск),
+            // и на "холодном" старте сразу после входа могут отвечать не сразу — из-за этого
+            // список чатов висел на Loading, даже когда Firestore уже всё вернул. Особенно
+            // заметно именно на ПЕРВОЙ загрузке после логина — отсюда и жалоба "иногда вообще
+            // не появляется, помогает только перезаход". .onStart{} даёт им значение по
+            // умолчанию сразу же, не дожидаясь диска — черновики/папки просто "доедут"
+            // следующим обновлением, когда будут готовы.
+            // НОВОЕ (скрытые чаты): пятый источник — ID скрытых чатов и признак decoy-режима.
+            val hiddenInfo: Flow<Pair<Set<String>, Boolean>> = combine(
+                userSettingsPreferences.hiddenChatIds.onStart { emit(emptySet()) },
+                userSettingsPreferences.decoyMode.onStart { emit(false) }
+            ) { ids, decoy -> ids to decoy }
+
+            // ФИКС КРАША: варарг-перегрузка combine() с 5 Flow в связке с R8-минификацией
+            // релизной сборки иногда даёт NullPointerException внутри CombineKt (Flow.collect
+            // на null-ссылке из внутреннего Array<Flow<*>?>). Разбиваем на два вложенных
+            // combine() с фиксированной арностью (по 2-3 потока) — эти перегрузки не используют
+            // варарг-массив и не подвержены этому багу минификации.
+            val baseInfo = combine(
+                chatRepository.observeChatList(),
+                draftsPreferences.observeAllDrafts().onStart { emit(emptyMap()) },
+                _activeFilter
+            ) { result, drafts, filter -> Triple(result, drafts, filter) }
+
+            combine(
+                baseInfo,
+                chatFolders.onStart { emit(emptyList()) },
+                hiddenInfo
+            ) { (result, drafts, filter), folders, hidden ->
+                when (result) {
+                    is ChatListResult.Success -> {
+                        val chatsWithDrafts = if (drafts.isEmpty()) {
+                            result.chats
+                        } else {
+                            result.chats.map { chat ->
+                                val draft = drafts[chat.chatId]
+                                if (draft != null) chat.copy(draftText = draft) else chat
+                            }
+                        }
+                        // НОВОЕ (скрытые чаты): в decoy-режиме полностью убираем скрытые чаты из списка.
+                        val (hiddenIds, decoyMode) = hidden
+                        val visibleChats = if (decoyMode) {
+                            chatsWithDrafts.filter { it.chatId !in hiddenIds }
+                        } else {
+                            chatsWithDrafts
+                        }
+                        // БАГ-ФИКС (пустые чаты): личный чат, в котором нет ни одного
+                        // сообщения, автоматически скрывается из списка (как в Telegram:
+                        // «мусорные» пустые диалоги не должны висеть в списке). Папки
+                        // «Избранное», «Поддержка» и группы/каналы (в них есть хоть
+                        // какое-то содержимое/описание) не скрываются.
+                        val chatsWithContent = visibleChats.filter { chat ->
+                            chat.type != ChatType.PRIVATE ||
+                                chat.otherUserId == null || // «Избранное» и служебные
+                                chat.chatId.startsWith("support_") ||
+                                chat.lastMessage.isNotBlank() ||
+                                chat.draftText.isNotBlank() ||
+                                chat.lastMessageTimestamp == 0L
+                        }
+                        val (archived, active) = chatsWithContent.partition { it.isArchived }
+                        
+                        // Применяем фильтр
+                        val filtered = when (filter) {
+                            ChatFilter.ALL      -> active
+                            ChatFilter.PRIVATE  -> active.filter { it.type == ChatType.PRIVATE }
+                            ChatFilter.GROUPS   -> active.filter { it.type == ChatType.GROUP || it.type == ChatType.CHANNEL }
+                            // НОВОЕ (расширение интерфейса каналов): таб «Мои каналы» — только CHANNEL,
+                            // включая владельца/админа и просто подписанта.
+                            ChatFilter.CHANNELS -> active.filter { it.type == ChatType.CHANNEL }
+                            ChatFilter.UNREAD   -> active.filter { it.unreadCount > 0 }
+                            is ChatFilter.Folder -> {
+                                // НОВОЕ (п.4): фильтрация по пользовательской папке
+                                val folder = folders.find { it.id == filter.folderId }
+                                if (folder != null) {
+                                    active.filter { it.chatId in folder.chatIds }
+                                } else {
+                                    active
+                                }
+                            }
+                        }
+                        
+                        if (active.isEmpty() && archived.isEmpty()) ChatListUiState.Empty
+                        else ChatListUiState.Content(
+                            chats = filtered,
+                            archivedChats = archived,
+                            allActiveChats = active
+                        )
+                    }
+                    is ChatListResult.Error -> ChatListUiState.Error(result.message)
+                }
+            }.collect { state -> _uiState.value = state }
+        }
+    }
+
+    // БАГ-ФИКС (действия меню долгого нажатия): раньше все ошибки пина/мьюта/
+    // архива/удаления молча глотались пустыми catch — «ничего не происходит».
+    // Теперь каждая ошибка показывается пользователю снекбаром.
+    private val _actionError = kotlinx.coroutines.flow.MutableSharedFlow<String>()
+    val actionError: kotlinx.coroutines.flow.SharedFlow<String> = _actionError
+
+    private fun launchAction(errorPrefix: String, action: suspend () -> Unit) {
+        viewModelScope.launch {
+            runCatching { action() }.onFailure { e ->
+                _actionError.emit(errorPrefix + (e.message?.let { ": $it" } ?: ""))
+            }
+        }
+    }
+
+    fun togglePinChat(chatId: String) {
+        // БАГ-ФИКС (закрепление официального канала): правила Firestore разрешают писать
+        // в документ канала только главным админам, поэтому обычный пользователь
+        // закрепляет его локально (у себя на устройстве) — иначе пин молча падал.
+        if (chatId == app.yodo.messenger.domain.repository.ChatRepository.OFFICIAL_CHANNEL_ID) {
+            viewModelScope.launch {
+                runCatching {
+                    val pinned = userSettingsPreferences.officialChannelPinned.first()
+                    userSettingsPreferences.setOfficialChannelPinned(!pinned)
+                }
+            }
+            return
+        }
+        launchAction("Не удалось закрепить чат") { chatRepository.togglePinChat(chatId) }
+    }
+
+    fun toggleMuteChat(chatId: String) {
+        launchAction("Не удалось изменить уведомления") { chatRepository.toggleMuteChat(chatId) }
+    }
+
+    fun toggleArchiveChat(chatId: String) {
+        launchAction("Не удалось переместить чат в архив") { chatRepository.toggleArchiveChat(chatId) }
+    }
+
+    fun deleteChat(chatId: String) {
+        launchAction("Не удалось удалить чат") { chatRepository.deleteChat(chatId) }
+    }
+
+    fun clearChatHistory(chatId: String) {
+        launchAction("Не удалось очистить историю") { chatRepository.clearChatHistory(chatId) }
+    }
+
+    // НОВОЕ (скрытые чаты): переключить скрытие чата.
+    fun toggleChatHidden(chatId: String) {
+        viewModelScope.launch {
+            val hidden = hiddenChatIds.value.contains(chatId)
+            userSettingsPreferences.setChatHidden(chatId, !hidden)
+        }
+    }
+
+    private fun syncFcmToken() {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        viewModelScope.launch {
+            runCatching {
+                val token = FirebaseMessaging.getInstance().token.await()
+                firestore.collection("users").document(uid).update("fcmToken", token).await()
+            }
+        }
+    }
+}
