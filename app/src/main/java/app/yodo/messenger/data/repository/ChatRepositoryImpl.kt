@@ -470,6 +470,22 @@ class ChatRepositoryImpl @Inject constructor(
             if (existingChat != null) return CreateChatResult.Success(existingChat.id)
             val myDoc = firestore.collection("users").document(uid).get().await()
             val otherDoc = firestore.collection("users").document(otherUserId).get().await()
+            // НОВОЕ (п.15): «Кто может писать тебе» — проверяем настройку адресата только
+            // при СОЗДАНИИ нового чата; в существующие чаты (ранний return выше) ответить
+            // можно всегда, чтобы ограничение не ломало текущие переписки.
+            val whoCanMessageMe = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                otherDoc.getString("whoCanMessageMe")
+            )
+            if (whoCanMessageMe != app.yodo.messenger.domain.model.PrivacyWho.EVERYONE &&
+                !isAllowedByPrivacy(otherUserId, uid, whoCanMessageMe)
+            ) {
+                return CreateChatResult.Error(
+                    if (whoCanMessageMe == app.yodo.messenger.domain.model.PrivacyWho.NOBODY)
+                        "Пользователь запретил писать ему"
+                    else
+                        "Пользователь принимает личные сообщения только от знакомых"
+                )
+            }
             val myName = myDoc.getString("displayName") ?: "Пользователь"
             val otherName = otherDoc.getString("displayName") ?: "Пользователь"
             val newChatRef = firestore.collection("chats").document()
@@ -504,9 +520,30 @@ class ChatRepositoryImpl @Inject constructor(
         val uid = firebaseAuth.currentUser?.uid ?: return CreateChatResult.Error("Вы не авторизованы")
         val trimmedTitle = title.trim()
         if (trimmedTitle.isBlank()) return CreateChatResult.Error("Введите название группы")
-        val allParticipants = (memberIds + uid).distinct()
-        if (allParticipants.size < 3) return CreateChatResult.Error("Выберите хотя бы 2 участников")
         return try {
+            // НОВОЕ (п.15): уважаем настройку адресатов «Кто может приглашать в группы» —
+            // ограничившие приватность не добавляются, создание отменяется с пояснением.
+            val skippedNames = mutableListOf<String>()
+            val allowedMembers = mutableListOf<String>()
+            for (memberId in memberIds.distinct()) {
+                val doc = firestore.collection("users").document(memberId).get().await()
+                val who = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                    doc.getString("whoCanInviteToGroups")
+                )
+                if (isAllowedByPrivacy(memberId, uid, who)) {
+                    allowedMembers += memberId
+                } else {
+                    skippedNames += doc.getString("displayName").orEmpty().ifBlank { "Пользователь" }
+                }
+            }
+            if (skippedNames.isNotEmpty()) {
+                return CreateChatResult.Error(
+                    "Не добавлены — настройка «Кто может приглашать в группы»: " +
+                        skippedNames.joinToString(", ")
+                )
+            }
+            val allParticipants = (allowedMembers + uid).distinct()
+            if (allParticipants.size < 3) return CreateChatResult.Error("Выберите хотя бы 2 участников")
             // Аватарка группы — сжатый Base64 (та же логика, что у каналов)
             val avatarBase64 = avatarBitmap?.let { bmp ->
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -743,16 +780,68 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
-    // НОВОЕ: приглашение пользователей в канал владельцем/админом — подписывает их напрямую.
-    override suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>) {
-        if (userIds.isEmpty()) return
-        try {
-            val updates = mutableMapOf<String, Any>(
-                "participantIds" to FieldValue.arrayUnion(*userIds.toTypedArray())
-            )
-            userIds.forEach { uid -> updates["unreadCounts.$uid"] = 0 }
-            firestore.collection("chats").document(chatId).update(updates).await()
-        } catch (e: Exception) { }
+    // НОВОЕ (п.15): приглашение пользователей в канал владельцем/админом — подписывает их напрямую.
+    // П.15: перед приглашением проверяем настройку каждого адресата «Кто может приглашать
+    // в группы» — ограничившие приватность не приглашаются, их имена возвращаются для показа.
+    override suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>): List<String> {
+        if (userIds.isEmpty()) return emptyList()
+        val myUid = firebaseAuth.currentUser?.uid ?: return emptyList()
+        return try {
+            val allowed = mutableListOf<String>()
+            val skippedNames = mutableListOf<String>()
+            for (uid in userIds) {
+                val doc = firestore.collection("users").document(uid).get().await()
+                val who = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                    doc.getString("whoCanInviteToGroups")
+                )
+                if (isAllowedByPrivacy(uid, myUid, who)) {
+                    allowed += uid
+                } else {
+                    skippedNames += doc.getString("displayName").orEmpty().ifBlank { "Пользователь" }
+                }
+            }
+            if (allowed.isNotEmpty()) {
+                val updates = mutableMapOf<String, Any>(
+                    "participantIds" to FieldValue.arrayUnion(*allowed.toTypedArray())
+                )
+                allowed.forEach { uid -> updates["unreadCounts.$uid"] = 0 }
+                firestore.collection("chats").document(chatId).update(updates).await()
+            }
+            skippedNames
+        } catch (e: Exception) { emptyList() }
+    }
+
+    // НОВОЕ (п.15): публичная проверка настройки приватности. CONTACTS («Только знакомые»)
+    // пропускает, если viewer есть в contactIds владельца или у них уже есть личный чат.
+    override suspend fun isAllowedByPrivacy(
+        targetUid: String,
+        viewerUid: String,
+        who: app.yodo.messenger.domain.model.PrivacyWho
+    ): Boolean {
+        if (targetUid == viewerUid) return true
+        return when (who) {
+            app.yodo.messenger.domain.model.PrivacyWho.EVERYONE -> true
+            app.yodo.messenger.domain.model.PrivacyWho.NOBODY -> false
+            app.yodo.messenger.domain.model.PrivacyWho.CONTACTS -> {
+                try {
+                    val targetDoc = firestore.collection("users").document(targetUid).get().await()
+                    val contactIds =
+                        (targetDoc.get("contactIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    if (viewerUid in contactIds) return true
+                    // Знакомые = есть общий личный чат (переписывались раньше)
+                    val existing = firestore.collection("chats")
+                        .whereArrayContains("participantIds", viewerUid)
+                        .whereEqualTo("type", "PRIVATE")
+                        .get().await()
+                    existing.documents.any { doc ->
+                        (doc.get("participantIds") as? List<*>)?.contains(targetUid) == true
+                    }
+                } catch (e: Exception) {
+                    // При ошибке сети действуем осторожно — считаем, что не разрешено
+                    false
+                }
+            }
+        }
     }
 
     override suspend fun addChannelAdmin(chatId: String, userId: String) {

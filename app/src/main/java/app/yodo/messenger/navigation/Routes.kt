@@ -47,6 +47,8 @@ sealed class Routes(val route: String) {
     data object SwitchAccount : Routes("switch_account")
     data object AddAccount : Routes("add_account")
     data object BlockedUsers : Routes("blocked_users")
+    // НОВОЕ (п.15): настройки приватности «Кто может приглашать в группы / писать / смотреть профиль».
+    data object PrivacyWho : Routes("privacy_who")
     // НОВОЕ (архивация чатов)
     data object ArchivedChats : Routes("archived_chats")
     data object SavedMessages : Routes("saved_messages")

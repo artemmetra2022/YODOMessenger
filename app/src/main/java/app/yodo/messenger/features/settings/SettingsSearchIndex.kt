@@ -33,6 +33,8 @@ object SettingsSearchIndex {
     const val ANCHOR_PIN = "pin"
     const val ANCHOR_DECOY_PIN = "decoy_pin"
     const val ANCHOR_BLOCKED_USERS = "blocked_users"
+    // НОВОЕ (п.15): настройки приватности «Кто может …».
+    const val ANCHOR_WHO_CAN = "who_can"
     const val ANCHOR_PROFILE_VISIBILITY = "profile_visibility"
     const val ANCHOR_NOTIFICATIONS = "notifications"
     const val ANCHOR_QUIET_HOURS = "quiet_hours"
@@ -150,6 +152,13 @@ object SettingsSearchIndex {
             id = "blocked_users", anchorId = ANCHOR_BLOCKED_USERS,
             title = "Заблокированные пользователи", subtitle = "Управлять списком блокировок",
             keywords = listOf("блокировка", "чёрный список", "черный список", "заблокирован", "бан", "block", "разблокировать", "unblock"),
+            sectionTitle = SEC_PRIVACY
+        ),
+        // НОВОЕ (п.15): настройки приватности «Кто может …».
+        SettingsSearchItem(
+            id = "who_can", anchorId = ANCHOR_WHO_CAN,
+            title = "Кто может…", subtitle = "Приглашать в группы, писать вам, смотреть профиль",
+            keywords = listOf("приглашения", "приглашать в группы", "кто может писать", "написать", "сообщения от незнакомцев", "приватность", "спам", "кто видит профиль", "privacy"),
             sectionTitle = SEC_PRIVACY
         ),
         SettingsSearchItem(

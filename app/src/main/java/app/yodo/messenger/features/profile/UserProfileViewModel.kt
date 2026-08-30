@@ -21,6 +21,9 @@ sealed class UserProfileUiState {
     data object Loading : UserProfileUiState()
     data class Content(val user: YodoUser, val presence: UserPresence?) : UserProfileUiState()
     data object NotFound : UserProfileUiState()
+    // НОВОЕ (п.15): владелец профиля ограничил «Кто может видеть мой профиль»,
+    // и текущий пользователь — не его знакомый.
+    data object Restricted : UserProfileUiState()
 }
 
 @HiltViewModel
@@ -69,6 +72,16 @@ class UserProfileViewModel @Inject constructor(
         viewModelScope.launch {
             val user = userRepository.getUserById(userId)
             if (user != null) {
+                // НОВОЕ (п.15): «Кто может видеть мой профиль» — если владелец ограничил
+                // просмотр, а мы не знакомые ему (нет в contactIds / нет общего личного чата),
+                // показываем заглушку вместо содержимого профиля.
+                val myUid = firebaseAuth.currentUser?.uid
+                if (myUid != null && user.whoCanSeeMyProfile != app.yodo.messenger.domain.model.PrivacyWho.EVERYONE &&
+                    !chatRepository.isAllowedByPrivacy(userId, myUid, user.whoCanSeeMyProfile)
+                ) {
+                    _uiState.value = UserProfileUiState.Restricted
+                    return@launch
+                }
                 _uiState.value = UserProfileUiState.Content(user, presence = null)
                 _isBlocked.value = userRepository.isUserBlocked(userId)
                 if (isAppAdmin) _isGloballyBlocked.value = userRepository.getGlobalBlock(userId) != null

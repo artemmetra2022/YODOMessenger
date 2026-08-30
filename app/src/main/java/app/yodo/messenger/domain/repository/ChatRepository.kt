@@ -185,8 +185,19 @@ interface ChatRepository {
     suspend fun deleteChannel(chatId: String): ChannelUpdateResult
     suspend fun addChannelAdmin(chatId: String, userId: String)
     suspend fun removeChannelAdmin(chatId: String, userId: String)
-    // НОВОЕ: приглашение пользователей в канал (подписка "за них", инициированная владельцем/админом).
-    suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>)
+    // НОВОЕ (п.15): приглашение пользователей в канал (подписка "за них", инициированная владельцем/админом).
+    // Возвращает имена пользователей, которых НЕ удалось пригласить — они ограничили
+    // настройку приватности «Кто может приглашать в группы».
+    suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>): List<String>
+
+    // НОВОЕ (п.15): проверка настройки приватности «кто может …» владельца targetUid
+    // для viewerUid. CONTACTS пропускает знакомых (есть в contactIds владельца
+    // или уже есть личный чат).
+    suspend fun isAllowedByPrivacy(
+        targetUid: String,
+        viewerUid: String,
+        who: app.yodo.messenger.domain.model.PrivacyWho
+    ): Boolean
 
     // НОВОЕ (переработка каналов):
     /** Поиск каналов по префиксу названия (без учёта регистра). */

@@ -679,6 +679,8 @@ fun YodoNavGraph(
                 onProfileClick = { navController.navigate(Routes.Profile.route) },
                 // ИСПРАВЛЕНО (AB): кнопка «Заблокированные пользователи» теперь открывает экран.
                 onOpenBlockedUsers = { navController.navigate(Routes.BlockedUsers.route) },
+                // НОВОЕ (п.15): настройки приватности «Кто может …».
+                onOpenPrivacyWho = { navController.navigate(Routes.PrivacyWho.route) },
                 // НОВОЕ (Y): открыть экран смены аккаунта.
                 onSwitchAccount = { navController.navigate(Routes.SwitchAccount.route) },
                 // НОВОЕ (батч 7): открыть «Фишки и инструменты».
@@ -736,6 +738,12 @@ fun YodoNavGraph(
                 onOpenProfile = { userId ->
                     navController.navigate(Routes.UserProfile.createRoute(userId))
                 }
+            )
+        }
+        // НОВОЕ (п.15): настройки приватности «Кто может приглашать в группы / писать / смотреть профиль».
+        composable(Routes.PrivacyWho.route) {
+            app.yodo.messenger.features.settings.PrivacyWhoScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
         // Заглушка: "Избранное" как от��ельный экран (альтернатива переходу через chatId).

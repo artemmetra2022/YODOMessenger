@@ -67,6 +67,9 @@ class ScanContactViewModel @Inject constructor(
             }
             contact.publicKey?.let { cryptoManager.cachePublicKey(contact.uid, it) }
             savedContacts.addContact(contact)
+            // НОВОЕ (п.15): фиксируем контакт и на сервере (users/{me}.contactIds) —
+            // по этому списку работает режим приватности «Только знакомые» у контакта.
+            runCatching { userRepository.addContactId(contact.uid) }
             _state.value = ScanState.Success(contact, savedOffline = hadKeyOffline)
         }
     }

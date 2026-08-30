@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.Chat
@@ -133,6 +134,8 @@ fun SettingsScreen(
     onProfileClick: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
     onOpenBlockedUsers: () -> Unit = {},
+    // НОВОЕ (п.15): настройки приватности «Кто может приглашать в группы / писать / смотреть профиль».
+    onOpenPrivacyWho: () -> Unit = {},
     // НОВОЕ (Y): переход на экран смены аккаунта.
     onSwitchAccount: () -> Unit = {},
     // НОВОЕ (батч 7): открыть «Фишки и инструменты».
@@ -817,6 +820,20 @@ fun SettingsScreen(
                         subtitle = stringResource(R.string.settings_blocked_users_subtitle),
                         colorTheme = colorTheme,
                         onClick = onOpenBlockedUsers
+                    )
+                }
+            }
+
+            // НОВОЕ (п.15): настройки приватности «Кто может приглашать в группы / писать / смотреть профиль».
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_WHO_CAN, anchorPositions, highlightedAnchor, colorTheme)) {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.GroupAdd,
+                        title = "Кто может…",
+                        subtitle = "Приглашать в группы, писать вам, смотреть профиль",
+                        colorTheme = colorTheme,
+                        onClick = onOpenPrivacyWho
                     )
                 }
             }

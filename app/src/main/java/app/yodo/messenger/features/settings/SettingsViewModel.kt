@@ -15,6 +15,7 @@ import app.yodo.messenger.data.local.PinRequirement
 import app.yodo.messenger.data.local.ThemePreferences
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.ChatFolder
+import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.PresenceRepository
@@ -96,6 +97,11 @@ class SettingsViewModel @Inject constructor(
     val showWebsite: StateFlow<Boolean> = currentUser.map { it?.showWebsite ?: true }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val showPhoneNumber: StateFlow<Boolean> = currentUser.map { it?.showPhoneNumber ?: false }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val showEmail: StateFlow<Boolean> = currentUser.map { it?.showEmail ?: false }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // НОВОЕ (п.15): настройки приватности «кто может …».
+    val whoCanInviteToGroups: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanInviteToGroups ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
+    val whoCanMessageMe: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanMessageMe ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
+    val whoCanSeeMyProfile: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanSeeMyProfile ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
 
     // НОВОЕ (AC/AD): главный админ (одна из 2 почт) — видит раздел «Жалобы».
     val isAppAdmin: Boolean =
@@ -227,6 +233,23 @@ class SettingsViewModel @Inject constructor(
     fun setShowWebsite(enabled: Boolean) = pushPrivacySettings(showWebsite = enabled)
     fun setShowPhoneNumber(enabled: Boolean) = pushPrivacySettings(showPhoneNumber = enabled)
     fun setShowEmail(enabled: Boolean) = pushPrivacySettings(showEmail = enabled)
+
+    // НОВОЕ (п.15): сеттеры настроек «кто может …» — сохраняются в Firestore.
+    fun setWhoCanInviteToGroups(value: PrivacyWho) {
+        viewModelScope.launch {
+            userRepository.updatePrivacyWho(value, whoCanMessageMe.value, whoCanSeeMyProfile.value)
+        }
+    }
+    fun setWhoCanMessageMe(value: PrivacyWho) {
+        viewModelScope.launch {
+            userRepository.updatePrivacyWho(whoCanInviteToGroups.value, value, whoCanSeeMyProfile.value)
+        }
+    }
+    fun setWhoCanSeeMyProfile(value: PrivacyWho) {
+        viewModelScope.launch {
+            userRepository.updatePrivacyWho(whoCanInviteToGroups.value, whoCanMessageMe.value, value)
+        }
+    }
 
     fun logout() { authRepository.logout() }
     fun clearAllDrafts() { viewModelScope.launch { draftsPreferences.clearAllDrafts() } }

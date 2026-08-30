@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.domain.model.GlobalBlock
+import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.ProfileHistoryEntry
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChatRepository
@@ -301,6 +302,37 @@ class UserRepositoryImpl @Inject constructor(
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось обновить настройки")) }
     }
 
+    // НОВОЕ (п.15): настройки приватности «кто может …».
+    override suspend fun updatePrivacyWho(
+        whoCanInviteToGroups: PrivacyWho,
+        whoCanMessageMe: PrivacyWho,
+        whoCanSeeMyProfile: PrivacyWho
+    ): ProfileUpdateResult {
+        val user = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
+        return try {
+            firestore.collection("users").document(user.uid).update(mapOf(
+                "whoCanInviteToGroups" to whoCanInviteToGroups.name,
+                "whoCanMessageMe" to whoCanMessageMe.name,
+                "whoCanSeeMyProfile" to whoCanSeeMyProfile.name
+            )).await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось обновить настройки")) }
+    }
+
+    // НОВОЕ (п.15): серверный список контактов (contactIds) — наполнение при добавлении
+    // контакта по QR. Нужен, чтобы режим «Только знакомые» проверялся на стороне
+    // другого пользователя (у него нет доступа к вашему локальному телефону).
+    override suspend fun addContactId(uid: String) {
+        val me = firebaseAuth.currentUser?.uid ?: return
+        if (uid == me) return
+        try {
+            firestore.collection("users").document(me)
+                .update("contactIds", FieldValue.arrayUnion(uid)).await()
+        } catch (e: Exception) {
+            // Не критично: «Только знакомые» также пропускает тех, с кем уже есть личный чат
+        }
+    }
+
     override suspend fun blockUser(uid: String): ProfileUpdateResult {
         val me = firebaseAuth.currentUser?.uid ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
@@ -434,6 +466,9 @@ class UserRepositoryImpl @Inject constructor(
         publicId = getString("publicId"),
         emojiStatus = getString("emojiStatus"),
         customStatus = getString("customStatus"),
-        isEmailVerified = getBoolean("isEmailVerified") ?: false
+        isEmailVerified = getBoolean("isEmailVerified") ?: false,
+        whoCanInviteToGroups = PrivacyWho.fromString(getString("whoCanInviteToGroups")),
+        whoCanMessageMe = PrivacyWho.fromString(getString("whoCanMessageMe")),
+        whoCanSeeMyProfile = PrivacyWho.fromString(getString("whoCanSeeMyProfile"))
     )
 }
