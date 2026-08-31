@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -160,6 +161,7 @@ private fun iconFor(type: AdminActionType): ImageVector = when (type) {
     AdminActionType.MESSAGE_PINNED -> Icons.Filled.PushPin
     AdminActionType.MESSAGE_UNPINNED -> Icons.Filled.PushPin
     AdminActionType.USER_INVITED -> Icons.Filled.PersonAdd
+    AdminActionType.OWNERSHIP_TRANSFERRED -> Icons.Filled.SwapHoriz
 }
 
 @Composable
