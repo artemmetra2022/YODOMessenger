@@ -7,8 +7,16 @@ package app.yodo.messenger.features.settings
  * слов — это позволяет находить настройку не только по точному названию,
  * но и по смыслу (например "звук" находит "Уведомления", а "код" находит "PIN").
  *
- * [anchorId] — стабильный идентификатор секции на экране настроек, используется
- * для прокрутки/подсветки найденного пункта после перехода из результатов поиска.
+ * [anchorId] — стабильный идентификатор пункта внутри экрана категории,
+ * используется для прокрутки/подсветки найденного пункта после перехода из
+ * результатов поиска.
+ *
+ * ИЗМЕНЕНО (разделение настроек по категориям): добавлено поле [categoryRoute] —
+ * маршрут экрана категории (Routes.SettingsAppearance.route и т.п.), в котором
+ * физически находится этот пункт. Раньше все пункты были на одном экране и
+ * anchorId было достаточно; теперь поиск, вызванный с экрана списка категорий
+ * или с любого экрана категории, сначала переходит на нужный экран по
+ * [categoryRoute], а уже там скроллит/подсвечивает пункт по [anchorId].
  */
 data class SettingsSearchItem(
     val id: String,
@@ -16,12 +24,14 @@ data class SettingsSearchItem(
     val title: String,
     val subtitle: String,
     val keywords: List<String> = emptyList(),
-    val sectionTitle: String
+    val sectionTitle: String,
+    val categoryRoute: String
 )
 
 object SettingsSearchIndex {
 
-    // Якоря секций — должны совпадать с anchorId, которые расставлены в SettingsScreen.
+    // Якоря секций — должны совпадать с anchorId, которые расставлены на
+    // соответствующем экране категории.
     const val ANCHOR_APPEARANCE = "appearance"
     const val ANCHOR_CUSTOMIZATION = "customization"
     const val ANCHOR_LANGUAGE = "language"
@@ -58,241 +68,257 @@ object SettingsSearchIndex {
     private const val SEC_ACCOUNT = "Аккаунт"
     private const val SEC_SEARCH = "Поиск"
 
+    // ИЗМЕНЕНО (разделение настроек по категориям): маршруты экранов категорий.
+    // Значения совпадают с Routes.Settings*.route — продублированы здесь как
+    // константы (а не прямая ссылка на Routes), чтобы модуль features/settings
+    // не зависел от модуля navigation.
+    const val ROUTE_APPEARANCE = "settings_appearance"
+    const val ROUTE_LANGUAGE = "settings_language"
+    const val ROUTE_CHATS = "settings_chats"
+    const val ROUTE_PRIVACY = "settings_privacy"
+    const val ROUTE_NOTIFICATIONS = "settings_notifications"
+    const val ROUTE_ACCOUNT = "settings_account"
+
     val items: List<SettingsSearchItem> = listOf(
         SettingsSearchItem(
             id = "dark_theme", anchorId = ANCHOR_APPEARANCE,
             title = "Тёмная тема", subtitle = "Переключить светлое/тёмное оформление",
             keywords = listOf("темная", "тёмная", "светлая", "ночная", "тема", "night", "dark", "оформление", "цвет фона"),
-            sectionTitle = SEC_APPEARANCE
+            sectionTitle = SEC_APPEARANCE, categoryRoute = ROUTE_APPEARANCE
         ),
         SettingsSearchItem(
             id = "color_theme", anchorId = ANCHOR_CUSTOMIZATION,
             title = "Цветовая тема", subtitle = "Выбрать акцентный цвет приложения",
             keywords = listOf("цвет", "палитра", "акцент", "раскраска", "стиль", "color"),
-            sectionTitle = SEC_CUSTOMIZATION
+            sectionTitle = SEC_CUSTOMIZATION, categoryRoute = ROUTE_APPEARANCE
         ),
         SettingsSearchItem(
             id = "font_size", anchorId = ANCHOR_CUSTOMIZATION,
             title = "Размер шрифта", subtitle = "Настроить размер текста в приложении",
             keywords = listOf("шрифт", "текст", "размер текста", "буквы", "крупнее", "мельче", "font"),
-            sectionTitle = SEC_CUSTOMIZATION
+            sectionTitle = SEC_CUSTOMIZATION, categoryRoute = ROUTE_APPEARANCE
         ),
         SettingsSearchItem(
             id = "language", anchorId = ANCHOR_LANGUAGE,
             title = "Язык приложения", subtitle = "Сменить язык интерфейса",
             keywords = listOf("язык", "локализация", "русский", "английский", "language"),
-            sectionTitle = SEC_LANGUAGE
+            sectionTitle = SEC_LANGUAGE, categoryRoute = ROUTE_LANGUAGE
         ),
         SettingsSearchItem(
             id = "send_on_enter", anchorId = ANCHOR_CHATS,
             title = "Отправка по Enter", subtitle = "Отправлять сообщение при нажатии Enter",
             keywords = listOf("энтер", "клавиша", "отправка", "ввод"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
             id = "hide_keyboard", anchorId = ANCHOR_CHATS,
             title = "Скрывать клавиатуру", subtitle = "Скрывать клавиатуру после отправки сообщения",
             keywords = listOf("клавиатура", "скрыть", "закрыть клавиатуру"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
             id = "auto_download", anchorId = ANCHOR_CHATS,
             title = "Автозагрузка изображений", subtitle = "Автоматически скачивать изображения в чатах",
             keywords = listOf("автозагрузка", "картинки", "фото", "загрузка", "трафик", "интернет"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
             id = "advanced_polls", anchorId = ANCHOR_CHATS,
             title = "Расширенные опросы", subtitle = "Опросы с несколькими вариантами и викторины",
             keywords = listOf("опрос", "викторина", "голосование", "poll"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
             id = "chat_background", anchorId = ANCHOR_CHAT_BACKGROUND,
             title = "Фон чата", subtitle = "Изменить фоновое изображение чатов",
             keywords = listOf("фон", "обои", "background", "картинка чата", "заднийфон"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
             id = "chat_folders", anchorId = ANCHOR_CHAT_FOLDERS,
             title = "Папки чатов", subtitle = "Организовать чаты по папкам",
             keywords = listOf("папка", "категории", "организация чатов", "folder"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
             id = "online_status", anchorId = ANCHOR_PRIVACY,
             title = "Статус «в сети»", subtitle = "Показывать другим, когда вы онлайн",
             keywords = listOf("онлайн", "в сети", "статус", "видимость", "был в сети"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "read_receipts", anchorId = ANCHOR_PRIVACY,
             title = "Отметки о прочтении", subtitle = "Показывать другим, что сообщение прочитано",
             keywords = listOf("прочитано", "галочки", "read receipts", "прочтение"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "auto_delete_account", anchorId = ANCHOR_AUTO_DELETE,
             title = "Автоудаление аккаунта", subtitle = "Удалить аккаунт после периода неактивности",
             keywords = listOf("автоудаление", "неактивность", "самоуничтожение", "удаление по таймеру"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "pin_code", anchorId = ANCHOR_PIN,
             title = "PIN-код", subtitle = "Защитить приложение кодом-паролем",
             keywords = listOf("пин", "код", "пароль", "блокировка приложения", "защита", "pin", "код доступа", "поменять пин", "сменить пароль", "сменить пин"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "decoy_pin", anchorId = ANCHOR_DECOY_PIN,
             title = "Ложный PIN", subtitle = "Скрыть выбранные чаты за отдельным кодом",
             keywords = listOf("ложный код", "скрытые чаты", "фейковый пин", "второй пин", "decoy"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "blocked_users", anchorId = ANCHOR_BLOCKED_USERS,
             title = "Заблокированные пользователи", subtitle = "Управлять списком блокировок",
             keywords = listOf("блокировка", "чёрный список", "черный список", "заблокирован", "бан", "block", "разблокировать", "unblock"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         // НОВОЕ (п.15): настройки приватности «Кто может …».
         SettingsSearchItem(
             id = "who_can", anchorId = ANCHOR_WHO_CAN,
             title = "Кто может…", subtitle = "Приглашать в группы, писать вам, смотреть профиль",
             keywords = listOf("приглашения", "приглашать в группы", "кто может писать", "написать", "сообщения от незнакомцев", "приватность", "спам", "кто видит профиль", "privacy"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "extended_profile", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Расширенный профиль", subtitle = "Что из профиля видно другим пользователям",
             keywords = listOf("расширенный профиль", "видимость профиля", "приватность профиля", "что видят другие"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "profile_about_me", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Видимость «О себе»", subtitle = "Показывать раздел «О себе» в профиле",
             keywords = listOf("о себе", "биография", "описание профиля"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "profile_birth_date", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Видимость даты рождения", subtitle = "Показывать дату рождения в профиле",
             keywords = listOf("день рождения", "дата рождения", "возраст"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "profile_location", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Видимость геолокации", subtitle = "Показывать местоположение в профиле",
             keywords = listOf("местоположение", "город", "гео", "локация"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "profile_website", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Видимость сайта", subtitle = "Показывать ссылку на сайт в профиле",
             keywords = listOf("сайт", "ссылка", "website"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "profile_phone", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Видимость номера телефона", subtitle = "Показывать номер телефона в профиле",
             keywords = listOf("телефон", "номер", "phone"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "profile_email", anchorId = ANCHOR_PROFILE_VISIBILITY,
             title = "Видимость почты", subtitle = "Показывать email в профиле",
             keywords = listOf("почта", "email", "электронная почта"),
-            sectionTitle = SEC_PRIVACY
+            sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "mute_all", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Отключить все уведомления", subtitle = "Полностью выключить уведомления",
             keywords = listOf("выключить уведомления", "без звука", "тишина", "mute", "пуш", "push", "отключить пуши", "не уведомлять"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "notification_sound", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Звук уведомлений", subtitle = "Включить/выключить звук уведомлений",
             keywords = listOf("звук", "звонок", "мелодия", "sound"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "notification_vibration", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Вибрация", subtitle = "Включить/выключить вибрацию при уведомлениях",
             keywords = listOf("вибро", "вибрация", "vibration", "тряска"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "quiet_hours", anchorId = ANCHOR_QUIET_HOURS,
             title = "Тихие часы", subtitle = "Не беспокоить в заданный ночной интервал",
             keywords = listOf("не беспокоить", "ночь", "расписание уведомлений", "quiet hours"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "hide_notification_preview", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Скрывать текст в уведомлениях", subtitle = "Показывать «Новое сообщение» без текста",
             keywords = listOf("превью", "скрыть текст", "конфиденциальность уведомлений", "preview"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "notification_snooze", anchorId = ANCHOR_NOTIFICATION_SNOOZE,
             title = "Пауза уведомлений", subtitle = "Временно отключить уведомления на 1 или 8 часов",
             keywords = listOf("пауза", "снуз", "отложить уведомления", "snooze"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "test_notification", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Тестовое уведомление", subtitle = "Проверить, что уведомления работают",
             keywords = listOf("тест", "проверка уведомлений", "test"),
-            sectionTitle = SEC_NOTIFICATIONS
+            sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(
             id = "tools", anchorId = ANCHOR_TOOLS,
             title = "Фишки и инструменты", subtitle = "Заметки, таймер, пароли, конвертеры и другое",
             keywords = listOf("инструменты", "функции", "утилиты", "мини-приложения", "tools"),
-            sectionTitle = SEC_ACCOUNT
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         SettingsSearchItem(
             id = "security_center", anchorId = ANCHOR_SECURITY_CENTER,
             title = "Центр безопасности", subtitle = "2FA по email, защита от скриншотов",
             keywords = listOf("безопасность", "двухфакторная", "2fa", "скриншот", "security"),
-            sectionTitle = SEC_ACCOUNT
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         SettingsSearchItem(
             id = "onboarding", anchorId = ANCHOR_ONBOARDING,
             title = "Пройти обучение", subtitle = "Короткий тур по возможностям приложения",
             keywords = listOf("обучение", "тур", "гайд", "как пользоваться", "туториал"),
-            sectionTitle = SEC_ACCOUNT
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         SettingsSearchItem(
             id = "switch_account", anchorId = ANCHOR_SWITCH_ACCOUNT,
             title = "Сменить аккаунт", subtitle = "Переключиться между аккаунтами или добавить новый",
             keywords = listOf("сменить аккаунт", "другой аккаунт", "добавить аккаунт", "switch"),
-            sectionTitle = SEC_ACCOUNT
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         SettingsSearchItem(
             id = "logout", anchorId = ANCHOR_SWITCH_ACCOUNT,
             title = "Выйти из аккаунта", subtitle = "Выход из текущего аккаунта",
             keywords = listOf("выход", "разлогиниться", "logout", "sign out"),
-            sectionTitle = SEC_ACCOUNT
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         SettingsSearchItem(
             id = "delete_account", anchorId = ANCHOR_SWITCH_ACCOUNT,
             title = "Удалить аккаунт", subtitle = "Безвозвратное удаление аккаунта",
             keywords = listOf("удаление", "удалить профиль", "снести аккаунт", "delete"),
-            sectionTitle = SEC_ACCOUNT
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
+        // ИСПРАВЛЕНО (разделение настроек по категориям): фактически оба пункта
+        // ниже расположены в разделе «Аккаунт» на экране (было видно по коду
+        // SettingsScreen — шли сразу после «Удалить аккаунт»), а не «Поиск»/«Чаты»,
+        // как ошибочно значилось в sectionTitle раньше. categoryRoute поставлен
+        // по фактическому месту на экране.
         SettingsSearchItem(
             id = "search_in_global", anchorId = ANCHOR_SEARCH_IN_GLOBAL,
             title = "Показывать настройки в общем поиске", subtitle = "Включить или выключить показ настроек на главном экране поиска",
             keywords = listOf("общий поиск", "глобальный поиск", "поиск настроек", "показывать настройки"),
-            sectionTitle = SEC_SEARCH
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         SettingsSearchItem(
             id = "hide_status_bar_chat_list", anchorId = ANCHOR_HIDE_STATUS_BAR_CHAT_LIST,
             title = "Скрывать статус-бар в списке чатов", subtitle = "Полностью скрывать системную панель времени и батареи на главном экране",
             keywords = listOf("статус бар", "статусбар", "скрыть статус бар", "полноэкранный режим", "immersive"),
-            sectionTitle = SEC_CHATS
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         )
     )
 }

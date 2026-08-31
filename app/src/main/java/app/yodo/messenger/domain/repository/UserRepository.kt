@@ -71,4 +71,18 @@ interface UserRepository {
     suspend fun removeGlobalBlock(uid: String): ProfileUpdateResult
     /** Глобальная блокировка конкретного пользователя (для админ-UI). */
     suspend fun getGlobalBlock(uid: String): GlobalBlock?
+
+    // НОВОЕ (глобальный аудит-лог): чтение журнала для AdminAuditLogScreen.
+    // Доступно только двум главным админам — проверяется и здесь (защита UI),
+    // и в firestore.rules (защита данных).
+    suspend fun getGlobalAuditLog(
+        limit: Int = 50,
+        startAfterTimestamp: Long? = null
+    ): List<app.yodo.messenger.domain.model.GlobalAdminLogEntry>
+
+    // НОВОЕ (глобальный аудит-лог): запись события "изменение обязательного
+    // подтверждения email" — вызывается из AdminHomeViewModel рядом с
+    // AppSettingsRepository.setRequireEmailVerification, чтобы это изменение
+    // тоже попадало в общий журнал действий Админки.
+    suspend fun logRequireEmailVerificationChanged(enabled: Boolean)
 }

@@ -595,4 +595,10 @@
     <string name="nav_chats_cd">Чаты</string>
     <string name="nav_nearby_cd">Рядом</string>
     <string name="nav_offline_cd">Офлайн</string>
+
+    <!-- НОВОЕ: быстрые действия в push-уведомлении о сообщении (только личные чаты) -->
+    <string name="notification_action_mark_read">Прочитано</string>
+    <string name="notification_action_reply">Ответить</string>
+    <string name="notification_reply_sent">Ответ отправлен</string>
+    <string name="notification_reply_failed">Не удалось отправить ответ</string>
 </resources>

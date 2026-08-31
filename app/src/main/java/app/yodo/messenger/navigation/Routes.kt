@@ -32,10 +32,42 @@ sealed class Routes(val route: String) {
     data object Contacts : Routes("contacts")
     data object ForwardMessage : Routes("forward_message")
     data object Profile : Routes("profile")
-    data object Settings : Routes("settings?anchor={anchor}") {
-        // НОВОЕ (поиск по настройкам): переход из общего поиска на конкретный пункт настроек.
+    // ИЗМЕНЕНО (разделение настроек по категориям): теперь это экран списка
+    // категорий + поиск. Сам список категорий не нуждается в anchor-параметре —
+    // поиск с этого экрана сразу переходит в нужный экран категории (см. ниже).
+    data object Settings : Routes("settings")
+    // НОВОЕ (разделение настроек по категориям): 6 отдельных экранов категорий.
+    // У каждого свой anchor-параметр — работает так же, как раньше у общего
+    // Settings: переход из результата поиска сразу прокручивает и подсвечивает
+    // нужный пункт внутри экрана категории.
+    data object SettingsAppearance : Routes("settings_appearance?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
-            if (anchor.isNullOrBlank()) "settings" else "settings?anchor=$anchor"
+            if (anchor.isNullOrBlank()) "settings_appearance" else "settings_appearance?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsLanguage : Routes("settings_language?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_language" else "settings_language?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsChats : Routes("settings_chats?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_chats" else "settings_chats?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsPrivacy : Routes("settings_privacy?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_privacy" else "settings_privacy?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsNotifications : Routes("settings_notifications?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_notifications" else "settings_notifications?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsAccount : Routes("settings_account?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_account" else "settings_account?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
@@ -163,6 +195,9 @@ sealed class Routes(val route: String) {
     // НОВОЕ: список/поиск пользователей для глобальной блокировки прямо из Админки,
     // без необходимости искать конкретного человека через общий поиск по чатам.
     data object AdminUsers : Routes("admin_users")
+    // НОВОЕ (глобальный аудит-лог): журнал действий Админки (глобальные
+    // блокировки/разблокировки, изменение настроек приложения).
+    data object AdminAuditLog : Routes("admin_audit_log")
 
     // НОВОЕ: личный блокнот «Заметки».
 }

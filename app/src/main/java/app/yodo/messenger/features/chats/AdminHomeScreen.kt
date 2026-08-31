@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.SupportAgent
@@ -53,6 +54,8 @@ fun AdminHomeScreen(
     onOpenReports: () -> Unit,
     onOpenUsers: () -> Unit,
     onOpenOfficialChannel: (chatId: String) -> Unit,
+    // НОВОЕ (глобальный аудит-лог): переход к журналу действий Админки.
+    onOpenAuditLog: () -> Unit,
     viewModel: AdminHomeViewModel = hiltViewModel()
 ) {
     val requireEmailVerification by viewModel.requireEmailVerification.collectAsState(initial = true)
@@ -93,6 +96,12 @@ fun AdminHomeScreen(
                 title = "Официальный канал",
                 subtitle = "Публикация постов и рассылок",
                 onClick = { onOpenOfficialChannel(viewModel.officialChannelId) }
+            )
+            AdminSectionRow(
+                icon = Icons.Filled.History,
+                title = "Журнал действий",
+                subtitle = "История глобальных блокировок и изменений настроек",
+                onClick = onOpenAuditLog
             )
 
             // Настройка обязательного подтверждения email — та же логика и то же

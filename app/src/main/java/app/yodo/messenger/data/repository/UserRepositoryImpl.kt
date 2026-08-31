@@ -3,6 +3,8 @@ package app.yodo.messenger.data.repository
 import android.graphics.Bitmap
 import android.net.Uri
 import app.yodo.messenger.core.util.toUserMessage
+import app.yodo.messenger.domain.model.GlobalAdminActionType
+import app.yodo.messenger.domain.model.GlobalAdminLogEntry
 import app.yodo.messenger.domain.model.GlobalBlock
 import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.ProfileHistoryEntry
@@ -446,6 +448,53 @@ class UserRepositoryImpl @Inject constructor(
         awaitClose { reg.remove() }
     }
 
+    // НОВОЕ (глобальный аудит-лог + push о модерации): запись в корневую
+    // коллекцию adminAuditLog — история действий Админки, не привязанных к
+    // конкретному чату. Отдельно от chats/{chatId}/adminLog (ChatRepositoryImpl.
+    // logAdminAction), который остаётся только для чатовых/групповых действий.
+    private suspend fun logGlobalAdminAction(
+        actionType: GlobalAdminActionType,
+        details: String = "",
+        targetUserId: String? = null,
+        targetUserName: String? = null
+    ) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        try {
+            val actorName = firestore.collection("users").document(uid).get().await()
+                .getString("displayName") ?: "Админ"
+            val entry = mapOf(
+                "actorId" to uid,
+                "actorName" to actorName,
+                "actionType" to actionType.name,
+                "details" to details,
+                "targetUserId" to targetUserId,
+                "targetUserName" to targetUserName,
+                "timestamp" to System.currentTimeMillis()
+            )
+            firestore.collection("adminAuditLog").add(entry).await()
+        } catch (e: Exception) { }
+    }
+
+    // НОВОЕ (push о модерации): кладёт запись в очередь moderationNotifications,
+    // которую периодически вычитывает push-worker/index.js (та же схема, что и
+    // очередь notified==false в messages, только для событий модерации, а не
+    // сообщений чата). Клиент получает push через YodoFirebaseMessagingService
+    // с data.type == "moderation" и показывает его через
+    // NotificationHelper.showModerationNotification — без диплинка в чат.
+    private suspend fun queueModerationNotification(userId: String, title: String, body: String) {
+        try {
+            firestore.collection("moderationNotifications").add(
+                mapOf(
+                    "userId" to userId,
+                    "title" to title,
+                    "body" to body,
+                    "notified" to false,
+                    "createdAt" to System.currentTimeMillis()
+                )
+            ).await()
+        } catch (e: Exception) { }
+    }
+
     override suspend fun setGlobalBlock(uid: String, reason: String): ProfileUpdateResult {
         if (!isAdminEmail()) return ProfileUpdateResult.Error("Нет прав администратора")
         val me = firebaseAuth.currentUser ?: return ProfileUpdateResult.Error("Вы не авторизованы")
@@ -458,6 +507,20 @@ class UserRepositoryImpl @Inject constructor(
                 "blockedByName" to myName,
                 "blockedAt" to System.currentTimeMillis()
             )).await()
+            val targetName = firestore.collection("users").document(uid).get().await()
+                .getString("displayName")
+            logGlobalAdminAction(
+                GlobalAdminActionType.USER_GLOBALLY_BLOCKED,
+                details = reason.take(500),
+                targetUserId = uid,
+                targetUserName = targetName
+            )
+            // НОВОЕ (push о модерации): уведомляем заблокированного пользователя.
+            queueModerationNotification(
+                userId = uid,
+                title = "Аккаунт заблокирован",
+                body = if (reason.isNotBlank()) "Причина: ${reason.take(200)}" else "Ваш аккаунт заблокирован администрацией"
+            )
             ProfileUpdateResult.Success
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось заблокировать аккаунт")) }
     }
@@ -466,6 +529,19 @@ class UserRepositoryImpl @Inject constructor(
         if (!isAdminEmail()) return ProfileUpdateResult.Error("Нет прав администратора")
         return try {
             globalBlocksRef().document(uid).delete().await()
+            val targetName = firestore.collection("users").document(uid).get().await()
+                .getString("displayName")
+            logGlobalAdminAction(
+                GlobalAdminActionType.USER_GLOBALLY_UNBLOCKED,
+                targetUserId = uid,
+                targetUserName = targetName
+            )
+            // НОВОЕ (push о модерации): уведомляем разблокированного пользователя.
+            queueModerationNotification(
+                userId = uid,
+                title = "Блокировка снята",
+                body = "Доступ к аккаунту восстановлен"
+            )
             ProfileUpdateResult.Success
         } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось снять блокировку")) }
     }
@@ -478,6 +554,50 @@ class UserRepositoryImpl @Inject constructor(
             val data = doc.data as? Map<String, Any?> ?: return null
             parseGlobalBlock(uid, data)
         } catch (e: Exception) { null }
+    }
+
+    // НОВОЕ (глобальный аудит-лог): публичная обёртка над logGlobalAdminAction
+    // для события изменения настройки "требовать подтверждение email" —
+    // вызывается из AdminHomeViewModel сразу после AppSettingsRepository.
+    override suspend fun logRequireEmailVerificationChanged(enabled: Boolean) {
+        if (!isAdminEmail()) return
+        logGlobalAdminAction(
+            GlobalAdminActionType.REQUIRE_EMAIL_VERIFICATION_CHANGED,
+            details = if (enabled) "Включено" else "Выключено"
+        )
+    }
+
+    // НОВОЕ (глобальный аудит-лог): чтение журнала для AdminAuditLogScreen.
+    // Доступно только двум главным админам — проверяется и здесь (защита UI),
+    // и в firestore.rules (защита данных).
+    override suspend fun getGlobalAuditLog(
+        limit: Int,
+        startAfterTimestamp: Long?
+    ): List<GlobalAdminLogEntry> {
+        if (!isAdminEmail()) return emptyList()
+        return try {
+            var query = firestore.collection("adminAuditLog")
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+            if (startAfterTimestamp != null) {
+                query = query.startAfter(startAfterTimestamp)
+            }
+            query.get().await().documents.mapNotNull { doc ->
+                val actionTypeName = doc.getString("actionType") ?: return@mapNotNull null
+                val actionType = runCatching { GlobalAdminActionType.valueOf(actionTypeName) }.getOrNull()
+                    ?: return@mapNotNull null
+                GlobalAdminLogEntry(
+                    id = doc.id,
+                    actorId = doc.getString("actorId") ?: "",
+                    actorName = doc.getString("actorName") ?: "",
+                    actionType = actionType,
+                    details = doc.getString("details") ?: "",
+                    targetUserId = doc.getString("targetUserId"),
+                    targetUserName = doc.getString("targetUserName"),
+                    timestamp = doc.getLong("timestamp") ?: 0L
+                )
+            }
+        } catch (e: Exception) { emptyList() }
     }
 
     private fun com.google.firebase.firestore.DocumentSnapshot.toYodoUser(uid: String) = YodoUser(

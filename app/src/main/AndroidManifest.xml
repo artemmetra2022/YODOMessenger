@@ -104,6 +104,11 @@
             </intent-filter>
         </service>
 
+        <!-- ==================== БЫСТРЫЕ ДЕЙСТВИЯ В УВЕДОМЛЕНИИ (Прочитано/Ответить) ==================== -->
+        <receiver
+            android:name=".data.remote.fcm.NotificationActionReceiver"
+            android:exported="false" />
+
         <!-- ==================== FILE PROVIDER (для шаринга фото) ==================== -->
         <provider
             android:name="androidx.core.content.FileProvider"

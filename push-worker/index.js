@@ -10,6 +10,13 @@
  * 2. Для каждого — находит участников чата (кроме отправителя) и их FCM-токены
  * 3. Отправляет push через Firebase Cloud Messaging
  * 4. Помечает сообщение notified = true (даже при ошибке отправки — чтобы не зависало навсегда)
+ *
+ * НОВОЕ (push о модерации): вторым, независимым шагом также вычитывает
+ * корневую коллекцию moderationNotifications (notified == false) — это очередь
+ * отдельных событий модерации (глобальный бан/разбан пользователя), которые
+ * кладёт туда UserRepositoryImpl.queueModerationNotification при действиях
+ * Админки. Формат payload другой (нет chatId/senderName — есть title/body),
+ * поэтому обрабатывается отдельным циклом, а не смешивается с сообщениями чата.
  */
 
 const { initializeApp, cert } = require("firebase-admin/app");
@@ -29,12 +36,8 @@ function initFirebase() {
   initializeApp({ credential: cert(serviceAccount) });
 }
 
-async function main() {
-  initFirebase();
-  const db = getFirestore();
-  const messaging = getMessaging();
-
-  console.log("Ищу неотправленные push-уведомления...");
+async function sendChatMessageNotifications(db, messaging) {
+  console.log("Ищу неотправленные push-уведомления о сообщениях...");
 
   // collectionGroup — ищет во ВСЕХ подколлекциях "messages" сразу, во всех чатах
   const pendingSnapshot = await db
@@ -110,12 +113,17 @@ async function main() {
       }
 
       if (tokens.length > 0) {
+        // НОВОЕ (быстрые действия "Прочитано"/"Ответить" в уведомлении):
+        // клиенту нужно знать тип чата (только 1-на-1 показываем кнопки) и id
+        // отправителя (чтобы отметить прочитанным и корректно сформировать ответ).
         const response = await messaging.sendEachForMulticast({
           tokens,
           data: {
             chatId,
+            senderId: senderId || "",
             senderName,
             messageText: message.text || "",
+            chatType: chatData.type || "PRIVATE",
           },
           android: { priority: "high" },
         });
@@ -133,7 +141,87 @@ async function main() {
   }
 
   await batch.commit();
-  console.log(`Готово. Успешно отправлено: ${sentCount}, ошибок: ${errorCount}`);
+  console.log(`Сообщения: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
+}
+
+// НОВОЕ (push о модерации): отдельная очередь для событий модерации —
+// глобальный бан/разбан пользователя (см. UserRepositoryImpl.setGlobalBlock/
+// removeGlobalBlock). Каждая запись адресована одному конкретному userId и
+// несёт готовый title/body (не требует join с другими коллекциями, в отличие
+// от сообщений чата).
+async function sendModerationNotifications(db, messaging) {
+  console.log("Ищу неотправленные push-уведомления о модерации...");
+
+  const pendingSnapshot = await db
+    .collection("moderationNotifications")
+    .where("notified", "==", false)
+    .limit(200)
+    .get();
+
+  if (pendingSnapshot.empty) {
+    console.log("Нет новых уведомлений о модерации.");
+    return;
+  }
+
+  console.log(`Найдено уведомлений о модерации: ${pendingSnapshot.size}`);
+
+  const userCache = new Map();
+  const batch = db.batch();
+  let sentCount = 0;
+  let errorCount = 0;
+
+  for (const notifDoc of pendingSnapshot.docs) {
+    try {
+      const notif = notifDoc.data();
+      const userId = notif.userId;
+      if (!userId) {
+        batch.update(notifDoc.ref, { notified: true });
+        continue;
+      }
+
+      let cached = userCache.get(userId);
+      if (!cached) {
+        const doc = await db.collection("users").doc(userId).get();
+        cached = doc.exists ? doc.data() : {};
+        userCache.set(userId, cached);
+      }
+
+      const token = cached.fcmToken;
+      if (token) {
+        // data-only payload (как и для сообщений) — клиент сам решает, как
+        // показать уведомление, с учётом своих настроек (mute/quiet hours и т.д.).
+        const response = await messaging.sendEachForMulticast({
+          tokens: [token],
+          data: {
+            type: "moderation",
+            title: notif.title || "Yodo Messenger",
+            body: notif.body || "",
+          },
+          android: { priority: "high" },
+        });
+        sentCount += response.successCount;
+        errorCount += response.failureCount;
+      }
+
+      batch.update(notifDoc.ref, { notified: true });
+    } catch (err) {
+      console.error(`Ошибка обработки уведомления о модерации ${notifDoc.id}:`, err.message);
+      batch.update(notifDoc.ref, { notified: true });
+      errorCount++;
+    }
+  }
+
+  await batch.commit();
+  console.log(`Модерация: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
+}
+
+async function main() {
+  initFirebase();
+  const db = getFirestore();
+  const messaging = getMessaging();
+
+  await sendChatMessageNotifications(db, messaging);
+  await sendModerationNotifications(db, messaging);
 }
 
 main()

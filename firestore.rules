@@ -117,6 +117,35 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ (глобальный аудит-лог Админки): корневая коллекция adminAuditLog —
+    // история действий, не привязанных к конкретному чату (глобальный бан/
+    // разбан пользователя, изменение общих настроек приложения). Пишет и
+    // читает клиент напрямую (см. UserRepositoryImpl.logGlobalAdminAction /
+    // getGlobalAuditLog) — только два доверенных админа, симметрично
+    // globalBlocks/supportRestrictions выше. Записи неизменяемы после
+    // создания — update/delete не разрешены никому с клиента.
+    match /adminAuditLog/{entryId} {
+      allow read, create: if isOfficialChannelAdmin();
+      allow update, delete: if false;
+    }
+
+    // НОВОЕ (push о модерации): корневая коллекция moderationNotifications —
+    // очередь событий модерации (глобальный бан/разбан), которую периодически
+    // вычитывает push-worker/index.js через Admin SDK (обходит эти правила
+    // полностью, так что доступ воркера ими не ограничивается). С клиента
+    // разрешено только СОЗДАНИЕ — двум админам (UserRepositoryImpl.
+    // queueModerationNotification), когда они блокируют/разблокируют
+    // пользователя. Явного чтения с клиента не требуется — ни сам получатель,
+    // ни кто-либо ещё не просматривает эту очередь через приложение, только
+    // получает готовый push после того, как воркер её обработает и пометит
+    // notified: true. Update/delete с клиента не разрешены — это исключительно
+    // задача воркера (notified: true) через Admin SDK.
+    match /moderationNotifications/{notificationId} {
+      allow read: if false;
+      allow create: if isOfficialChannelAdmin();
+      allow update, delete: if false;
+    }
+
     // НОВОЕ (п.19 ТЗ): ограничение возможности писать в поддержку — мера мягче
     // globalBlocks (пользователь не блокируется целиком, только лишается доступа
     // к отправке сообщений в чат поддержки). Та же модель прав: сам пользователь

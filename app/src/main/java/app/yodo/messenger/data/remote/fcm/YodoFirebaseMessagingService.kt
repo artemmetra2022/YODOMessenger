@@ -16,7 +16,11 @@ import javax.inject.Inject
 
 /**
  * Формат данных в push-сообщении (см. push-worker/index.js):
- * data: { chatId, senderName, messageText }
+ * data: { chatId, senderName, messageText } — обычное сообщение чата
+ * data: { type: "moderation", title, body } — уведомление о модерации
+ * (глобальный бан/разбан); намеренно не проверяет mute/quiet hours/snooze —
+ * это редкое и важное системное уведомление, которое не должно теряться
+ * из-за пользовательских настроек тишины для обычных сообщений.
  */
 @AndroidEntryPoint
 class YodoFirebaseMessagingService : FirebaseMessagingService() {
@@ -43,9 +47,29 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
+        // НОВОЕ (push о модерации): отдельная ветка для событий модерации
+        // (глобальный бан/разбан) — другой payload (title/body, без chatId),
+        // поэтому не смешивается с обработкой обычных сообщений чата ниже.
+        if (message.data["type"] == "moderation") {
+            val title = message.data["title"] ?: "Yodo Messenger"
+            val body = message.data["body"] ?: ""
+            app.yodo.messenger.notifications.NotificationHelper.showModerationNotification(
+                context = applicationContext,
+                title = title,
+                body = body
+            )
+            return
+        }
+
         val chatId = message.data["chatId"] ?: return
         val senderName = message.data["senderName"] ?: "Yodo Messenger"
         val messageText = message.data["messageText"] ?: message.notification?.body.orEmpty()
+        // НОВОЕ (быстрые действия "Прочитано"/"Ответить"): кнопки показываем только
+        // для личных чатов (1 на 1) — push-worker кладёт chatType в data (см.
+        // push-worker/index.js). По умолчанию (chatType отсутствует/неизвестен)
+        // считаем чат НЕ приватным — безопаснее не показать кнопки, чем случайно
+        // показать их в группе.
+        val isPrivateChat = message.data["chatType"].equals("PRIVATE", ignoreCase = true)
 
         serviceScope.launch {
             val globallyMuted = userSettingsPreferences.muteAllNotifications.first()
@@ -77,7 +101,10 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
                     senderName = "Новое сообщение",
                     messageText = "Откройте приложение, чтобы прочитать",
                     soundEnabled = soundEnabled,
-                    vibrationEnabled = vibrationEnabled
+                    vibrationEnabled = vibrationEnabled,
+                    // Текст скрыт настройками приватности — быстрый инлайн-ответ здесь неуместен
+                    // (не видно, на что отвечаешь), но отметить прочитанным всё же можно.
+                    isPrivateChat = isPrivateChat
                 )
                 return@launch
             }
@@ -98,7 +125,8 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
                 messageText = messageText,
                 history = history,
                 soundEnabled = soundEnabled,
-                vibrationEnabled = vibrationEnabled
+                vibrationEnabled = vibrationEnabled,
+                isPrivateChat = isPrivateChat
             )
         }
     }

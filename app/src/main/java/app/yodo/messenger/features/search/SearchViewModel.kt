@@ -58,10 +58,12 @@ class SearchViewModel @Inject constructor(
     private val _openGroupProfileId = MutableStateFlow<String?>(null)
     val openGroupProfileId: StateFlow<String?> = _openGroupProfileId
 
-    // НОВОЕ (поиск по настройкам): тап по найденной настройке — переходим в
-    // экран настроек и прокручиваем к нужному пункту (по anchorId).
-    private val _openSettingsAnchor = MutableStateFlow<String?>(null)
-    val openSettingsAnchor: StateFlow<String?> = _openSettingsAnchor
+    // ИЗМЕНЕНО (разделение настроек по категориям): раньше хранился только
+    // anchorId и всегда открывался единственный экран настроек. Теперь нужно
+    // ещё знать, в какой именно экран категории переходить — храним весь
+    // найденный пункт (item.categoryRoute + item.anchorId).
+    private val _openSettingsItem = MutableStateFlow<SettingsSearchItem?>(null)
+    val openSettingsItem: StateFlow<SettingsSearchItem?> = _openSettingsItem
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
@@ -122,12 +124,12 @@ class SearchViewModel @Inject constructor(
 
     // НОВОЕ (поиск по настройкам): тап по найденной настройке.
     fun openSetting(item: SettingsSearchItem) {
-        _openSettingsAnchor.value = item.anchorId
+        _openSettingsItem.value = item
     }
 
     fun consumeErrorMessage() { _errorMessage.value = null }
     fun consumeOpenChatId() { _openChatId.value = null }
     fun consumeOpenChannelProfileId() { _openChannelProfileId.value = null }
     fun consumeOpenGroupProfileId() { _openGroupProfileId.value = null }
-    fun consumeOpenSettingsAnchor() { _openSettingsAnchor.value = null }
+    fun consumeOpenSettingsItem() { _openSettingsItem.value = null }
 }
