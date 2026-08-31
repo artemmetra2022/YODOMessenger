@@ -158,9 +158,9 @@ class ChatListViewModel @Inject constructor(
 
     // НОВОЕ (скрытые чаты): задан ли основной PIN (нужно для шторки со скрытыми чатами).
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     // НОВОЕ: скрывать ли системный статус-бар на этом экране (настраивается пользователем).
     val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     // НОВОЕ (скрытые чаты): полный список скрытых чатов (для отдельного окна).
