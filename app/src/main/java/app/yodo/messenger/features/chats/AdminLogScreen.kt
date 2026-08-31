@@ -160,6 +160,7 @@ private fun iconFor(type: AdminActionType): ImageVector = when (type) {
     AdminActionType.MESSAGE_PINNED -> Icons.Filled.PushPin
     AdminActionType.MESSAGE_UNPINNED -> Icons.Filled.PushPin
     AdminActionType.USER_INVITED -> Icons.Filled.PersonAdd
+    AdminActionType.OWNERSHIP_TRANSFERRED -> Icons.Filled.AdminPanelSettings
 }
 
 @Composable

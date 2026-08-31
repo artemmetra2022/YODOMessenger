@@ -348,7 +348,10 @@ private fun ChatBackgroundPreview(type: ChatBackgroundType, customPath: String) 
             .background(
                 when (type) {
                     ChatBackgroundType.DEFAULT -> MaterialTheme.colorScheme.surfaceVariant
-                    ChatBackgroundType.SOLID_COLOR -> LocalColorTheme.current.primary.copy(alpha = 0.3f)
+                    ChatBackgroundType.GRADIENT_1 -> LocalColorTheme.current.primary.copy(alpha = 0.3f)
+                    ChatBackgroundType.GRADIENT_2 -> LocalColorTheme.current.secondary.copy(alpha = 0.3f)
+                    ChatBackgroundType.GRADIENT_3 -> LocalColorTheme.current.primary.copy(alpha = 0.5f)
+                    ChatBackgroundType.GRADIENT_4 -> LocalColorTheme.current.secondary.copy(alpha = 0.5f)
                     ChatBackgroundType.CUSTOM_IMAGE -> MaterialTheme.colorScheme.surfaceVariant
                 },
                 RoundedCornerShape(8.dp)

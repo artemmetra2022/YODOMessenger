@@ -284,7 +284,7 @@ object NotificationHelper {
             // Ответ уже отправлен — новый звук/вибрация не нужны, только визуальное
             // подтверждение, поэтому используем "тихий" канал независимо от настроек звука.
             .setOnlyAlertOnce(true)
-            .setTimeoutAfter(REPLY_SENT_AUTO_DISMISS_MS)
+        builder.setTimeoutAfter(REPLY_SENT_AUTO_DISMISS_MS)
 
         runCatching {
             NotificationManagerCompat.from(context).notify(chatId.hashCode(), builder.build())

@@ -13,7 +13,6 @@ import app.yodo.messenger.notifications.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.goAsync
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
