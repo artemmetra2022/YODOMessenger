@@ -31,7 +31,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.domain.model.CommentPermission
 import app.yodo.messenger.features.profile.AvatarCropScreen
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
@@ -280,6 +284,73 @@ fun EditChannelScreen(
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
                 } else {
                     Text(if (uiState.profile?.coverBase64 != null) "Изменить обложку" else "Загрузить обложку")
+                }
+            }
+
+            // ═══ НОВОЕ: кто может писать комментарии (владелец/админ канала) ═══
+            if (uiState.canManage) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+                Text(
+                    "Комментарии",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Разрешить комментарии", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Если выключено — комментировать посты нельзя вообще.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = uiState.restrictions.allowComments,
+                        onCheckedChange = { checked ->
+                            viewModel.updateRestrictions(uiState.restrictions.copy(allowComments = checked))
+                        },
+                        enabled = !uiState.isSavingRestrictions,
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = colorTheme.primary)
+                    )
+                }
+
+                // Кто именно может писать — актуально только когда комментарии включены.
+                if (uiState.restrictions.allowComments) {
+                    Text(
+                        "Кто может писать",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp)
+                    )
+                    CommentPermission.entries.forEach { option ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !uiState.isSavingRestrictions) {
+                                    viewModel.updateRestrictions(uiState.restrictions.copy(commentPermission = option))
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = uiState.restrictions.commentPermission == option,
+                                onClick = { viewModel.updateRestrictions(uiState.restrictions.copy(commentPermission = option)) },
+                                enabled = !uiState.isSavingRestrictions
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text(option.title, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    option.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

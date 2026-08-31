@@ -78,6 +78,8 @@ fun GroupInfoScreen(
     // НОВОЕ: подтверждение выхода из группы — раньше кнопка срабатывала в один тап,
     // случайное касание молча выкидывало пользователя из чата.
     var showLeaveConfirm by remember { mutableStateOf(false) }
+    // НОВОЕ (передача владения): участник, которому владелец хочет передать права.
+    var confirmTransferTo by remember { mutableStateOf<YodoUser?>(null) }
 
     LaunchedEffect(didLeave) {
         if (didLeave) onLeftGroup()
@@ -340,12 +342,23 @@ fun GroupInfoScreen(
                         }
                     }
 
+                    // ИЗМЕНЕНО: владелец не может просто выйти — сначала обязан передать
+                    // права другому участнику (это же проверяется на сервере в правилах).
+                    val isOwner = state.info.createdBy == viewModel.myUid
                     Button(
                         onClick = { showLeaveConfirm = true },
                         colors = ButtonDefaults.buttonColors(containerColor = YodoError),
                         modifier = Modifier.fillMaxWidth().padding(16.dp)
                     ) {
                         Text(stringResource(R.string.group_info_leave), color = Color.White)
+                    }
+                    if (isOwner) {
+                        Text(
+                            "Вы владелец группы — чтобы выйти, сначала назначьте владельцем другого участника (значок ⋮ у его имени).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        )
                     }
                 }
             }
@@ -395,6 +408,15 @@ fun GroupInfoScreen(
                         label = "Забанить",
                         onClick = { memberActions = null; confirmMemberAction = member to "ban" }
                     )
+                    // НОВОЕ (передача владения): доступно только текущему владельцу группы,
+                    // не обычному админу.
+                    if ((uiState as? GroupInfoUiState.Content)?.info?.createdBy == viewModel.myUid) {
+                        MemberActionRow(
+                            icon = Icons.Filled.Shield,
+                            label = "Назначить владельцем",
+                            onClick = { memberActions = null; confirmTransferTo = member }
+                        )
+                    }
                 }
             },
             confirmButton = {},
@@ -424,6 +446,30 @@ fun GroupInfoScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmMemberAction = null }) { Text("Отмена") }
+            }
+        )
+    }
+
+    // НОВОЕ (передача владения): подтверждение — действие необратимо без
+    // участия нового владельца (только он сможет передать права обратно).
+    confirmTransferTo?.let { member ->
+        AlertDialog(
+            onDismissRequest = { confirmTransferTo = null },
+            title = { Text("Назначить владельцем?") },
+            text = {
+                Text(
+                    "${member.displayName} станет владельцем группы. Вы останетесь администратором, " +
+                        "но потеряете возможность передать права обратно себе — это сможет сделать только новый владелец."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmTransferTo = null
+                    viewModel.transferOwnership(member.uid)
+                }) { Text("Назначить", color = MaterialTheme.colorScheme.primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmTransferTo = null } ) { Text("Отмена") }
             }
         )
     }

@@ -245,6 +245,10 @@ fun YodoNavGraph(
                 // сразу к экрану информации о группе (раздел «Заявки»).
                 onOpenGroupInfo = { chatId ->
                     navController.navigate(Routes.GroupInfo.createRoute(chatId))
+                },
+                // НОВОЕ (единая вкладка «Админка»): переход к сводному экрану.
+                onOpenAdminHome = {
+                    navController.navigate(Routes.AdminHome.route)
                 }
             )
         }
@@ -267,6 +271,36 @@ fun YodoNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenConversation = { chatId ->
                     navController.navigate(Routes.Chat.createRoute(chatId))
+                }
+            )
+        }
+        // НОВОЕ (единая вкладка «Админка»): сводный экран — точка входа во все
+        // админ-функции приложения. Каждый пункт просто переходит к уже
+        // существующему экрану/потоку, ничего не дублируя по логике.
+        composable(Routes.AdminHome.route) {
+            app.yodo.messenger.features.chats.AdminHomeScreen(
+                onOpenSupportInbox = {
+                    navController.navigate(Routes.AdminPanel.route)
+                },
+                onOpenReports = {
+                    navController.navigate(Routes.ReportInbox.route)
+                },
+                onOpenUsers = {
+                    navController.navigate(Routes.AdminUsers.route)
+                },
+                onOpenOfficialChannel = { chatId ->
+                    navController.navigate(Routes.Chat.createRoute(chatId))
+                }
+            )
+        }
+        // НОВОЕ (единая вкладка «Админка»): поиск пользователя и его глобальная
+        // блокировка. Контекстная блокировка с профиля конкретного человека
+        // (UserProfileScreen) остаётся отдельным, независимым путём.
+        composable(Routes.AdminUsers.route) {
+            app.yodo.messenger.features.chats.AdminUsersScreen(
+                onBack = { navController.popBackStack() },
+                onOpenUserProfile = { userId ->
+                    navController.navigate(Routes.UserProfile.createRoute(userId))
                 }
             )
         }

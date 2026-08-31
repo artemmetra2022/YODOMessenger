@@ -104,6 +104,29 @@ class SettingsViewModel @Inject constructor(
     val whoCanMessageMe: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanMessageMe ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
     val whoCanSeeMyProfile: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanSeeMyProfile ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
 
+    // НОВОЕ (исключения из «Кто может мне писать»): список пользователей, для
+    // которых whoCanMessageMe не действует. Список объектов YodoUser (для показа
+    // имени/аватара) держим отдельным state — currentUser хранит только их uid.
+    private val _messagePrivacyExceptions = MutableStateFlow<List<YodoUser>>(emptyList())
+    val messagePrivacyExceptions: StateFlow<List<YodoUser>> = _messagePrivacyExceptions
+    fun loadMessagePrivacyExceptions() {
+        viewModelScope.launch {
+            _messagePrivacyExceptions.value = userRepository.getMessagePrivacyExceptions()
+        }
+    }
+    fun addMessagePrivacyException(uid: String) {
+        viewModelScope.launch {
+            userRepository.addMessagePrivacyException(uid)
+            loadMessagePrivacyExceptions()
+        }
+    }
+    fun removeMessagePrivacyException(uid: String) {
+        viewModelScope.launch {
+            userRepository.removeMessagePrivacyException(uid)
+            loadMessagePrivacyExceptions()
+        }
+    }
+
     // НОВОЕ (AC/AD): главный админ (одна из 2 почт) — видит раздел «Жалобы».
     val isAppAdmin: Boolean =
         firebaseAuth.currentUser?.email?.lowercase() in app.yodo.messenger.domain.repository.ChatRepository.ADMIN_EMAILS

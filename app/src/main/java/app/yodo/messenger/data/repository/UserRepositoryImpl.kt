@@ -333,6 +333,43 @@ class UserRepositoryImpl @Inject constructor(
         }
     }
 
+    // НОВОЕ (исключения из «Кто может мне писать»): управление списком
+    // messagePrivacyExceptions — пользователей, для которых настройка
+    // whoCanMessageMe не действует (могут писать всегда).
+    override suspend fun addMessagePrivacyException(uid: String): ProfileUpdateResult {
+        val me = firebaseAuth.currentUser?.uid ?: return ProfileUpdateResult.Error("Вы не авторизованы")
+        if (uid == me) return ProfileUpdateResult.Error("Нельзя добавить самого себя")
+        return try {
+            firestore.collection("users").document(me)
+                .update("messagePrivacyExceptions", FieldValue.arrayUnion(uid)).await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось добавить исключение")) }
+    }
+
+    override suspend fun removeMessagePrivacyException(uid: String): ProfileUpdateResult {
+        val me = firebaseAuth.currentUser?.uid ?: return ProfileUpdateResult.Error("Вы не авторизованы")
+        return try {
+            firestore.collection("users").document(me)
+                .update("messagePrivacyExceptions", FieldValue.arrayRemove(uid)).await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) { ProfileUpdateResult.Error(e.toUserMessage("Не удалось удалить исключение")) }
+    }
+
+    override suspend fun getMessagePrivacyExceptions(): List<YodoUser> {
+        val me = firebaseAuth.currentUser?.uid ?: return emptyList()
+        return try {
+            val myDoc = firestore.collection("users").document(me).get().await()
+            val ids = (myDoc.get("messagePrivacyExceptions") as? List<*>)
+                ?.filterIsInstance<String>() ?: return emptyList()
+            ids.mapNotNull { uid ->
+                runCatching {
+                    val doc = firestore.collection("users").document(uid).get().await()
+                    if (doc.exists()) doc.toYodoUser(uid) else null
+                }.getOrNull()
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+
     override suspend fun blockUser(uid: String): ProfileUpdateResult {
         val me = firebaseAuth.currentUser?.uid ?: return ProfileUpdateResult.Error("Вы не авторизованы")
         return try {
@@ -469,6 +506,8 @@ class UserRepositoryImpl @Inject constructor(
         isEmailVerified = getBoolean("isEmailVerified") ?: false,
         whoCanInviteToGroups = PrivacyWho.fromString(getString("whoCanInviteToGroups")),
         whoCanMessageMe = PrivacyWho.fromString(getString("whoCanMessageMe")),
-        whoCanSeeMyProfile = PrivacyWho.fromString(getString("whoCanSeeMyProfile"))
+        whoCanSeeMyProfile = PrivacyWho.fromString(getString("whoCanSeeMyProfile")),
+        messagePrivacyExceptions = (get("messagePrivacyExceptions") as? List<*>)
+            ?.filterIsInstance<String>() ?: emptyList()
     )
 }

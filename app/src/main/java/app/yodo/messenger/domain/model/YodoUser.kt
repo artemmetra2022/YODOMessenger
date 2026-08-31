@@ -34,5 +34,8 @@ data class YodoUser(
     // Приглашать в группы/каналы, писать в личку, просматривать профиль.
     val whoCanInviteToGroups: PrivacyWho = PrivacyWho.EVERYONE,
     val whoCanMessageMe: PrivacyWho = PrivacyWho.EVERYONE,
-    val whoCanSeeMyProfile: PrivacyWho = PrivacyWho.EVERYONE
+    val whoCanSeeMyProfile: PrivacyWho = PrivacyWho.EVERYONE,
+    // НОВОЕ (п.15, исключения): список uid, для которых правило whoCanMessageMe
+    // НЕ действует — они могут писать всегда, даже если выбрано «Никто».
+    val messagePrivacyExceptions: List<String> = emptyList()
 )

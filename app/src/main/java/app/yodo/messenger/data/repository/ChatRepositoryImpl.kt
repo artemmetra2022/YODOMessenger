@@ -721,7 +721,8 @@ class ChatRepositoryImpl @Inject constructor(
                 "allowComments" to true,
                 "allowReactions" to true,
                 "allowSaving" to true,
-                "allowLinkPreviews" to true
+                "allowLinkPreviews" to true,
+                "commentPermission" to app.yodo.messenger.domain.model.CommentPermission.EVERYONE.name
             )
             if (avatarBase64 != null) data["avatarBase64"] = avatarBase64
             newChatRef.set(data).await()
@@ -828,12 +829,19 @@ class ChatRepositoryImpl @Inject constructor(
 
     // НОВОЕ (п.15): публичная проверка настройки приватности. CONTACTS («Только знакомые»)
     // пропускает, если viewer есть в contactIds владельца или у них уже есть личный чат.
+    // НОВОЕ (исключения): вне зависимости от значения `who`, если viewerUid есть в
+    // messagePrivacyExceptions владельца (targetUid) — доступ разрешён всегда.
     override suspend fun isAllowedByPrivacy(
         targetUid: String,
         viewerUid: String,
         who: app.yodo.messenger.domain.model.PrivacyWho
     ): Boolean {
         if (targetUid == viewerUid) return true
+        try {
+            val exceptions = firestore.collection("users").document(targetUid).get().await()
+                .get("messagePrivacyExceptions") as? List<*>
+            if (exceptions?.contains(viewerUid) == true) return true
+        } catch (e: Exception) { /* при ошибке чтения исключений просто идём дальше по общему правилу */ }
         return when (who) {
             app.yodo.messenger.domain.model.PrivacyWho.EVERYONE -> true
             app.yodo.messenger.domain.model.PrivacyWho.NOBODY -> false
@@ -1160,7 +1168,11 @@ class ChatRepositoryImpl @Inject constructor(
             allowComments = doc.getBoolean("allowComments") ?: true,
             allowReactions = doc.getBoolean("allowReactions") ?: true,
             allowSaving = doc.getBoolean("allowSaving") ?: true,
-            allowLinkPreviews = doc.getBoolean("allowLinkPreviews") ?: true
+            allowLinkPreviews = doc.getBoolean("allowLinkPreviews") ?: true,
+            // НОВОЕ (кто может писать комментарии): отсутствующее поле = "Все"
+            // (старое поведение — раз allowComments уже был true по умолчанию).
+            commentPermission = app.yodo.messenger.domain.model.CommentPermission
+                .fromRaw(doc.getString("commentPermission"))
         )
     }
 
@@ -1262,7 +1274,9 @@ class ChatRepositoryImpl @Inject constructor(
                     "allowComments" to restrictions.allowComments,
                     "allowReactions" to restrictions.allowReactions,
                     "allowSaving" to restrictions.allowSaving,
-                    "allowLinkPreviews" to restrictions.allowLinkPreviews
+                    "allowLinkPreviews" to restrictions.allowLinkPreviews,
+                    // НОВОЕ (кто может писать комментарии).
+                    "commentPermission" to restrictions.commentPermission.name
                 )
             ).await()
             ChannelUpdateResult.Success
@@ -1707,12 +1721,68 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
-    override suspend fun leaveGroup(chatId: String) {
-        val uid = firebaseAuth.currentUser?.uid ?: return
-        try {
-            firestore.collection("chats").document(chatId)
-                .update("participantIds", FieldValue.arrayRemove(uid)).await()
-        } catch (e: Exception) { }
+    // ИСПРАВЛЕНИЕ (выход из группы не работал): причин было две.
+    // 1. firestore.rules не разрешали участнику удалить самого себя из
+    //    participantIds — правило allow update покрывало только вход
+    //    (добавление себя) и смену ролей владельцем/админом, поэтому
+    //    arrayRemove(uid) отклонялся с PERMISSION_DENIED.
+    // 2. Ошибка при этом гасилась пустым catch — UI не получал никакого
+    //    сигнала и просто ничего не происходило.
+    // Плюс: владелец не может выйти, бросив группу без владельца — сначала
+    // обязан передать права через transferOwnership().
+    override suspend fun leaveGroup(chatId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val doc = chatRef.get().await()
+            if (!doc.exists()) return ChannelUpdateResult.Error("Группа не найдена")
+            if (doc.getString("createdBy") == uid) {
+                return ChannelUpdateResult.Error("Сначала передайте права владельца другому участнику")
+            }
+            chatRef.update(
+                mapOf(
+                    "participantIds" to FieldValue.arrayRemove(uid),
+                    "adminIds" to FieldValue.arrayRemove(uid)
+                )
+            ).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось выйти из группы"))
+        }
+    }
+
+    // НОВОЕ: передача прав владельца. Только текущий владелец может это
+    // сделать, и только на пользователя, уже состоящего в группе. Прежний
+    // владелец остаётся в adminIds — не теряет доступ к управлению группой.
+    override suspend fun transferOwnership(chatId: String, newOwnerId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val doc = chatRef.get().await()
+            if (!doc.exists()) return ChannelUpdateResult.Error("Группа не найдена")
+            if (doc.getString("createdBy") != uid) {
+                return ChannelUpdateResult.Error("Только владелец может передать права")
+            }
+            val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            if (newOwnerId !in participantIds) {
+                return ChannelUpdateResult.Error("Новый владелец должен быть участником группы")
+            }
+            if (newOwnerId == uid) {
+                return ChannelUpdateResult.Error("Пользователь уже является владельцем")
+            }
+            chatRef.update(
+                mapOf(
+                    "createdBy" to newOwnerId,
+                    "adminIds" to FieldValue.arrayUnion(uid, newOwnerId)
+                )
+            ).await()
+            val targetName = firestore.collection("users").document(newOwnerId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.OWNERSHIP_TRANSFERRED, targetUserId = newOwnerId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось передать права владельца"))
+        }
     }
 
     override suspend fun togglePinChat(chatId: String) {
@@ -1751,13 +1821,30 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override suspend fun clearChatHistory(chatId: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
         try {
+            // БАГ-ФИКС («Очистить историю» падало с «недостаточно прав»): правила
+            // Firestore разрешают удалять сообщение только его автору (senderId ==
+            // текущий пользователь), либо владельцу/модератору чата (isChatModerator),
+            // либо глобальному админу в официальном канале. Раньше здесь удалялись
+            // ВСЕ сообщения без разбора — если в чате было хоть одно чужое сообщение,
+            // весь batch отклонялся целиком с PERMISSION_DENIED, и не удалялось вообще
+            // ничего (даже свои). Теперь: обычный участник чистит только свои
+            // сообщения; владелец/админ/модератор чата — все сообщения в чате.
+            val chatDoc = firestore.collection("chats").document(chatId).get().await()
+            val canDeleteAll = chatDoc.getString("createdBy") == uid ||
+                (chatDoc.get("adminIds") as? List<*>)?.contains(uid) == true
+
             val messagesRef = firestore.collection("chats").document(chatId).collection("messages")
             val snapshot = messagesRef.get().await()
             // Firestore batch ограничен 500 операциями — делим на чанки.
             snapshot.documents.chunked(500).forEach { chunk ->
                 val batch = firestore.batch()
-                chunk.forEach { doc -> batch.delete(doc.reference) }
+                chunk.forEach { doc ->
+                    if (canDeleteAll || doc.getString("senderId") == uid) {
+                        batch.delete(doc.reference)
+                    }
+                }
                 batch.commit().await()
             }
             firestore.collection("chats").document(chatId).update(

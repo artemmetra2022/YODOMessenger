@@ -48,6 +48,11 @@ interface UserRepository {
     // НОВОЕ (п.15): добавить пользователя в мой серверный список контактов
     // (users/{uid}.contactIds) — по нему работает режим «Только знакомые».
     suspend fun addContactId(uid: String)
+    // НОВОЕ (исключения из «Кто может мне писать»): пользователи из этого списка
+    // могут писать мне всегда, даже если whoCanMessageMe == NOBODY/CONTACTS.
+    suspend fun addMessagePrivacyException(uid: String): ProfileUpdateResult
+    suspend fun removeMessagePrivacyException(uid: String): ProfileUpdateResult
+    suspend fun getMessagePrivacyExceptions(): List<YodoUser>
     suspend fun blockUser(uid: String): ProfileUpdateResult
     suspend fun unblockUser(uid: String): ProfileUpdateResult
     suspend fun getBlockedUsers(): List<YodoUser>

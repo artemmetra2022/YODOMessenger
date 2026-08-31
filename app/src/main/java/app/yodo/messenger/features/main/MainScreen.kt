@@ -3,6 +3,7 @@ package app.yodo.messenger.features.main
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Settings
@@ -19,7 +20,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
+import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatListScreen
 
 @Composable
@@ -38,9 +41,16 @@ fun MainScreen(
     // НОВОЕ (каталог/рекомендации каналов): открытие витрины каналов.
     onDiscoverChannels: () -> Unit = {},
     // НОВОЕ (админ-функции групп): переход к экрану группы по тапу на бейдж заявок.
-    onOpenGroupInfo: (String) -> Unit = {}
+    onOpenGroupInfo: (String) -> Unit = {},
+    // НОВОЕ (единая вкладка «Админка»): переход к сводному экрану админ-функций.
+    // Сама вкладка видна только двум доверенным аккаунтам (isAppAdmin).
+    onOpenAdminHome: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    // НОВОЕ (единая вкладка «Админка»): используем тот же ViewModel, что и сам
+    // экран Админки, только чтобы узнать isAppAdmin — без лишнего дублирования
+    // проверки ADMIN_EMAILS.
+    val isAppAdmin = hiltViewModel<AdminHomeViewModel>().isAppAdmin
 
     Scaffold(
         bottomBar = {
@@ -70,6 +80,17 @@ fun MainScreen(
                     icon = { Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_title)) },
                     label = { Text(stringResource(R.string.settings_title)) }
                 )
+                // НОВОЕ (единая вкладка «Админка»): видна только двум доверенным
+                // аккаунтам — у остальных пользователей нижняя навигация из 4
+                // пунктов, без изменений.
+                if (isAppAdmin) {
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = { onOpenAdminHome() },
+                        icon = { Icon(Icons.Filled.AdminPanelSettings, contentDescription = "Админка") },
+                        label = { Text("Админка") }
+                    )
+                }
             }
         }
     ) { padding ->

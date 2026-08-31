@@ -283,7 +283,16 @@ interface ChatRepository {
     suspend fun togglePinTopic(chatId: String, topicId: String): ChannelUpdateResult
     /** Отметить тему прочитанной для текущего пользователя. */
     suspend fun markTopicAsRead(chatId: String, topicId: String)
-    suspend fun leaveGroup(chatId: String)
+    // ИЗМЕНЕНО (выход из группы не работал): раньше метод ничего не возвращал и
+    // глушил любую ошибку — участник не мог понять, почему кнопка «Выйти» не
+    // срабатывает. Теперь возвращает результат; владелец группы не может выйти,
+    // пока не передаст права другому участнику через transferOwnership().
+    suspend fun leaveGroup(chatId: String): ChannelUpdateResult
+
+    // НОВОЕ: передача прав владельца другому участнику группы/канала. Только
+    // текущий владелец может это сделать, и только на существующего участника.
+    // Прежний владелец остаётся в adminIds (не теряет доступ к управлению).
+    suspend fun transferOwnership(chatId: String, newOwnerId: String): ChannelUpdateResult
     suspend fun togglePinChat(chatId: String)
     suspend fun toggleMuteChat(chatId: String)
     // НОВОЕ (архивация чатов): переключить архивный статус чата для текущего пользователя.

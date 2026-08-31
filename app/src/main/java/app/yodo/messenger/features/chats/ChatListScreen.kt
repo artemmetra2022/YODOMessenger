@@ -228,13 +228,24 @@ fun ChatListScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // НОВОЕ: если статус-бар скрыт настройкой — системный отступ сверху
-                    // не нужен (иначе на его месте остался бы пустой зазор), берём
-                    // небольшой фиксированный отступ. Если бар виден как обычно —
-                    // оставляем штатный statusBarsPadding().
+                    // ИЗМЕНЕНО (по просьбе): расстояние от статус-бара до заголовка
+                    // "Yodo Messenger" сделано противоположным тому, что было раньше.
+                    // Когда статус-бар ВКЛЮЧЁН (виден) — отступ должен быть МЕНЬШЕ, чем
+                    // штатный полный statusBarsPadding() (он ощущался слишком большим):
+                    // берём реальную высоту статус-бара и вычитаем часть отступа, но не
+                    // уходим ниже нуля на случай нулевого инсета (жест-навигация/edge-to-edge
+                    // без видимого статус-бара). Когда статус-бар ВЫКЛЮЧЕН (скрыт
+                    // настройкой) — отступ, наоборот, УВЕЛИЧЕН (раньше был мелкий
+                    // фиксированный 4.dp, из-за чего заголовок оказывался слишком
+                    // близко к самому верху экрана).
                     .then(
-                        if (hideStatusBarOnChatList) Modifier.padding(top = 4.dp)
-                        else Modifier.statusBarsPadding()
+                        if (hideStatusBarOnChatList) {
+                            Modifier.padding(top = 20.dp)
+                        } else {
+                            val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars
+                                .asPaddingValues().calculateTopPadding()
+                            Modifier.padding(top = (statusBarHeight - 12.dp).coerceAtLeast(0.dp))
+                        }
                     )
             ) {
                 // Заголовок + иконки

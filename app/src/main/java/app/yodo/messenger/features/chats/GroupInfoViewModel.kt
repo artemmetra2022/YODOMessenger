@@ -106,10 +106,25 @@ class GroupInfoViewModel @Inject constructor(
         load()
     }
 
+    // ИЗМЕНЕНО (выход из группы не работал): теперь обрабатываем результат —
+    // при ошибке (например, владелец без передачи прав) показываем снекбар
+    // вместо тихого "ничего не произошло".
     fun leaveGroup() {
         viewModelScope.launch {
-            chatRepository.leaveGroup(chatId)
-            _didLeave.value = true
+            when (val result = chatRepository.leaveGroup(chatId)) {
+                is ChannelUpdateResult.Error -> _adminState.value = _adminState.value.copy(errorMessage = result.message)
+                ChannelUpdateResult.Success -> _didLeave.value = true
+            }
+        }
+    }
+
+    // НОВОЕ: передача прав владельца выбранному участнику.
+    fun transferOwnership(newOwnerId: String) {
+        viewModelScope.launch {
+            when (val result = chatRepository.transferOwnership(chatId, newOwnerId)) {
+                is ChannelUpdateResult.Error -> _adminState.value = _adminState.value.copy(errorMessage = result.message)
+                ChannelUpdateResult.Success -> reload()
+            }
         }
     }
 

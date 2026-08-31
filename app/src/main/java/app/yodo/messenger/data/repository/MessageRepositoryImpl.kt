@@ -145,6 +145,51 @@ class MessageRepositoryImpl @Inject constructor(
             val chatRef = firestore.collection("chats").document(chatId)
             val chatSnapshot = chatRef.get().await()
             val participantIds = (chatSnapshot.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList<String>()
+            // БАГ-ФИКС («Кто может мне писать» игнорировалось): раньше настройка
+            // whoCanMessageMe проверялась ТОЛЬКО при создании нового чата
+            // (ChatRepositoryImpl.createOrGetPrivateChat) — если чат уже существовал
+            // (например, переписывались раньше, потом сменили настройку на «Никто»),
+            // отправлять сообщения в него можно было всегда. Теперь проверяем настройку
+            // получателя и при каждой отправке в уже существующий личный (PRIVATE) чат,
+            // с учётом списка исключений (messagePrivacyExceptions) — пользователи из
+            // исключений могут писать всегда, даже если выбрано «Никто».
+            if (chatSnapshot.getString("type") == "PRIVATE" && participantIds.size == 2) {
+                val otherUid = participantIds.firstOrNull { it != uid }
+                if (otherUid != null) {
+                    val otherDoc = firestore.collection("users").document(otherUid).get().await()
+                    val who = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                        otherDoc.getString("whoCanMessageMe")
+                    )
+                    if (who != app.yodo.messenger.domain.model.PrivacyWho.EVERYONE) {
+                        val exceptions = otherDoc.get("messagePrivacyExceptions") as? List<*>
+                        val isException = exceptions?.contains(uid) == true
+                        if (!isException) {
+                            val allowedByContacts = who == app.yodo.messenger.domain.model.PrivacyWho.CONTACTS &&
+                                run {
+                                    val contactIds = (otherDoc.get("contactIds") as? List<*>)
+                                        ?.filterIsInstance<String>() ?: emptyList()
+                                    if (uid in contactIds) return@run true
+                                    val existing = firestore.collection("chats")
+                                        .whereArrayContains("participantIds", uid)
+                                        .whereEqualTo("type", "PRIVATE")
+                                        .get().await()
+                                    existing.documents.any { doc ->
+                                        doc.id != chatId &&
+                                            (doc.get("participantIds") as? List<*>)?.contains(otherUid) == true
+                                    }
+                                }
+                            if (!allowedByContacts) {
+                                return SendMessageResult.Error(
+                                    if (who == app.yodo.messenger.domain.model.PrivacyWho.NOBODY)
+                                        "Пользователь запретил писать ему"
+                                    else
+                                        "Пользователь принимает личные сообщения только от знакомых"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             // НОВОЕ (закрытие темы): владелец/админ закрыл раздел — писать в него больше нельзя.
             if (topicId != null) {
                 val topicSnapshot = chatRef.collection("topics").document(topicId).get().await()
@@ -205,30 +250,71 @@ class MessageRepositoryImpl @Inject constructor(
             // WriteBatch: либо сообщение и сопутствующие обновления применяются вместе,
             // либо не применяется ничего, и повторная отправка действительно оправдана.
             val newDocRef = chatRef.collection("messages").document()
-            val batch = firestore.batch()
-            batch.set(newDocRef, data)
-            // НОВОЕ (превью после удаления): lastMessageId нужен, чтобы при удалении
-            // сообщения точно знать, было ли оно последним в чате (см.
-            // refreshLastMessagePreviewIfNeeded), не полагаясь на сравнение времени.
             unreadUpdates["lastMessageId"] = newDocRef.id
-            batch.update(chatRef, unreadUpdates)
-            if (topicId != null) {
-                val topicUpdates = mutableMapOf<String, Any?>(
+            val topicUpdates: MutableMap<String, Any?>? = if (topicId != null) {
+                mutableMapOf<String, Any?>(
                     "lastMessage" to previewText,
                     "lastMessageTimestamp" to now,
                     "lastMessageSenderId" to uid
-                )
-                // НОВОЕ (бейдж непрочитанных по темам): считаем непрочитанные отдельно
-                // внутри документа темы, а не только на весь чат целиком.
-                participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
-                    topicUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
+                ).also { updates ->
+                    participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
+                        updates["unreadCounts.$otherUid"] = FieldValue.increment(1)
+                    }
                 }
+            } else null
+
+            // БАГ-ФИКС (п.18: лимит «1 активное обращение в поддержку» не срабатывал):
+            // раньше проверка hasAwaitingSupportReply() читала документ чата ДО отправки,
+            // отдельным вызовом в ViewModel, а сама запись сообщения шла отдельным
+            // WriteBatch. Если пользователь отправлял два сообщения почти одновременно
+            // (например, быстро нажимал Enter/кнопку отправки дважды), оба запроса
+            // читали ещё не обновлённое состояние чата ДО того, как первый успевал
+            // закоммититься — классический race condition, оба сообщения проходили
+            // проверку и отправлялись. Для чата поддержки (не админом) запись теперь
+            // идёт через Firestore-транзакцию: проверка «есть ли уже неотвеченное моё
+            // сообщение» и сама запись атомарны относительно друг друга — при гонке
+            // одна из транзакций увидит уже обновлённый lastMessageSenderId и будет
+            // автоматически повторена (runTransaction), увидит блокировку и завершится ошибкой.
+            val isMySupportChatSend = chatId.startsWith("support_") &&
+                chatId == "support_$uid" && data["senderId"] != "support_system"
+            if (isMySupportChatSend) {
+                try {
+                    firestore.runTransaction { txn ->
+                        val freshChat = txn.get(chatRef)
+                        val lastSenderId = freshChat.getString("lastMessageSenderId")
+                        val lastMessage = freshChat.getString("lastMessage").orEmpty()
+                        if (lastSenderId == uid && lastMessage.isNotBlank()) {
+                            throw AwaitingSupportReplyException()
+                        }
+                        txn.set(newDocRef, data)
+                        txn.update(chatRef, unreadUpdates)
+                        if (topicId != null && topicUpdates != null) {
+                            txn.update(chatRef.collection("topics").document(topicId), topicUpdates)
+                        }
+                        null
+                    }.await()
+                } catch (e: AwaitingSupportReplyException) {
+                    return SendMessageResult.Error(
+                        "У вас уже есть активное обращение в поддержку без ответа. Дождитесь ответа оператора, прежде чем писать снова."
+                    )
+                }
+                return SendMessageResult.Success(messageId = newDocRef.id)
+            }
+
+            val batch = firestore.batch()
+            batch.set(newDocRef, data)
+            batch.update(chatRef, unreadUpdates)
+            if (topicId != null && topicUpdates != null) {
                 batch.update(chatRef.collection("topics").document(topicId), topicUpdates)
             }
             batch.commit().await()
             SendMessageResult.Success(messageId = newDocRef.id)
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отправить сообщение")) }
     }
+
+    // Служебное исключение для runTransaction: сигнализирует, что у пользователя уже
+    // есть отправленное в поддержку сообщение без ответа оператора (см. sendRawMessage).
+    private class AwaitingSupportReplyException : Exception()
 
     override suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext?,
@@ -798,17 +884,21 @@ class MessageRepositoryImpl @Inject constructor(
         try {
             val showReadReceipts = userSettingsPreferences.showReadReceipts.first()
             val chatRef = firestore.collection("chats").document(chatId)
+            val messagesRef = chatRef.collection("messages")
+            // whereNotEqualTo требует составного индекса — заменяем на фильтрацию
+            // в памяти: загружаем SENT- и DELIVERED-сообщения (статусы до READ),
+            // затем отбираем чужие. Читаем это всегда (не только при showReadReceipts),
+            // так как ниже используем этот же список, чтобы синхронизировать unreadCounts
+            // без гонки (см. комментарий ниже) — при выключенных read receipts переход
+            // статусов в READ просто не выполняется, но список для подсчёта нужен всё равно.
+            val sentSnapshot = messagesRef.whereEqualTo("status", "SENT").get().await()
+            val deliveredSnapshot = messagesRef.whereEqualTo("status", "DELIVERED").get().await()
+            val unreadDocs = (sentSnapshot.documents + deliveredSnapshot.documents)
+                .filter { it.getString("senderId") != uid }
             if (showReadReceipts) {
-                val messagesRef = chatRef.collection("messages")
-                // whereNotEqualTo требует составного индекса — заменяем на фильтрацию
-                // в памяти: загружаем SENT- и DELIVERED-сообщения (статусы до READ),
-                // затем отбираем чужие. Batch делим по 500, чтобы не превысить лимит
-                // Firestore. ИСПРАВЛЕНО: раньше проверялся только "SENT" — сообщения,
-                // уже помеченные DELIVERED, не переходили в READ при открытии чата.
-                val sentSnapshot = messagesRef.whereEqualTo("status", "SENT").get().await()
-                val deliveredSnapshot = messagesRef.whereEqualTo("status", "DELIVERED").get().await()
-                val unreadDocs = (sentSnapshot.documents + deliveredSnapshot.documents)
-                    .filter { it.getString("senderId") != uid }
+                // ИСПРАВЛЕНО: раньше проверялся только "SENT" — сообщения, уже помеченные
+                // DELIVERED, не переходили в READ при открытии чата. Batch делим по 500,
+                // чтобы не превысить лимит Firestore.
                 if (unreadDocs.isNotEmpty()) {
                     unreadDocs.chunked(500).forEach { chunk ->
                         val batch = firestore.batch()
@@ -821,7 +911,46 @@ class MessageRepositoryImpl @Inject constructor(
                     chatRef.update("lastMessageStatus", "READ").await()
                 }
             }
-            chatRef.update("unreadCounts.$uid", 0).await()
+            // ФИКС (залипание бейджа при двух сообщениях подряд с разницей ~15 сек):
+            // раньше здесь стояло безусловное chatRef.update("unreadCounts.$uid", 0).
+            // Это гонка с отправителем: когда приходит первое сообщение, наш клиент
+            // (уже открывший чат) тут же запускает этот suspend-вызов и в конце обнуляет
+            // счётчик. Если пока он выполняется (сеть, несколько await() выше) отправитель
+            // шлёт второе сообщение — на сервере выполняется unreadCounts.$uid =
+            // increment(1) для него. Порядок применения двух конкурентных записей на
+            // сервере Firestore не гарантирован: если increment(1) применится ПОСЛЕ нашей
+            // записи 0, счётчик останется равным 1, хотя оба сообщения уже показаны и
+            // прочитаны. А поскольку это изменение поля самого чата, а не нового документа
+            // в /messages, слушатель observeMessages() на него не реагирует и повторно
+            // markAsRead() не вызывает — бейдж "залипает" до выхода из чата и входа заново.
+            // Решение: вместо безусловной записи 0 сверяем unreadCounts с реальным числом
+            // чужих непрочитанных сообщений (unreadDocs, уже посчитанным выше — если
+            // showReadReceipts включён, это ровно то, что мы только что пометили READ).
+            // Если по факту чужих непрочитанных нет — обнуляем, даже если серверный
+            // счётчик "уполз" выше из-за гонки с increment(1) отправителя. Если же
+            // непрочитанные остались (пришло новое сообщение уже после чтения выше) —
+            // подтягиваем счётчик к их реальному числу вместо того, чтобы оставлять
+            // завышенное "залипшее" значение; свежее сообщение при этом всё равно придёт
+            // отдельным snapshot'ом в observeMessages() и вызовет markAsRead() ещё раз.
+            val stillUnreadCount = unreadDocs.size
+            firestore.runTransaction { tx ->
+                val snap = tx.get(chatRef)
+                val unreadMap = snap.get("unreadCounts") as? Map<*, *>
+                val current = (unreadMap?.get(uid) as? Long)?.toInt() ?: 0
+                if (stillUnreadCount == 0) {
+                    // Все чужие сообщения, которые видели выше, действительно прочитаны —
+                    // безопасно обнулить, даже если current сейчас больше (это и есть
+                    // симптом гонки, который мы чиним).
+                    if (current != 0) tx.update(chatRef, "unreadCounts.$uid", 0)
+                } else if (current > stillUnreadCount) {
+                    // Появилось новое сообщение уже после нашей проверки выше (retry
+                    // логика в observeMessages его подхватит и вызовет markAsRead ещё
+                    // раз) — но раз старый счётчик явно завышен относительно того, что
+                    // мы только что нашли, подтягиваем его к реальному значению вместо
+                    // того чтобы оставлять "залипшим".
+                    tx.update(chatRef, "unreadCounts.$uid", stillUnreadCount)
+                }
+            }.await()
         } catch (e: Exception) { }
     }
 
@@ -1025,9 +1154,41 @@ class MessageRepositoryImpl @Inject constructor(
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Комментарий не может быть пустым")
         return try {
+            // НОВОЕ (настройки канала: кто может писать комментарии): раньше здесь не
+            // было никакой проверки allowComments/commentPermission вообще — переключатель
+            // в настройках канала был чисто декоративным, комментировать мог кто угодно.
+            // Теперь проверяем и общий флаг, и (если комментарии включены) круг лиц.
+            val chatRef = firestore.collection("chats").document(chatId)
+            val chatDoc = chatRef.get().await()
+            val allowComments = chatDoc.getBoolean("allowComments") ?: true
+            if (!allowComments) {
+                return SendMessageResult.Error("Комментарии к этому каналу отключены")
+            }
+            val commentPermission = app.yodo.messenger.domain.model.CommentPermission
+                .fromRaw(chatDoc.getString("commentPermission"))
+            val ownerId = chatDoc.getString("createdBy")
+            val adminIds = (chatDoc.get("adminIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            val participantIds = (chatDoc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            val isAdmin = uid == ownerId || uid in adminIds
+            val isSubscriber = uid in participantIds
+            val allowed = when (commentPermission) {
+                app.yodo.messenger.domain.model.CommentPermission.EVERYONE -> true
+                app.yodo.messenger.domain.model.CommentPermission.SUBSCRIBERS_ONLY -> isSubscriber || isAdmin
+                app.yodo.messenger.domain.model.CommentPermission.ADMINS_ONLY -> isAdmin
+            }
+            if (!allowed) {
+                val reason = when (commentPermission) {
+                    app.yodo.messenger.domain.model.CommentPermission.SUBSCRIBERS_ONLY ->
+                        "Комментировать могут только подписчики канала"
+                    app.yodo.messenger.domain.model.CommentPermission.ADMINS_ONLY ->
+                        "Комментировать могут только администраторы канала"
+                    else -> "Недостаточно прав для комментирования"
+                }
+                return SendMessageResult.Error(reason)
+            }
             val myDoc = firestore.collection("users").document(uid).get().await()
             val senderName = myDoc.getString("displayName")?.takeIf { it.isNotBlank() } ?: "Пользователь"
-            val messageRef = firestore.collection("chats").document(chatId)
+            val messageRef = chatRef
                 .collection("messages").document(messageId)
             messageRef.collection("comments").add(
                 mapOf(
