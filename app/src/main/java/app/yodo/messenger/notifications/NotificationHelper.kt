@@ -266,8 +266,9 @@ object NotificationHelper {
 
         val conversationTitle = history.lastOrNull { it.senderName != "Вы" }?.senderName
         val me = Person.Builder().setName("Вы").build()
-        val messagingStyle = NotificationCompat.MessagingStyle(me).apply {
-            if (conversationTitle != null) setConversationTitle(conversationTitle)
+        val messagingStyle = NotificationCompat.MessagingStyle(me)
+        if (conversationTitle != null) {
+            messagingStyle.setConversationTitle(conversationTitle)
         }
         history.forEach { msg ->
             val sender = Person.Builder().setName(msg.senderName).build()
