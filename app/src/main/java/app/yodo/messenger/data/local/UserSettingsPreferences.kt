@@ -109,6 +109,9 @@ class UserSettingsPreferences @Inject constructor(
     // НОВОЕ (поиск по настройкам): показывать ли результаты настроек в общем поиске.
     private val showSettingsInGlobalSearchKey = booleanPreferencesKey("show_settings_in_global_search")
 
+    // НОВОЕ: скрывать системный статус-бар (время/батарея) на экране списка чатов.
+    private val hideStatusBarOnChatListKey = booleanPreferencesKey("hide_status_bar_on_chat_list")
+
     val sendOnEnter: Flow<Boolean> = context.settingsDataStore.data.map { it[sendOnEnterKey] ?: true }
     val fontSize: Flow<FontSize> = context.settingsDataStore.data.map { prefs ->
         prefs[fontSizeKey]?.let { raw -> runCatching { FontSize.valueOf(raw) }.getOrNull() } ?: FontSize.MEDIUM
@@ -128,6 +131,9 @@ class UserSettingsPreferences @Inject constructor(
 
     // НОВОЕ (поиск по настройкам): по умолчанию включено — настройки видны в общем поиске.
     val showSettingsInGlobalSearch: Flow<Boolean> = context.settingsDataStore.data.map { it[showSettingsInGlobalSearchKey] ?: true }
+
+    // НОВОЕ: по умолчанию выключено — статус-бар на списке чатов виден, как раньше.
+    val hideStatusBarOnChatList: Flow<Boolean> = context.settingsDataStore.data.map { it[hideStatusBarOnChatListKey] ?: false }
 
     val pinRequirement: Flow<PinRequirement> = context.settingsDataStore.data.map { prefs ->
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
@@ -210,6 +216,7 @@ class UserSettingsPreferences @Inject constructor(
     suspend fun setAdvancedPollsEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[advancedPollsEnabledKey] = enabled } }
     // НОВОЕ (поиск по настройкам): включить/выключить показ настроек в общем поиске.
     suspend fun setShowSettingsInGlobalSearch(enabled: Boolean) { context.settingsDataStore.edit { it[showSettingsInGlobalSearchKey] = enabled } }
+    suspend fun setHideStatusBarOnChatList(enabled: Boolean) { context.settingsDataStore.edit { it[hideStatusBarOnChatListKey] = enabled } }
 
     suspend fun setPin(pin: String) {
         val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()

@@ -91,9 +91,15 @@ class InviteToChannelViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(isInviting = true, errorMessage = null)
         viewModelScope.launch {
-            chatRepository.inviteUsersToChannel(chatId, members)
-            _uiState.value = _uiState.value.copy(isInviting = false)
-            _invited.value = true
+            // НОВОЕ (п.15): репозиторий возвращает имена тех, кого не пригласили —
+            // они ограничили настройку приватности «Кто может приглашать в группы».
+            val skipped = chatRepository.inviteUsersToChannel(chatId, members)
+            _uiState.value = _uiState.value.copy(
+                isInviting = false,
+                errorMessage = if (skipped.isEmpty()) null
+                else "Не приглашены (настройка «Кто может приглашать в группы»): " + skipped.joinToString(", ")
+            )
+            if (skipped.size < members.size) _invited.value = true
         }
     }
 

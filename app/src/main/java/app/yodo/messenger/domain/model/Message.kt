@@ -23,6 +23,9 @@ data class Message(
     val imagesBase64: List<String> = emptyList(),
     val isEdited: Boolean = false,
     val isDeleted: Boolean = false,
+    // НОВОЕ (баг 10): сообщение удалено администратором (по жалобе или модерацией) —
+    // вместо обычной заглушки показываем «Сообщение удалено администратором».
+    val deletedByAdmin: Boolean = false,
     val forwardedFromSenderName: String? = null,
     val forwardedFromSenderId: String? = null,
     val forwardedFromSenderPhotoUrl: String? = null,

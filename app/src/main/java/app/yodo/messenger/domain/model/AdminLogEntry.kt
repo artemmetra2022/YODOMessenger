@@ -18,7 +18,8 @@ enum class AdminActionType(val label: String) {
     CHAT_INFO_CHANGED("Изменение параметров чата"),
     MESSAGE_PINNED("Закрепление сообщения"),
     MESSAGE_UNPINNED("Открепление сообщения"),
-    USER_INVITED("Приглашение участника")
+    USER_INVITED("Приглашение участника"),
+    OWNERSHIP_TRANSFERRED("Передача прав владельца")
 }
 
 /**

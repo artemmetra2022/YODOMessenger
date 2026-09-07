@@ -25,7 +25,10 @@ data class ChannelProfileUiState(
     val owner: YodoUser? = null,
     val admins: List<YodoUser> = emptyList(),
     val isOwner: Boolean = false,
-    val canManage: Boolean = false
+    val canManage: Boolean = false,
+    // НОВОЕ (п.22 ТЗ): текущий пользователь — нужен, чтобы подставить имя
+    // отправителя в текст приглашения ("Вас пригласил(а) <имя>").
+    val currentUser: YodoUser? = null
 )
 
 @HiltViewModel
@@ -67,6 +70,13 @@ class ChannelProfileViewModel @Inject constructor(
             val recentPosts = messageRepository.getRecentMessages(chatId, 3)
             val owner = profile.ownerId?.let { userRepository.getUserById(it) }
             val admins = profile.adminIds.mapNotNull { userRepository.getUserById(it) }
+            // НОВОЕ (п.22 ТЗ): текущий пользователь для текста приглашения "с отправителем".
+            // Если он совпадает с владельцем — не делаем лишний повторный запрос.
+            val currentUser = when (myUid) {
+                null -> null
+                owner?.uid -> owner
+                else -> userRepository.getUserById(myUid)
+            }
             _uiState.value = ChannelProfileUiState(
                 isLoading = false,
                 profile = profile,
@@ -75,7 +85,8 @@ class ChannelProfileViewModel @Inject constructor(
                 owner = owner,
                 admins = admins,
                 isOwner = myUid != null && myUid == profile.ownerId,
-                canManage = myUid != null && (myUid == profile.ownerId || myUid in profile.adminIds)
+                canManage = myUid != null && (myUid == profile.ownerId || myUid in profile.adminIds),
+                currentUser = currentUser
             )
         }
     }

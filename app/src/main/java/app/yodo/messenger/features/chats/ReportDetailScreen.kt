@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -168,9 +169,9 @@ fun ReportDetailScreen(
             ResolveReportDialog(
                 report = report,
                 onDismiss = { showResolveDialog = false },
-                onConfirm = { resolution, comment, deleteMessage, banUser ->
+                onConfirm = { resolution, comment, deleteMessage, banUser, silentDelete ->
                     showResolveDialog = false
-                    viewModel.resolve(resolution, comment, deleteMessage, banUser)
+                    viewModel.resolve(resolution, comment, deleteMessage, banUser, silentDelete)
                 }
             )
         }
@@ -300,10 +301,12 @@ private fun DismissReportDialog(onDismiss: () -> Unit, onConfirm: (String) -> Un
 private fun ResolveReportDialog(
     report: Report,
     onDismiss: () -> Unit,
-    onConfirm: (ReportResolution, String, Boolean, Boolean) -> Unit
+    onConfirm: (ReportResolution, String, Boolean, Boolean, Boolean) -> Unit
 ) {
     var deleteMessage by remember { mutableStateOf(report.targetType == ReportTargetType.MESSAGE) }
     var banUser by remember { mutableStateOf(false) }
+    // НОВОЕ (баг 10): тихое удаление — доступно только вместе с удалением сообщения.
+    var silentDelete by remember { mutableStateOf(false) }
     var comment by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -317,6 +320,38 @@ private fun ResolveReportDialog(
                         Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.width(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Удалить сообщение")
+                    }
+                    // НОВОЕ (баг 10): тихое удаление — сообщение исчезает бесследно,
+                    // без заглушки «Сообщение удалено администратором».
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Checkbox(
+                            checked = silentDelete,
+                            onCheckedChange = {
+                                silentDelete = it
+                                if (it) deleteMessage = true
+                            },
+                            enabled = deleteMessage
+                        )
+                        Icon(
+                            Icons.Filled.VisibilityOff,
+                            contentDescription = null,
+                            modifier = Modifier.width(18.dp),
+                            tint = if (deleteMessage) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Тихое удаление (без пометки)",
+                            color = if (deleteMessage) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (deleteMessage) {
+                        Text(
+                            if (silentDelete) "Сообщение будет удалено бесследно — участники его больше не увидят."
+                            else "В чате появится пометка «Сообщение удалено администратором».",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 12.dp).fillMaxWidth()
+                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -338,12 +373,11 @@ private fun ResolveReportDialog(
             TextButton(
                 onClick = {
                     val resolution = when {
-                        deleteMessage && banUser -> ReportResolution.USER_BANNED
                         banUser -> ReportResolution.USER_BANNED
                         deleteMessage -> ReportResolution.MESSAGE_DELETED
                         else -> ReportResolution.NO_ACTION
                     }
-                    onConfirm(resolution, comment, deleteMessage, banUser)
+                    onConfirm(resolution, comment, deleteMessage, banUser, silentDelete)
                 }
             ) { Text("Подтвердить") }
         },

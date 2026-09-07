@@ -3,6 +3,7 @@ package app.yodo.messenger.domain.repository
 import android.graphics.Bitmap
 import android.net.Uri
 import app.yodo.messenger.domain.model.GlobalBlock
+import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.ProfileHistoryEntry
 import app.yodo.messenger.domain.model.YodoUser
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +38,21 @@ interface UserRepository {
         showBirthDate: Boolean, showAboutMe: Boolean, showLocation: Boolean,
         showWebsite: Boolean, showPhoneNumber: Boolean, showEmail: Boolean
     ): ProfileUpdateResult
+    // НОВОЕ (п.15): настройки приватности «кто может …» — приглашать в группы,
+    // писать в личку, смотреть профиль. Хранятся в документе пользователя в Firestore.
+    suspend fun updatePrivacyWho(
+        whoCanInviteToGroups: PrivacyWho,
+        whoCanMessageMe: PrivacyWho,
+        whoCanSeeMyProfile: PrivacyWho
+    ): ProfileUpdateResult
+    // НОВОЕ (п.15): добавить пользователя в мой серверный список контактов
+    // (users/{uid}.contactIds) — по нему работает режим «Только знакомые».
+    suspend fun addContactId(uid: String)
+    // НОВОЕ (исключения из «Кто может мне писать»): пользователи из этого списка
+    // могут писать мне всегда, даже если whoCanMessageMe == NOBODY/CONTACTS.
+    suspend fun addMessagePrivacyException(uid: String): ProfileUpdateResult
+    suspend fun removeMessagePrivacyException(uid: String): ProfileUpdateResult
+    suspend fun getMessagePrivacyExceptions(): List<YodoUser>
     suspend fun blockUser(uid: String): ProfileUpdateResult
     suspend fun unblockUser(uid: String): ProfileUpdateResult
     suspend fun getBlockedUsers(): List<YodoUser>
@@ -55,4 +71,18 @@ interface UserRepository {
     suspend fun removeGlobalBlock(uid: String): ProfileUpdateResult
     /** Глобальная блокировка конкретного пользователя (для админ-UI). */
     suspend fun getGlobalBlock(uid: String): GlobalBlock?
+
+    // НОВОЕ (глобальный аудит-лог): чтение журнала для AdminAuditLogScreen.
+    // Доступно только двум главным админам — проверяется и здесь (защита UI),
+    // и в firestore.rules (защита данных).
+    suspend fun getGlobalAuditLog(
+        limit: Int = 50,
+        startAfterTimestamp: Long? = null
+    ): List<app.yodo.messenger.domain.model.GlobalAdminLogEntry>
+
+    // НОВОЕ (глобальный аудит-лог): запись события "изменение обязательного
+    // подтверждения email" — вызывается из AdminHomeViewModel рядом с
+    // AppSettingsRepository.setRequireEmailVerification, чтобы это изменение
+    // тоже попадало в общий журнал действий Админки.
+    suspend fun logRequireEmailVerificationChanged(enabled: Boolean)
 }

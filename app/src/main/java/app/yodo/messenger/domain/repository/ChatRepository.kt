@@ -13,6 +13,7 @@ import app.yodo.messenger.domain.model.JoinRequest
 import app.yodo.messenger.domain.model.CustomRole
 import app.yodo.messenger.domain.model.ForumTopic
 import app.yodo.messenger.domain.model.MemberPermissions
+import app.yodo.messenger.domain.model.SupportRestriction
 import app.yodo.messenger.domain.model.YodoUser
 import kotlinx.coroutines.flow.Flow
 
@@ -185,8 +186,19 @@ interface ChatRepository {
     suspend fun deleteChannel(chatId: String): ChannelUpdateResult
     suspend fun addChannelAdmin(chatId: String, userId: String)
     suspend fun removeChannelAdmin(chatId: String, userId: String)
-    // НОВОЕ: приглашение пользователей в канал (подписка "за них", инициированная владельцем/админом).
-    suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>)
+    // НОВОЕ (п.15): приглашение пользователей в канал (подписка "за них", инициированная владельцем/админом).
+    // Возвращает имена пользователей, которых НЕ удалось пригласить — они ограничили
+    // настройку приватности «Кто может приглашать в группы».
+    suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>): List<String>
+
+    // НОВОЕ (п.15): проверка настройки приватности «кто может …» владельца targetUid
+    // для viewerUid. CONTACTS пропускает знакомых (есть в contactIds владельца
+    // или уже есть личный чат).
+    suspend fun isAllowedByPrivacy(
+        targetUid: String,
+        viewerUid: String,
+        who: app.yodo.messenger.domain.model.PrivacyWho
+    ): Boolean
 
     // НОВОЕ (переработка каналов):
     /** Поиск каналов по префиксу названия (без учёта регистра). */
@@ -237,6 +249,21 @@ interface ChatRepository {
     /** Для админ-панели: поток всех бесед поддержки (новые сверху). */
     fun observeSupportConversations(): Flow<List<SupportConversation>>
 
+    // НОВОЕ (п.18 ТЗ): только 1 активное (без ответа) обращение в поддержку.
+    /** true, если последнее сообщение в чате поддержки текущего пользователя — от него самого
+     * (админ ещё не ответил), т.е. новое сообщение отправлять пока нельзя. */
+    suspend fun hasAwaitingSupportReply(): Boolean
+
+    // === НОВОЕ (п.19 ТЗ): ограничение возможности писать в поддержку ===
+    /** Поток текущего ограничения (или null) для текущего пользователя — для проверки перед отправкой. */
+    fun observeMySupportRestriction(): Flow<SupportRestriction?>
+    /** Разовое чтение ограничения указанного пользователя (для админ-панели). */
+    suspend fun getSupportRestriction(uid: String): SupportRestriction?
+    /** Наложить ограничение. durationMillis == null -> навсегда, иначе истекает через это время. */
+    suspend fun setSupportRestriction(uid: String, reason: String, durationMillis: Long?): ChannelUpdateResult
+    /** Снять ограничение. */
+    suspend fun removeSupportRestriction(uid: String): ChannelUpdateResult
+
     suspend fun getChatInfo(chatId: String): ChatInfo?
 
     // ИСПРАВЛЕНО (шапка чата иногда показывает "Чат"/аватар-заглушку): getChatInfo — разовый
@@ -256,7 +283,16 @@ interface ChatRepository {
     suspend fun togglePinTopic(chatId: String, topicId: String): ChannelUpdateResult
     /** Отметить тему прочитанной для текущего пользователя. */
     suspend fun markTopicAsRead(chatId: String, topicId: String)
-    suspend fun leaveGroup(chatId: String)
+    // ИЗМЕНЕНО (выход из группы не работал): раньше метод ничего не возвращал и
+    // глушил любую ошибку — участник не мог понять, почему кнопка «Выйти» не
+    // срабатывает. Теперь возвращает результат; владелец группы не может выйти,
+    // пока не передаст права другому участнику через transferOwnership().
+    suspend fun leaveGroup(chatId: String): ChannelUpdateResult
+
+    // НОВОЕ: передача прав владельца другому участнику группы/канала. Только
+    // текущий владелец может это сделать, и только на существующего участника.
+    // Прежний владелец остаётся в adminIds (не теряет доступ к управлению).
+    suspend fun transferOwnership(chatId: String, newOwnerId: String): ChannelUpdateResult
     suspend fun togglePinChat(chatId: String)
     suspend fun toggleMuteChat(chatId: String)
     // НОВОЕ (архивация чатов): переключить архивный статус чата для текущего пользователя.

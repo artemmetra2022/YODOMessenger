@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,12 +38,14 @@ import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Verified
@@ -60,6 +64,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,6 +85,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
 import app.yodo.messenger.data.local.HiddenPinResult
 import app.yodo.messenger.features.settings.PinCellsInput
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -97,6 +103,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
+import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.YodoMotion
@@ -150,6 +157,8 @@ fun ChatListScreen(
     val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
     // НОВОЕ (AF): состояние обновления и жест "потянуть вниз — обновить чаты".
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    // НОВОЕ: настройка "скрывать статус-бар на списке чатов" (переключается в настройках).
+    val hideStatusBarOnChatList by viewModel.hideStatusBarOnChatList.collectAsState()
     val colorTheme = LocalColorTheme.current
     var showFabMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
@@ -158,6 +167,24 @@ fun ChatListScreen(
     androidx.compose.runtime.LaunchedEffect(Unit) {
         viewModel.actionError.collect { message ->
             snackbarHostState.showSnackbar(message)
+        }
+    }
+    // НОВОЕ: скрытие системного статус-бара только на этом экране, если включено в
+    // настройках. При выходе с экрана (или выключении настройки) бар обязательно
+    // возвращается — иначе он остался бы скрытым и на остальных экранах приложения.
+    // BEHAVIOR_SHOW_BARS_BY_SWIPE — свайп сверху временно покажет бар, как в обычных
+    // полноэкранных приложениях, вместо жёсткого "намертво скрыт".
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(hideStatusBarOnChatList, view) {
+        val window = (view.context as? android.app.Activity)?.window
+        val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+        if (hideStatusBarOnChatList && insetsController != null) {
+            insetsController.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_BARS_BY_SWIPE
+            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        }
+        onDispose {
+            insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
         }
     }
     // НОВОЕ (папки): чат, для которого открыт выбор папки (добавить/убрать из папок).
@@ -203,13 +230,34 @@ fun ChatListScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
+                    // ИЗМЕНЕНО (по просьбе): расстояние от статус-бара до заголовка
+                    // "Yodo Messenger" сделано противоположным тому, что было раньше.
+                    // Когда статус-бар ВКЛЮЧЁН (виден) — отступ должен быть МЕНЬШЕ, чем
+                    // штатный полный statusBarsPadding() (он ощущался слишком большим):
+                    // берём реальную высоту статус-бара и вычитаем часть отступа, но не
+                    // уходим ниже нуля на случай нулевого инсета (жест-навигация/edge-to-edge
+                    // без видимого статус-бара). Когда статус-бар ВЫКЛЮЧЕН (скрыт
+                    // настройкой) — отступ, наоборот, УВЕЛИЧЕН (раньше был мелкий
+                    // фиксированный 4.dp, из-за чего заголовок оказывался слишком
+                    // близко к самому верху экрана).
+                    .then(
+                        if (hideStatusBarOnChatList) {
+                            Modifier.padding(top = 20.dp)
+                        } else {
+                            val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars
+                                .asPaddingValues().calculateTopPadding()
+                            Modifier.padding(top = (statusBarHeight - 12.dp).coerceAtLeast(0.dp))
+                        }
+                    )
             ) {
                 // Заголовок + иконки
+                // ИЗМЕНЕНО: вертикальный отступ уменьшен примерно в 2,2 раза (было 8dp)
+                // по просьбе — расстояние от верха до "Yodo Messenger" меньше независимо
+                // от того, скрыт статус-бар или нет.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 3.6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // БАГ-ФИКС (заголовок главного экрана): во время загрузки чатов с
@@ -411,7 +459,9 @@ fun ChatListScreen(
                                     }
                                 }
                             }
-                            items(state.chats, key = { it.chatId }) { chat ->
+                            // НОВОЕ (п.16, оптимизация прокрутки): contentType помогает
+                            // LazyColumn переиспользовать композиции однотипных строк.
+                            items(state.chats, key = { it.chatId }, contentType = { "chat_row" }) { chat ->
                                 SwipeableChatListItem(
                                     chat = chat,
                                     colorTheme = colorTheme,
@@ -618,7 +668,7 @@ private fun HiddenChatsEmptyWindow(onDismiss: () -> Unit) {
 }
 
 // ---------------------------------------------------------------------------
-// Го��изонтальные табы фильтрации + папки
+// Горизонтальные табы фильтрации + папки
 // ---------------------------------------------------------------------------
 @Composable
 private fun ChatFilterTabs(
@@ -1195,11 +1245,7 @@ private fun ChatListItem(
                     userId = chat.otherUserId ?: chat.chatId
                 )
                 if (chat.isOnline) {
-                    Box(
-                        modifier = Modifier.size(14.dp).align(Alignment.BottomEnd)
-                            .clip(CircleShape).background(MaterialTheme.colorScheme.background)
-                            .padding(2.dp).clip(CircleShape).background(YodoOnline)
-                    )
+                    OnlineStatusDot(chat)
                 }
             }
         }
@@ -1219,6 +1265,15 @@ private fun ChatListItem(
                     // самостоятельным ярким акцентом (в т.ч. цветом темы у замка).
                     if (isHidden) {
                         Icon(Icons.Filled.Lock, contentDescription = "Скрытый чат",
+                            modifier = Modifier.size(13.dp).padding(end = 3.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+                    }
+                    // НОВОЕ (замок у скрытых групп): отдельный замок — специально для
+                    // групп/каналов с accessMode = HIDDEN (не видны в поиске, доступ
+                    // только по ссылке/приглашению/QR). Независим от isHidden выше
+                    // (PIN-скрытие чата) — оба замка могут стоять одновременно.
+                    if (chat.isHiddenAccessGroup) {
+                        Icon(Icons.Filled.Lock, contentDescription = "Скрытая группа",
                             modifier = Modifier.size(13.dp).padding(end = 3.dp),
                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                     }
@@ -1279,13 +1334,7 @@ private fun ChatListItem(
                         )
                         val currentUid = FirebaseAuth.getInstance().currentUser?.uid
                         if (chat.lastMessageSenderId != null && chat.lastMessageSenderId == currentUid) {
-                            val isRead = chat.lastMessageStatus == "READ"
-                            Icon(
-                                imageVector = if (isRead) Icons.Filled.DoneAll else Icons.Filled.Done,
-                                contentDescription = if (isRead) "Прочитано" else "Доставлено",
-                                modifier = Modifier.size(14.dp).padding(top = 2.dp),
-                                tint = if (isRead) Color(0xFF60E6FF) else Color.Gray
-                            )
+                            LastMessageStatusIcon(chat.lastMessageStatus)
                         }
                     }
                 }
@@ -1416,10 +1465,51 @@ private fun ChatListItem(
 // ---------------------------------------------------------------------------
 // Вспомогательные composable
 // ---------------------------------------------------------------------------
+
+/**
+ * НОВОЕ (баг 12): посекундный "тик" для статусов онлайн. Каждый элемент списка, где
+ * читается этот state, пересчитывается раз в секунду — подпись "был(а) N мин назад"
+ * обновляется в реальном времени, а "зависший" статус "в сети" (когда процесс
+ * собеседника убит системой без onStop) гаснет сам в пределах секунды после порога
+ * устаревания, не дожидаясь событий Firestore.
+ */
+@Composable
+private fun rememberNowTick(): Long {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+    return now
+}
+
+/** НОВОЕ (баг 12): зелёная точка с посекундной проверкой устаревания статуса. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.OnlineStatusDot(chat: ChatPreview) {
+    val now = rememberNowTick()
+    val effectivelyOnline = chat.isOnline &&
+        (chat.lastSeenMillis == 0L ||
+            (now - chat.lastSeenMillis) <= PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS)
+    if (effectivelyOnline) {
+        Box(
+            modifier = Modifier.size(14.dp).align(Alignment.BottomEnd)
+                .clip(CircleShape).background(MaterialTheme.colorScheme.background)
+                .padding(2.dp).clip(CircleShape).background(YodoOnline)
+        )
+    }
+}
+
 @Composable
 private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier) {
+    val now = rememberNowTick()
+    // НОВОЕ (баг 12): статус пересчитывается каждую секунду — и "в сети", и "был(а)…"...
+    val effectivelyOnline = chat.isOnline &&
+        (chat.lastSeenMillis == 0L ||
+            (now - chat.lastSeenMillis) <= PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS)
     when {
-        chat.isOnline -> Text(
+        effectivelyOnline -> Text(
             "в сети",
             style = MaterialTheme.typography.labelMedium,
             color = YodoOnline,
@@ -1436,9 +1526,42 @@ private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier)
     }
 }
 
+/**
+ * ИСПРАВЛЕНО (индикатор доставлено/прочитано в списке чатов): раньше здесь была своя
+ * упрощённая логика ("READ" -> две галочки, всё остальное -> одна), которая не отличала
+ * "отправляется"/"не отправлено"/"доставлено" и не была синхронизирована по смыслу и
+ * цвету с индикатором внутри чата (см. ChatScreen). Теперь используется тот же набор
+ * иконок/цветов, что и в самом чате, а рядом с "в сети" — как и просили — статус
+ * пересчитывается раз в секунду через rememberNowTick(), а не только по приходу нового
+ * снапшота Firestore, так что список не "подвисает" со старой галочкой.
+ */
+@Composable
+private fun LastMessageStatusIcon(rawStatus: String?) {
+    // Тик не влияет на сам статус (он приходит из Firestore), но гарантирует, что
+    // строка списка чатов перерисовывается каждую секунду — так же, как "в сети".
+    rememberNowTick()
+    val (icon, description, tint) = when (rawStatus) {
+        "SENDING" -> Triple(Icons.Filled.Schedule, "Отправка…", Color.Gray)
+        "FAILED" -> Triple(Icons.Filled.ErrorOutline, "Не отправлено", Color(0xFFFF5A5A))
+        "DELIVERED" -> Triple(Icons.Filled.DoneAll, "Доставлено", Color.Gray)
+        "READ" -> Triple(Icons.Filled.DoneAll, "Прочитано", Color(0xFF60E6FF))
+        // "SENT" и любые неизвестные/устаревшие значения — одна серая галочка.
+        else -> Triple(Icons.Filled.Done, "Отправлено", Color.Gray)
+    }
+    Icon(
+        imageVector = icon,
+        contentDescription = description,
+        modifier = Modifier.size(14.dp).padding(top = 2.dp),
+        tint = tint
+    )
+}
+
 @Composable
 private fun formatLastSeen(millis: Long): String {
-    val diffMillis = (System.currentTimeMillis() - millis).coerceAtLeast(0L)
+    // НОВОЕ (баг 12): время отсчитывается от посекундного тика, а не от момента
+    // композиции — подпись "N сек/мин назад" живая и обновляется каждую секунду.
+    val now = rememberNowTick()
+    val diffMillis = (now - millis).coerceAtLeast(0L)
     val diffSeconds = diffMillis / 1_000
     val diffMinutes = diffSeconds / 60
     return when {

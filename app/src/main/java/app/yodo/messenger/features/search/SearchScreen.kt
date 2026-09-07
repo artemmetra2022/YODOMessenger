@@ -86,8 +86,11 @@ fun SearchScreen(
     onOpenChannelProfile: (String) -> Unit,
     // НОВОЕ (админ-функции групп): переход на профиль группы из выдачи поиска.
     onOpenGroupProfile: (String) -> Unit = {},
-    // НОВОЕ (поиск по настройкам): открыть экран настроек и прокрутить к найденному пункту.
-    onOpenSettings: (String) -> Unit = {},
+    // ИЗМЕНЕНО (разделение настроек по категориям): раньше принимал только
+    // anchorId и открывал единственный экран настроек. Теперь принимает ещё
+    // и categoryRoute — маршрут конкретного экрана категории, куда нужно
+    // перейти перед прокруткой к найденному пункту.
+    onOpenSettings: (categoryRoute: String, anchorId: String) -> Unit = { _, _ -> },
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     var query by remember { mutableStateOf("") }
@@ -95,7 +98,7 @@ fun SearchScreen(
     val openChatId by viewModel.openChatId.collectAsState()
     val openChannelProfileId by viewModel.openChannelProfileId.collectAsState()
     val openGroupProfileId by viewModel.openGroupProfileId.collectAsState()
-    val openSettingsAnchor by viewModel.openSettingsAnchor.collectAsState()
+    val openSettingsItem by viewModel.openSettingsItem.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val colorTheme = LocalColorTheme.current
 
@@ -118,11 +121,12 @@ fun SearchScreen(
             viewModel.consumeOpenGroupProfileId()
         }
     }
-    // НОВОЕ (поиск по настройкам): переход в настройки при тапе на найденный пункт.
-    LaunchedEffect(openSettingsAnchor) {
-        openSettingsAnchor?.let {
-            onOpenSettings(it)
-            viewModel.consumeOpenSettingsAnchor()
+    // НОВОЕ (поиск по настройкам): переход в нужный экран категории настроек
+    // при тапе на найденный пункт.
+    LaunchedEffect(openSettingsItem) {
+        openSettingsItem?.let {
+            onOpenSettings(it.categoryRoute, it.anchorId)
+            viewModel.consumeOpenSettingsItem()
         }
     }
 

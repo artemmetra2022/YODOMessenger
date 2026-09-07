@@ -12,9 +12,11 @@ import app.yodo.messenger.data.local.FontSize
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinCheckResult
 import app.yodo.messenger.data.local.PinRequirement
+import app.yodo.messenger.data.local.SchoolPreferences
 import app.yodo.messenger.data.local.ThemePreferences
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.ChatFolder
+import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.PresenceRepository
@@ -36,6 +38,7 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val themePreferences: ThemePreferences,
     private val userSettingsPreferences: UserSettingsPreferences,
+    private val schoolPreferences: SchoolPreferences,
     private val languagePreferences: LanguagePreferences,
     private val draftsPreferences: DraftsPreferences,
     private val authRepository: AuthRepository,
@@ -68,6 +71,10 @@ class SettingsViewModel @Inject constructor(
     val advancedPollsEnabled: StateFlow<Boolean> = userSettingsPreferences.advancedPollsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
     val showSettingsInGlobalSearch: StateFlow<Boolean> = userSettingsPreferences.showSettingsInGlobalSearch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» в разделе «Аккаунт».
+    val schoolSectionEnabled: StateFlow<Boolean> = schoolPreferences.sectionEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val pinRequirement: StateFlow<PinRequirement> = userSettingsPreferences.pinRequirement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PinRequirement.NEVER)
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -96,6 +103,34 @@ class SettingsViewModel @Inject constructor(
     val showWebsite: StateFlow<Boolean> = currentUser.map { it?.showWebsite ?: true }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val showPhoneNumber: StateFlow<Boolean> = currentUser.map { it?.showPhoneNumber ?: false }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val showEmail: StateFlow<Boolean> = currentUser.map { it?.showEmail ?: false }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // НОВОЕ (п.15): настройки приватности «кто может …».
+    val whoCanInviteToGroups: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanInviteToGroups ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
+    val whoCanMessageMe: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanMessageMe ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
+    val whoCanSeeMyProfile: StateFlow<PrivacyWho> = currentUser.map { it?.whoCanSeeMyProfile ?: PrivacyWho.EVERYONE }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PrivacyWho.EVERYONE)
+
+    // НОВОЕ (исключения из «Кто может мне писать»): список пользователей, для
+    // которых whoCanMessageMe не действует. Список объектов YodoUser (для показа
+    // имени/аватара) держим отдельным state — currentUser хранит только их uid.
+    private val _messagePrivacyExceptions = MutableStateFlow<List<YodoUser>>(emptyList())
+    val messagePrivacyExceptions: StateFlow<List<YodoUser>> = _messagePrivacyExceptions
+    fun loadMessagePrivacyExceptions() {
+        viewModelScope.launch {
+            _messagePrivacyExceptions.value = userRepository.getMessagePrivacyExceptions()
+        }
+    }
+    fun addMessagePrivacyException(uid: String) {
+        viewModelScope.launch {
+            userRepository.addMessagePrivacyException(uid)
+            loadMessagePrivacyExceptions()
+        }
+    }
+    fun removeMessagePrivacyException(uid: String) {
+        viewModelScope.launch {
+            userRepository.removeMessagePrivacyException(uid)
+            loadMessagePrivacyExceptions()
+        }
+    }
 
     // НОВОЕ (AC/AD): главный админ (одна из 2 почт) — видит раздел «Жалобы».
     val isAppAdmin: Boolean =
@@ -146,6 +181,7 @@ class SettingsViewModel @Inject constructor(
     fun setAdvancedPollsEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setAdvancedPollsEnabled(enabled) } }
     // НОВОЕ (поиск по настройкам): переключатель показа настроек в общем поиске.
     fun setShowSettingsInGlobalSearch(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setShowSettingsInGlobalSearch(enabled) } }
+    fun setHideStatusBarOnChatList(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideStatusBarOnChatList(enabled) } }
 
     fun setPin(pin: String, requirement: PinRequirement = PinRequirement.ON_CLOSE) {
         viewModelScope.launch {
@@ -227,6 +263,23 @@ class SettingsViewModel @Inject constructor(
     fun setShowWebsite(enabled: Boolean) = pushPrivacySettings(showWebsite = enabled)
     fun setShowPhoneNumber(enabled: Boolean) = pushPrivacySettings(showPhoneNumber = enabled)
     fun setShowEmail(enabled: Boolean) = pushPrivacySettings(showEmail = enabled)
+
+    // НОВОЕ (п.15): сеттеры настроек «кто может …» — сохраняются в Firestore.
+    fun setWhoCanInviteToGroups(value: PrivacyWho) {
+        viewModelScope.launch {
+            userRepository.updatePrivacyWho(value, whoCanMessageMe.value, whoCanSeeMyProfile.value)
+        }
+    }
+    fun setWhoCanMessageMe(value: PrivacyWho) {
+        viewModelScope.launch {
+            userRepository.updatePrivacyWho(whoCanInviteToGroups.value, value, whoCanSeeMyProfile.value)
+        }
+    }
+    fun setWhoCanSeeMyProfile(value: PrivacyWho) {
+        viewModelScope.launch {
+            userRepository.updatePrivacyWho(whoCanInviteToGroups.value, whoCanMessageMe.value, value)
+        }
+    }
 
     fun logout() { authRepository.logout() }
     fun clearAllDrafts() { viewModelScope.launch { draftsPreferences.clearAllDrafts() } }

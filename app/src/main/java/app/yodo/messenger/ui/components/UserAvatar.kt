@@ -82,7 +82,14 @@ fun UserAvatar(
             }
 
             !avatarBase64.isNullOrBlank() -> {
-                val bitmap = remember(avatarBase64) { ImageUtils.decodeBase64ToBitmap(avatarBase64) }
+                // ИСПРАВЛЕНО (п.16, лаги прокрутки): декод теперь идёт через
+                // LRU-кеш ImageUtils.decodeAvatarBitmapCached с понижением разрешения
+                // под размер аватара. Раньше каждая композиция строки (в т.ч. при
+                // быстрой прокрутке списков) заново декодировала полный base64-битмап
+                // на главном потоке.
+                val bitmap = remember(avatarBase64) {
+                    ImageUtils.decodeAvatarBitmapCached(avatarBase64)
+                }
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),

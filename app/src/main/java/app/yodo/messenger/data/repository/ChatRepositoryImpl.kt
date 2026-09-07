@@ -13,6 +13,7 @@ import app.yodo.messenger.domain.model.ChatType
 import app.yodo.messenger.domain.model.CustomRole
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.Permission
+import app.yodo.messenger.domain.model.SupportRestriction
 import app.yodo.messenger.domain.model.YodoUser
 import app.yodo.messenger.domain.repository.ChannelSearchItem
 import app.yodo.messenger.domain.repository.ChannelDirectory
@@ -140,7 +141,10 @@ class ChatRepositoryImpl @Inject constructor(
                     val cached = chat.otherUserId?.let { avatarCache[it] }
                     val presence = chat.otherUserId?.let { presenceCache[it] }
                     val online = isEffectivelyOnline(presence)
-                    val lastSeen = if (online || presence == null || presence.hidden) 0L else presence.lastSeen
+                    // НОВОЕ (баг 12): lastSeen передаётся ВСЕГДА реальный (и для онлайн-статуса),
+                    // а не 0 — UI каждую секунду сам пересчитывает устаревание статуса
+                    // (PresenceStatusText/OnlineStatusDot), не дожидаясь новых событий Firestore.
+                    val lastSeen = if (presence == null || presence.hidden) 0L else presence.lastSeen
                     chat.copy(
                         avatarUrl = cached?.first ?: chat.avatarUrl,
                         avatarBase64 = cached?.second ?: chat.avatarBase64,
@@ -293,6 +297,11 @@ class ChatRepositoryImpl @Inject constructor(
                         val rawLastMessage = doc.getString("lastMessage") ?: ""
                         val lastMessagePlain = doc.getString("lastMessagePlain")
                         val isEncryptedPreview = rawLastMessage == "🔒 Сообщение" && lastMessagePlain != null
+                        // НОВОЕ (замок у скрытых групп): читаем accessMode только для
+                        // групп/каналов — у личных чатов этого поля нет и оно не нужно.
+                        val isHiddenAccessGroup = (type == ChatType.GROUP || type == ChatType.CHANNEL) &&
+                            app.yodo.messenger.domain.model.ChannelAccessMode.fromRaw(doc.getString("accessMode")) ==
+                            app.yodo.messenger.domain.model.ChannelAccessMode.HIDDEN
                         ChatPreview(
                             chatId = doc.id,
                             title = title,
@@ -314,7 +323,8 @@ class ChatRepositoryImpl @Inject constructor(
                             otherUserId = otherUserId,
                             subscriberCount = if (type == ChatType.CHANNEL) participantIds.size else 0,
                             isArchived = archivedMap?.get(uid) as? Boolean ?: false,
-                            isEncryptedPreview = isEncryptedPreview
+                            isEncryptedPreview = isEncryptedPreview,
+                            isHiddenAccessGroup = isHiddenAccessGroup
                         )
                     } catch (e: Exception) { null }
                 }
@@ -390,9 +400,17 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
 
+        // ИСПРАВЛЕНО (баг: зелёная точка "в сети" иногда залипает в списке чатов):
+        // если у собеседника приложение убито системой без вызова onStop() (kill
+        // процесса, обрыв сети, самолётный режим и т.п.), документ presence в
+        // Firestore не меняется и новый снапшот не приходит — единственный способ
+        // погасить точку вовремя — локально пересчитать устаревание по времени.
+        // Раньше это делалось раз в 30 секунд, поэтому точка могла "гореть" зелёной
+        // до 30 секунд дольше, чем нужно, даже после PRESENCE_STALE_THRESHOLD_MILLIS.
+        // Теперь пересчитываем раз в секунду — как и в самом чате (PresenceRepositoryImpl).
         launch {
             while (true) {
-                delay(30_000L)
+                delay(1_000L)
                 emitList()
             }
         }
@@ -467,6 +485,22 @@ class ChatRepositoryImpl @Inject constructor(
             if (existingChat != null) return CreateChatResult.Success(existingChat.id)
             val myDoc = firestore.collection("users").document(uid).get().await()
             val otherDoc = firestore.collection("users").document(otherUserId).get().await()
+            // НОВОЕ (п.15): «Кто может писать тебе» — проверяем настройку адресата только
+            // при СОЗДАНИИ нового чата; в существующие чаты (ранний return выше) ответить
+            // можно всегда, чтобы ограничение не ломало текущие переписки.
+            val whoCanMessageMe = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                otherDoc.getString("whoCanMessageMe")
+            )
+            if (whoCanMessageMe != app.yodo.messenger.domain.model.PrivacyWho.EVERYONE &&
+                !isAllowedByPrivacy(otherUserId, uid, whoCanMessageMe)
+            ) {
+                return CreateChatResult.Error(
+                    if (whoCanMessageMe == app.yodo.messenger.domain.model.PrivacyWho.NOBODY)
+                        "Пользователь запретил писать ему"
+                    else
+                        "Пользователь принимает личные сообщения только от знакомых"
+                )
+            }
             val myName = myDoc.getString("displayName") ?: "Пользователь"
             val otherName = otherDoc.getString("displayName") ?: "Пользователь"
             val newChatRef = firestore.collection("chats").document()
@@ -501,9 +535,30 @@ class ChatRepositoryImpl @Inject constructor(
         val uid = firebaseAuth.currentUser?.uid ?: return CreateChatResult.Error("Вы не авторизованы")
         val trimmedTitle = title.trim()
         if (trimmedTitle.isBlank()) return CreateChatResult.Error("Введите название группы")
-        val allParticipants = (memberIds + uid).distinct()
-        if (allParticipants.size < 3) return CreateChatResult.Error("Выберите хотя бы 2 участников")
         return try {
+            // НОВОЕ (п.15): уважаем настройку адресатов «Кто может приглашать в группы» —
+            // ограничившие приватность не добавляются, создание отменяется с пояснением.
+            val skippedNames = mutableListOf<String>()
+            val allowedMembers = mutableListOf<String>()
+            for (memberId in memberIds.distinct()) {
+                val doc = firestore.collection("users").document(memberId).get().await()
+                val who = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                    doc.getString("whoCanInviteToGroups")
+                )
+                if (isAllowedByPrivacy(memberId, uid, who)) {
+                    allowedMembers += memberId
+                } else {
+                    skippedNames += doc.getString("displayName").orEmpty().ifBlank { "Пользователь" }
+                }
+            }
+            if (skippedNames.isNotEmpty()) {
+                return CreateChatResult.Error(
+                    "Не добавлены — настройка «Кто может приглашать в группы»: " +
+                        skippedNames.joinToString(", ")
+                )
+            }
+            val allParticipants = (allowedMembers + uid).distinct()
+            if (allParticipants.size < 3) return CreateChatResult.Error("Выберите хотя бы 2 участников")
             // Аватарка группы — сжатый Base64 (та же логика, что у каналов)
             val avatarBase64 = avatarBitmap?.let { bmp ->
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -627,7 +682,7 @@ class ChatRepositoryImpl @Inject constructor(
     // НОВОЕ (переработка каналов): создание пользовательского канала с аватаркой.
     // Создатель = владелец (может публиковать посты и назначать/снимать админов).
     // Каждый подписчик добавляется в participantIds, поэтому существующий механизм
-    // с��иска чатов (whereArrayContains) сразу подхватывает канал для всех подписчиков.
+    // списка чатов (whereArrayContains) сразу подхватывает канал для всех подписчиков.
     override suspend fun createChannel(
         title: String,
         description: String,
@@ -666,7 +721,8 @@ class ChatRepositoryImpl @Inject constructor(
                 "allowComments" to true,
                 "allowReactions" to true,
                 "allowSaving" to true,
-                "allowLinkPreviews" to true
+                "allowLinkPreviews" to true,
+                "commentPermission" to app.yodo.messenger.domain.model.CommentPermission.EVERYONE.name
             )
             if (avatarBase64 != null) data["avatarBase64"] = avatarBase64
             newChatRef.set(data).await()
@@ -740,16 +796,75 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
-    // НОВОЕ: приглашение пользователей в канал владельцем/админом — подписывает их напрямую.
-    override suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>) {
-        if (userIds.isEmpty()) return
+    // НОВОЕ (п.15): приглашение пользователей в канал владельцем/админом — подписывает их напрямую.
+    // П.15: перед приглашением проверяем настройку каждого адресата «Кто может приглашать
+    // в группы» — ограничившие приватность не приглашаются, их имена возвращаются для показа.
+    override suspend fun inviteUsersToChannel(chatId: String, userIds: List<String>): List<String> {
+        if (userIds.isEmpty()) return emptyList()
+        val myUid = firebaseAuth.currentUser?.uid ?: return emptyList()
+        return try {
+            val allowed = mutableListOf<String>()
+            val skippedNames = mutableListOf<String>()
+            for (uid in userIds) {
+                val doc = firestore.collection("users").document(uid).get().await()
+                val who = app.yodo.messenger.domain.model.PrivacyWho.fromString(
+                    doc.getString("whoCanInviteToGroups")
+                )
+                if (isAllowedByPrivacy(uid, myUid, who)) {
+                    allowed += uid
+                } else {
+                    skippedNames += doc.getString("displayName").orEmpty().ifBlank { "Пользователь" }
+                }
+            }
+            if (allowed.isNotEmpty()) {
+                val updates = mutableMapOf<String, Any>(
+                    "participantIds" to FieldValue.arrayUnion(*allowed.toTypedArray())
+                )
+                allowed.forEach { uid -> updates["unreadCounts.$uid"] = 0 }
+                firestore.collection("chats").document(chatId).update(updates).await()
+            }
+            skippedNames
+        } catch (e: Exception) { emptyList() }
+    }
+
+    // НОВОЕ (п.15): публичная проверка настройки приватности. CONTACTS («Только знакомые»)
+    // пропускает, если viewer есть в contactIds владельца или у них уже есть личный чат.
+    // НОВОЕ (исключения): вне зависимости от значения `who`, если viewerUid есть в
+    // messagePrivacyExceptions владельца (targetUid) — доступ разрешён всегда.
+    override suspend fun isAllowedByPrivacy(
+        targetUid: String,
+        viewerUid: String,
+        who: app.yodo.messenger.domain.model.PrivacyWho
+    ): Boolean {
+        if (targetUid == viewerUid) return true
         try {
-            val updates = mutableMapOf<String, Any>(
-                "participantIds" to FieldValue.arrayUnion(*userIds.toTypedArray())
-            )
-            userIds.forEach { uid -> updates["unreadCounts.$uid"] = 0 }
-            firestore.collection("chats").document(chatId).update(updates).await()
-        } catch (e: Exception) { }
+            val exceptions = firestore.collection("users").document(targetUid).get().await()
+                .get("messagePrivacyExceptions") as? List<*>
+            if (exceptions?.contains(viewerUid) == true) return true
+        } catch (e: Exception) { /* при ошибке чтения исключений просто идём дальше по общему правилу */ }
+        return when (who) {
+            app.yodo.messenger.domain.model.PrivacyWho.EVERYONE -> true
+            app.yodo.messenger.domain.model.PrivacyWho.NOBODY -> false
+            app.yodo.messenger.domain.model.PrivacyWho.CONTACTS -> {
+                try {
+                    val targetDoc = firestore.collection("users").document(targetUid).get().await()
+                    val contactIds =
+                        (targetDoc.get("contactIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    if (viewerUid in contactIds) return true
+                    // Знакомые = есть общий личный чат (переписывались раньше)
+                    val existing = firestore.collection("chats")
+                        .whereArrayContains("participantIds", viewerUid)
+                        .whereEqualTo("type", "PRIVATE")
+                        .get().await()
+                    existing.documents.any { doc ->
+                        (doc.get("participantIds") as? List<*>)?.contains(targetUid) == true
+                    }
+                } catch (e: Exception) {
+                    // При ошибке сети действуем осторожно — считаем, что не разрешено
+                    false
+                }
+            }
+        }
     }
 
     override suspend fun addChannelAdmin(chatId: String, userId: String) {
@@ -1012,7 +1127,7 @@ class ChatRepositoryImpl @Inject constructor(
             val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             ChannelProfile(
                 chatId = chatId,
-                title = doc.getString("title") ?: "Без назван��я",
+                title = doc.getString("title") ?: "Без названия",
                 description = doc.getString("description").orEmpty(),
                 avatarBase64 = doc.getString("avatarBase64"),
                 subscriberCount = participantIds.size,
@@ -1053,7 +1168,11 @@ class ChatRepositoryImpl @Inject constructor(
             allowComments = doc.getBoolean("allowComments") ?: true,
             allowReactions = doc.getBoolean("allowReactions") ?: true,
             allowSaving = doc.getBoolean("allowSaving") ?: true,
-            allowLinkPreviews = doc.getBoolean("allowLinkPreviews") ?: true
+            allowLinkPreviews = doc.getBoolean("allowLinkPreviews") ?: true,
+            // НОВОЕ (кто может писать комментарии): отсутствующее поле = "Все"
+            // (старое поведение — раз allowComments уже был true по умолчанию).
+            commentPermission = app.yodo.messenger.domain.model.CommentPermission
+                .fromRaw(doc.getString("commentPermission"))
         )
     }
 
@@ -1155,7 +1274,9 @@ class ChatRepositoryImpl @Inject constructor(
                     "allowComments" to restrictions.allowComments,
                     "allowReactions" to restrictions.allowReactions,
                     "allowSaving" to restrictions.allowSaving,
-                    "allowLinkPreviews" to restrictions.allowLinkPreviews
+                    "allowLinkPreviews" to restrictions.allowLinkPreviews,
+                    // НОВОЕ (кто может писать комментарии).
+                    "commentPermission" to restrictions.commentPermission.name
                 )
             ).await()
             ChannelUpdateResult.Success
@@ -1344,6 +1465,89 @@ class ChatRepositoryImpl @Inject constructor(
         awaitClose { listener.remove() }
     }
 
+    // НОВОЕ (п.18 ТЗ): нельзя создать второе активное (без ответа) обращение —
+    // проверяем, что последнее сообщение в support_<uid> уже от самого пользователя.
+    override suspend fun hasAwaitingSupportReply(): Boolean {
+        val uid = firebaseAuth.currentUser?.uid ?: return false
+        return try {
+            val doc = firestore.collection("chats").document(ChatRepository.supportChatIdFor(uid)).get().await()
+            if (!doc.exists()) return false
+            val lastSenderId = doc.getString("lastMessageSenderId")
+            val lastMessage = doc.getString("lastMessage").orEmpty()
+            lastSenderId == uid && lastMessage.isNotBlank()
+        } catch (e: Exception) { false }
+    }
+
+    // === НОВОЕ (п.19 ТЗ): ограничение возможности писать в поддержку ===
+    private fun supportRestrictionsRef() = firestore.collection("supportRestrictions")
+
+    private fun isAdminEmail(): Boolean =
+        firebaseAuth.currentUser?.email?.lowercase() in ChatRepository.ADMIN_EMAILS.map { it.lowercase() }
+
+    private fun parseSupportRestriction(uid: String, data: Map<String, Any?>) = SupportRestriction(
+        userId = uid,
+        reason = data["reason"] as? String ?: "",
+        restrictedBy = data["restrictedBy"] as? String ?: "",
+        restrictedByName = data["restrictedByName"] as? String ?: "",
+        restrictedAt = (data["restrictedAt"] as? Number)?.toLong() ?: 0L,
+        expiresAt = (data["expiresAt"] as? Number)?.toLong()
+    )
+
+    override fun observeMySupportRestriction(): Flow<SupportRestriction?> = callbackFlow {
+        val uid = firebaseAuth.currentUser?.uid
+        if (uid == null) { trySend(null); close(); return@callbackFlow }
+        val reg = supportRestrictionsRef().document(uid).addSnapshotListener { snapshot, _ ->
+            if (snapshot != null && snapshot.exists()) {
+                @Suppress("UNCHECKED_CAST")
+                val data = snapshot.data as? Map<String, Any?> ?: emptyMap()
+                val restriction = parseSupportRestriction(uid, data)
+                // Истёкшее временное ограничение для отправителя равносильно его отсутствию.
+                trySend(if (restriction.isActive()) restriction else null)
+            } else {
+                trySend(null)
+            }
+        }
+        awaitClose { reg.remove() }
+    }
+
+    override suspend fun getSupportRestriction(uid: String): SupportRestriction? {
+        return try {
+            val doc = supportRestrictionsRef().document(uid).get().await()
+            if (!doc.exists()) return null
+            @Suppress("UNCHECKED_CAST")
+            val data = doc.data as? Map<String, Any?> ?: return null
+            val restriction = parseSupportRestriction(uid, data)
+            if (restriction.isActive()) restriction else null
+        } catch (e: Exception) { null }
+    }
+
+    override suspend fun setSupportRestriction(uid: String, reason: String, durationMillis: Long?): ChannelUpdateResult {
+        if (!isAdminEmail()) return ChannelUpdateResult.Error("Нет прав администратора")
+        val me = firebaseAuth.currentUser ?: return ChannelUpdateResult.Error("Вы не авторизованы")
+        return try {
+            val myName = firestore.collection("users").document(me.uid).get().await()
+                .getString("displayName") ?: (me.email ?: "Админ")
+            val now = System.currentTimeMillis()
+            val data = mutableMapOf<String, Any?>(
+                "reason" to reason.take(500),
+                "restrictedBy" to me.uid,
+                "restrictedByName" to myName,
+                "restrictedAt" to now,
+                "expiresAt" to durationMillis?.let { now + it }
+            )
+            supportRestrictionsRef().document(uid).set(data).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) { ChannelUpdateResult.Error(e.toUserMessage("Не удалось ограничить обращения в поддержку")) }
+    }
+
+    override suspend fun removeSupportRestriction(uid: String): ChannelUpdateResult {
+        if (!isAdminEmail()) return ChannelUpdateResult.Error("Нет прав администратора")
+        return try {
+            supportRestrictionsRef().document(uid).delete().await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) { ChannelUpdateResult.Error(e.toUserMessage("Не удалось снять ограничение")) }
+    }
+
     override suspend fun getGroupInfo(chatId: String): GroupInfo? {
         return try {
             val doc = firestore.collection("chats").document(chatId).get().await()
@@ -1517,12 +1721,68 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) { }
     }
 
-    override suspend fun leaveGroup(chatId: String) {
-        val uid = firebaseAuth.currentUser?.uid ?: return
-        try {
-            firestore.collection("chats").document(chatId)
-                .update("participantIds", FieldValue.arrayRemove(uid)).await()
-        } catch (e: Exception) { }
+    // ИСПРАВЛЕНИЕ (выход из группы не работал): причин было две.
+    // 1. firestore.rules не разрешали участнику удалить самого себя из
+    //    participantIds — правило allow update покрывало только вход
+    //    (добавление себя) и смену ролей владельцем/админом, поэтому
+    //    arrayRemove(uid) отклонялся с PERMISSION_DENIED.
+    // 2. Ошибка при этом гасилась пустым catch — UI не получал никакого
+    //    сигнала и просто ничего не происходило.
+    // Плюс: владелец не может выйти, бросив группу без владельца — сначала
+    // обязан передать права через transferOwnership().
+    override suspend fun leaveGroup(chatId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val doc = chatRef.get().await()
+            if (!doc.exists()) return ChannelUpdateResult.Error("Группа не найдена")
+            if (doc.getString("createdBy") == uid) {
+                return ChannelUpdateResult.Error("Сначала передайте права владельца другому участнику")
+            }
+            chatRef.update(
+                mapOf(
+                    "participantIds" to FieldValue.arrayRemove(uid),
+                    "adminIds" to FieldValue.arrayRemove(uid)
+                )
+            ).await()
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось выйти из группы"))
+        }
+    }
+
+    // НОВОЕ: передача прав владельца. Только текущий владелец может это
+    // сделать, и только на пользователя, уже состоящего в группе. Прежний
+    // владелец остаётся в adminIds — не теряет доступ к управлению группой.
+    override suspend fun transferOwnership(chatId: String, newOwnerId: String): ChannelUpdateResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return ChannelUpdateResult.Error("Не авторизован")
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val doc = chatRef.get().await()
+            if (!doc.exists()) return ChannelUpdateResult.Error("Группа не найдена")
+            if (doc.getString("createdBy") != uid) {
+                return ChannelUpdateResult.Error("Только владелец может передать права")
+            }
+            val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            if (newOwnerId !in participantIds) {
+                return ChannelUpdateResult.Error("Новый владелец должен быть участником группы")
+            }
+            if (newOwnerId == uid) {
+                return ChannelUpdateResult.Error("Пользователь уже является владельцем")
+            }
+            chatRef.update(
+                mapOf(
+                    "createdBy" to newOwnerId,
+                    "adminIds" to FieldValue.arrayUnion(uid, newOwnerId)
+                )
+            ).await()
+            val targetName = firestore.collection("users").document(newOwnerId).get().await()
+                .getString("displayName")
+            logAdminAction(chatId, AdminActionType.OWNERSHIP_TRANSFERRED, targetUserId = newOwnerId, targetUserName = targetName)
+            ChannelUpdateResult.Success
+        } catch (e: Exception) {
+            ChannelUpdateResult.Error(e.toUserMessage("Не удалось передать права владельца"))
+        }
     }
 
     override suspend fun togglePinChat(chatId: String) {
@@ -1548,7 +1808,7 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     // НОВОЕ (архивация чатов): та же схема хранения, что у pinned/muted —
-    // map<uid, Boolean> в документе чата, персонально для каждог�� участника.
+    // map<uid, Boolean> в документе чата, персонально для каждого участника.
     override suspend fun toggleArchiveChat(chatId: String) {
         val uid = firebaseAuth.currentUser?.uid ?: return
         try {
@@ -1561,13 +1821,30 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override suspend fun clearChatHistory(chatId: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
         try {
+            // БАГ-ФИКС («Очистить историю» падало с «недостаточно прав»): правила
+            // Firestore разрешают удалять сообщение только его автору (senderId ==
+            // текущий пользователь), либо владельцу/модератору чата (isChatModerator),
+            // либо глобальному админу в официальном канале. Раньше здесь удалялись
+            // ВСЕ сообщения без разбора — если в чате было хоть одно чужое сообщение,
+            // весь batch отклонялся целиком с PERMISSION_DENIED, и не удалялось вообще
+            // ничего (даже свои). Теперь: обычный участник чистит только свои
+            // сообщения; владелец/админ/модератор чата — все сообщения в чате.
+            val chatDoc = firestore.collection("chats").document(chatId).get().await()
+            val canDeleteAll = chatDoc.getString("createdBy") == uid ||
+                (chatDoc.get("adminIds") as? List<*>)?.contains(uid) == true
+
             val messagesRef = firestore.collection("chats").document(chatId).collection("messages")
             val snapshot = messagesRef.get().await()
             // Firestore batch ограничен 500 операциями — делим на чанки.
             snapshot.documents.chunked(500).forEach { chunk ->
                 val batch = firestore.batch()
-                chunk.forEach { doc -> batch.delete(doc.reference) }
+                chunk.forEach { doc ->
+                    if (canDeleteAll || doc.getString("senderId") == uid) {
+                        batch.delete(doc.reference)
+                    }
+                }
                 batch.commit().await()
             }
             firestore.collection("chats").document(chatId).update(
@@ -1812,7 +2089,7 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun updateCustomRole(chatId: String, roleId: String, name: String, permissions: Set<Permission>): ChannelUpdateResult {
         val trimmed = name.trim()
-        if (trimmed.isBlank()) return ChannelUpdateResult.Error("Введите название рол��")
+        if (trimmed.isBlank()) return ChannelUpdateResult.Error("Введите название роли")
         return try {
             val data = mapOf(
                 "name" to trimmed,

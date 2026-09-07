@@ -42,6 +42,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -155,12 +157,39 @@ fun ChannelProfileScreen(
                     }
                 },
                 actions = {
-                    // НОВОЕ (ссылка-приглашение и шаринг): кнопка «Поделиться каналом» —
-                    // генерирует ссылку вида yodo://channel/<chatId> и открывает системное
-                    // окно «поделиться». Видна только когда профиль канала уже загружен.
+                    // НОВОЕ (п.22 ТЗ): «Поделиться каналом» теперь предлагает выбор —
+                    // просто ссылка (кратко, для тех кто и так знает канал) или ссылка
+                    // с описанием канала и указанием отправителя (нагляднее для тех,
+                    // кто получает приглашение впервые и не знаком с YODO).
                     if (uiState.profile != null) {
-                        IconButton(onClick = { shareChannelInviteLink(context, uiState.profile!!) }) {
-                            Icon(Icons.Filled.Share, contentDescription = "Поделиться каналом")
+                        var shareMenuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { shareMenuExpanded = true }) {
+                                Icon(Icons.Filled.Share, contentDescription = "Поделиться каналом")
+                            }
+                            DropdownMenu(
+                                expanded = shareMenuExpanded,
+                                onDismissRequest = { shareMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Просто ссылка") },
+                                    onClick = {
+                                        shareMenuExpanded = false
+                                        shareChannelInviteLink(context, uiState.profile!!)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Ссылка с описанием канала") },
+                                    onClick = {
+                                        shareMenuExpanded = false
+                                        shareChannelInviteLinkWithDescription(
+                                            context,
+                                            uiState.profile!!,
+                                            uiState.currentUser
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -725,9 +754,38 @@ private fun pluralRu(n: Int, one: String, few: String, many: String): String {
 // здесь достаточно chatId — канал уже и так публичный документ в Firestore).
 private fun buildChannelInviteLink(chatId: String): String = "yodo://channel/$chatId"
 
+/** Просто ссылка, без лишнего текста — для тех, кто и так знает, что за канал. */
 private fun shareChannelInviteLink(context: android.content.Context, profile: app.yodo.messenger.domain.model.ChannelProfile) {
     val link = buildChannelInviteLink(profile.chatId)
-    val message = "Присоединяйтесь к каналу «${profile.title}» в YODO Messenger:\n$link"
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, link)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Поделиться ссылкой"))
+}
+
+// НОВОЕ (п.22 ТЗ): ссылка с описанием канала и, если известно, именем отправителя —
+// нагляднее для получателя, который не знаком с YODO или с самим каналом. Описание
+// канала может быть пустым (необязательное поле в ChannelProfile) — тогда просто
+// пропускаем эту строку, а не показываем пустую пустую.
+private fun shareChannelInviteLinkWithDescription(
+    context: android.content.Context,
+    profile: app.yodo.messenger.domain.model.ChannelProfile,
+    sender: app.yodo.messenger.domain.model.YodoUser?
+) {
+    val link = buildChannelInviteLink(profile.chatId)
+    val message = buildString {
+        if (sender != null) {
+            append(sender.displayName).append(" приглашает вас в канал «").append(profile.title).append("»")
+        } else {
+            append("Приглашение в канал «").append(profile.title).append("»")
+        }
+        append(" в YODO Messenger")
+        if (profile.description.isNotBlank()) {
+            append("\n\n").append(profile.description)
+        }
+        append("\n\n").append(link)
+    }
     val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(android.content.Intent.EXTRA_TEXT, message)

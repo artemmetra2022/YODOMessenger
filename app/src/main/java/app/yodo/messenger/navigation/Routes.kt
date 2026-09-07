@@ -32,14 +32,64 @@ sealed class Routes(val route: String) {
     data object Contacts : Routes("contacts")
     data object ForwardMessage : Routes("forward_message")
     data object Profile : Routes("profile")
-    data object Settings : Routes("settings?anchor={anchor}") {
-        // НОВОЕ (поиск по настройкам): переход из общего поиска на конкретный пункт настроек.
+    // ИЗМЕНЕНО (разделение настроек по категориям): теперь это экран списка
+    // категорий + поиск. Сам список категорий не нуждается в anchor-параметре —
+    // поиск с этого экрана сразу переходит в нужный экран категории (см. ниже).
+    data object Settings : Routes("settings")
+    // НОВОЕ (разделение настроек по категориям): 6 отдельных экранов категорий.
+    // У каждого свой anchor-параметр — работает так же, как раньше у общего
+    // Settings: переход из результата поиска сразу прокручивает и подсвечивает
+    // нужный пункт внутри экрана категории.
+    data object SettingsAppearance : Routes("settings_appearance?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
-            if (anchor.isNullOrBlank()) "settings" else "settings?anchor=$anchor"
+            if (anchor.isNullOrBlank()) "settings_appearance" else "settings_appearance?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsLanguage : Routes("settings_language?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_language" else "settings_language?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsChats : Routes("settings_chats?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_chats" else "settings_chats?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsPrivacy : Routes("settings_privacy?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_privacy" else "settings_privacy?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsNotifications : Routes("settings_notifications?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_notifications" else "settings_notifications?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    data object SettingsAccount : Routes("settings_account?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_account" else "settings_account?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
     data object Tools : Routes("tools")
+
+    // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 (перенос
+    // функционала Telegram-бота) + экран настройки его отображения.
+    // Главный вход — из Настройки → Аккаунт (см. AccountSettingsScreen),
+    // пункт можно скрыть переключателем schoolSectionEnabled.
+    data object School : Routes("school")
+    data object SchoolTeachers : Routes("school_teachers")
+    data object SchoolNews : Routes("school_news")
+    data object SchoolSchedule : Routes("school_schedule")
+    data object SchoolPolls : Routes("school_polls")
+    data object SchoolQuiz : Routes("school_quiz")
+    data object SchoolGame : Routes("school_game")
+    data object SchoolReview : Routes("school_review")
+    data object SchoolFaq : Routes("school_faq")
+    data object SchoolParents : Routes("school_parents")
+    data object SchoolAdmin : Routes("school_admin")
+    data object SchoolSettings : Routes("school_settings")
+
     data object SecurityCenter : Routes("security_center")
     // НОВОЕ (вход по QR-коду): сканер QR из веб-версии в «Центре безопасности».
     data object QrLogin : Routes("qr_login")
@@ -47,6 +97,8 @@ sealed class Routes(val route: String) {
     data object SwitchAccount : Routes("switch_account")
     data object AddAccount : Routes("add_account")
     data object BlockedUsers : Routes("blocked_users")
+    // НОВОЕ (п.15): настройки приватности «Кто может приглашать в группы / писать / смотреть профиль».
+    data object PrivacyWho : Routes("privacy_who")
     // НОВОЕ (архивация чатов)
     data object ArchivedChats : Routes("archived_chats")
     data object SavedMessages : Routes("saved_messages")
@@ -154,6 +206,16 @@ sealed class Routes(val route: String) {
     data object ReportInbox : Routes("report_inbox")
     // НОВОЕ (чат поддержки): экран админ-панели поддержки.
     data object AdminPanel : Routes("admin_panel")
+    // НОВОЕ (единая вкладка «Админка»): сводный экран для 2 доверенных
+    // аккаунтов — точка входа во все админ-функции приложения вместо того,
+    // чтобы искать их по разным экранам (Настройки, FAB чатов, профиль юзера).
+    data object AdminHome : Routes("admin_home")
+    // НОВОЕ: список/поиск пользователей для глобальной блокировки прямо из Админки,
+    // без необходимости искать конкретного человека через общий поиск по чатам.
+    data object AdminUsers : Routes("admin_users")
+    // НОВОЕ (глобальный аудит-лог): журнал действий Админки (глобальные
+    // блокировки/разблокировки, изменение настроек приложения).
+    data object AdminAuditLog : Routes("admin_audit_log")
 
     // НОВОЕ: личный блокнот «Заметки».
 }

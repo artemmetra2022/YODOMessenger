@@ -54,6 +54,8 @@ interface ReportRepository {
     /**
      * Принять решение по жалобе: удалить сообщение и/или забанить пользователя,
      * с одновременной пометкой жалобы как решённой. resolution описывает итог для истории.
+     * НОВОЕ (баг 10): silentDelete=true — «тихое удаление» сообщения (документ удаляется
+     * из Firestore целиком, у всех участников оно просто исчезает без заглушки «удалено»).
      */
     suspend fun resolveReport(
         chatId: String,
@@ -61,7 +63,8 @@ interface ReportRepository {
         resolution: ReportResolution,
         comment: String = "",
         deleteMessage: Boolean = false,
-        banUser: Boolean = false
+        banUser: Boolean = false,
+        silentDelete: Boolean = false
     ): ReportActionResult
 
     /** Число жалоб в очереди (для бейджа на кнопке входа в раздел). */

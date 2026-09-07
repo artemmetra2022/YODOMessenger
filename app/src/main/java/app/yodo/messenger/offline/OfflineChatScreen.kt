@@ -131,8 +131,12 @@ fun OfflineChatScreen(
         }
     }
 
+    // ИСПРАВЛЕНО (баг 14): при выходе с экрана ПОЛНОСТЬЮ останавливаем Bluetooth
+    // (реклама, сканирование, beacon-цикл, соединения). Раньше здесь вызывался
+    // disconnect(), который перезапускал радио — Bluetooth продолжал работать
+    // в фоне после закрытия режима.
     DisposableEffect(Unit) {
-        onDispose { viewModel.disconnect() }
+        onDispose { viewModel.shutdown() }
     }
 
     Scaffold(

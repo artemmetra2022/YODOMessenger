@@ -89,8 +89,13 @@ interface MessageRepository {
         fromSenderAvatarBase64: String? = null
     ): SendMessageResult
     suspend fun editMessage(chatId: String, messageId: String, newText: String): SendMessageResult
-    suspend fun deleteMessage(chatId: String, messageId: String): SendMessageResult
-    suspend fun deleteMessages(chatId: String, messageIds: List<String>): SendMessageResult
+    // НОВОЕ (баг 10): deletedByAdmin=true помечает удаление как административное —
+    // в чате показывается «Сообщение удалено администратором» вместо обычной заглушки.
+    suspend fun deleteMessage(chatId: String, messageId: String, deletedByAdmin: Boolean = false): SendMessageResult
+    suspend fun deleteMessages(chatId: String, messageIds: List<String>, deletedByAdmin: Boolean = false): SendMessageResult
+    // НОВОЕ (баг 10): «тихое удаление» — документ сообщения удаляется из Firestore целиком,
+    // поэтому у всех участников сообщение исчезает бесследно (без заглушки «удалено»).
+    suspend fun hardDeleteMessage(chatId: String, messageId: String): SendMessageResult
     suspend fun markChatAsRead(chatId: String)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
     // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).

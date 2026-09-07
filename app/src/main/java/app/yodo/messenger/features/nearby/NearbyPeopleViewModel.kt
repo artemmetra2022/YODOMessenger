@@ -19,7 +19,16 @@ import javax.inject.Inject
 sealed class NearbyUiState {
     data object Loading : NearbyUiState()
     data object LocationUnavailable : NearbyUiState()
-    data class Content(val people: List<NearbyPerson>, val myLat: Double, val myLng: Double) : NearbyUiState()
+    // НОВОЕ (баг 13): для информативности UI добавлены точность геолокации, радиус
+    // поиска и время последнего обновления — показываются в шапке экрана и на карте.
+    data class Content(
+        val people: List<NearbyPerson>,
+        val myLat: Double,
+        val myLng: Double,
+        val myAccuracyMeters: Float = 0f,
+        val radiusKm: Double = 10.0,
+        val searchedAtMillis: Long = 0L
+    ) : NearbyUiState()
 }
 
 @HiltViewModel
@@ -52,7 +61,10 @@ class NearbyPeopleViewModel @Inject constructor(
                 _uiState.value = NearbyUiState.Content(
                     people = people,
                     myLat = location.latitude,
-                    myLng = location.longitude
+                    myLng = location.longitude,
+                    myAccuracyMeters = location.accuracy,
+                    radiusKm = radiusKm,
+                    searchedAtMillis = System.currentTimeMillis()
                 )
             } catch (e: Exception) {
                 _uiState.value = NearbyUiState.LocationUnavailable
@@ -61,12 +73,16 @@ class NearbyPeopleViewModel @Inject constructor(
     }
 
     fun stopSharingLocation() {
-        viewModelScope.launch { nearbyPeopleRepository.clearMyLocation() }
+        // ИСПРАВЛЕНО (баг 14): fire-and-forget без viewModelScope — очистка гарантированно
+        // уходит в Firestore при выходе с экрана, а не зависит от жизненного цикла корутин.
+        nearbyPeopleRepository.clearMyLocationNow()
     }
 
     override fun onCleared() {
         super.onCleared()
-        // По умолчанию не публикуем геопозицию дольше, чем экран открыт — приватность прежде всего
-        viewModelScope.launch { nearbyPeopleRepository.clearMyLocation() }
+        // По умолчанию не публикуем геопозицию дольше, чем экран открыт — приватность прежде всего.
+        // ИСПРАВЛЕНО (баг 14): раньше запуск корутины в уже отменённый viewModelScope —
+        // очистка из onCleared() молча не выполнялась. Теперь вызываем напрямую.
+        nearbyPeopleRepository.clearMyLocationNow()
     }
 }

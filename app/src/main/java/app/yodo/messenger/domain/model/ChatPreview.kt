@@ -40,5 +40,11 @@ data class ChatPreview(
     // для E2EE-личных чатов (поле lastMessagePlain в документе чата). Сам
     // документ сообщения остаётся зашифрованным — открытым остаётся только
     // короткое превью для списка чатов. Для обычных чатов совпадает с lastMessage.
-    val isEncryptedPreview: Boolean = false
+    val isEncryptedPreview: Boolean = false,
+    // НОВОЕ (замок у скрытых групп): true, только если это группа или канал с
+    // accessMode = HIDDEN (не видна в поиске, попасть можно только по прямой
+    // ссылке/приглашению/QR — см. ChannelAccessMode). Не путать с isHidden в
+    // ChatListScreen — тот отвечает за отдельный PIN-замок конкретного чата
+    // именно у меня на устройстве и от accessMode никак не зависит.
+    val isHiddenAccessGroup: Boolean = false
 )

@@ -9,6 +9,7 @@ import app.yodo.messenger.data.repository.PhoneAuthRepositoryImpl
 import app.yodo.messenger.data.repository.PostRepositoryImpl
 import app.yodo.messenger.data.repository.PresenceRepositoryImpl
 import app.yodo.messenger.data.repository.ReportRepositoryImpl
+import app.yodo.messenger.data.repository.SchoolRepositoryImpl
 import app.yodo.messenger.data.repository.SessionRepositoryImpl
 import app.yodo.messenger.data.repository.TwoFactorRepositoryImpl
 import app.yodo.messenger.data.repository.UserRepositoryImpl
@@ -21,6 +22,7 @@ import app.yodo.messenger.domain.repository.PhoneAuthRepository
 import app.yodo.messenger.domain.repository.PostRepository
 import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.domain.repository.ReportRepository
+import app.yodo.messenger.domain.repository.SchoolRepository
 import app.yodo.messenger.domain.repository.SessionRepository
 import app.yodo.messenger.domain.repository.TwoFactorRepository
 import app.yodo.messenger.domain.repository.UserRepository
@@ -81,4 +83,9 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindAppSettingsRepository(impl: AppSettingsRepositoryImpl): AppSettingsRepository
+
+    // НОВОЕ (раздел «Школа»): динамический контент школьного раздела.
+    @Binds
+    @Singleton
+    abstract fun bindSchoolRepository(impl: SchoolRepositoryImpl): SchoolRepository
 }

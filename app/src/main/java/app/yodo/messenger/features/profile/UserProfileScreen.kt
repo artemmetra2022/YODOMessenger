@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.AlertDialog
@@ -57,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import app.yodo.messenger.domain.repository.PresenceRepository
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -135,6 +137,36 @@ fun UserProfileScreen(
                 }
             }
 
+            // НОВОЕ (п.15): владелец ограничил просмотр профиля настройкой приватности.
+            is UserProfileUiState.Restricted -> {
+                Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Профиль скрыт",
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Пользователь ограничил, кто может видеть его профиль",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+
             is UserProfileUiState.Content -> {
                 val user = state.user
                 Column(
@@ -162,7 +194,7 @@ fun UserProfileScreen(
                             displayName = user.displayName,
                             photoUrl = user.photoUrl,
                             avatarBase64 = user.avatarBase64,
-                            isOnline = state.presence?.isOnline == true,
+                            isOnline = isPresenceEffectivelyOnline(state.presence),
                             colorTheme = colorTheme
                         )
 
@@ -218,15 +250,22 @@ fun UserProfileScreen(
                         }
 
                         // Статус онлайн
+                        // НОВОЕ (баг 12): статус пересчитывается каждую секунду — «в сети»
+                        // гаснет сам при устаревании (процесс собеседника убит без onStop),
+                        // а «был(а)…» показывает живое время и обновляется в реальном времени.
                         state.presence?.let { presence ->
-                            val statusText = if (presence.isOnline) stringResource(R.string.user_profile_online)
-                            else if (presence.lastSeenMillis > 0) stringResource(R.string.user_profile_last_seen)
-                            else null
+                            val effectivelyOnline = isPresenceEffectivelyOnline(presence)
+                            val statusText = when {
+                                effectivelyOnline -> stringResource(R.string.user_profile_online)
+                                presence.lastSeenMillis > 0 ->
+                                    stringResource(R.string.chat_list_was_online, formatProfileLastSeen(presence.lastSeenMillis))
+                                else -> null
+                            }
                             statusText?.let {
                                 Text(
                                     text = it,
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = if (presence.isOnline) colorTheme.primary
+                                    color = if (effectivelyOnline) colorTheme.primary
                                     else Color.Gray,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
@@ -432,7 +471,7 @@ fun UserProfileScreen(
             title = { Text("Блокировка аккаунта") },
             text = {
                 Column {
-                    Text("Причина бу��ет показана пользователю. Он сможет только подать обжалование.")
+                    Text("Причина будет показана пользователю. Он сможет только подать обжалование.")
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = globalBlockReason,
@@ -581,5 +620,50 @@ private fun ProfileInfoRow(
                 modifier = Modifier.size(18.dp)
             )
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// НОВОЕ (баг 12): посекундное обновление статуса онлайн в профиле
+// ---------------------------------------------------------------------------
+
+/**
+ * Посекундный "тик": composables, читающие это значение, пересчитываются раз в секунду.
+ */
+@Composable
+private fun rememberProfileNowTick(): Long {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+    return now
+}
+
+@Composable
+private fun isPresenceEffectivelyOnline(presence: app.yodo.messenger.domain.model.UserPresence?): Boolean {
+    val now = rememberProfileNowTick()
+    if (presence == null || !presence.isOnline) return false
+    // lastSeen == 0 — старые данные без времени; доверяем isOnline как есть.
+    return presence.lastSeenMillis == 0L ||
+        (now - presence.lastSeenMillis) <= PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS
+}
+
+@Composable
+private fun formatProfileLastSeen(millis: Long): String {
+    val now = rememberProfileNowTick()
+    val diffMillis = (now - millis).coerceAtLeast(0L)
+    val diffSeconds = diffMillis / 1_000
+    val diffMinutes = diffSeconds / 60
+    return when {
+        diffSeconds < 10 -> "только что"
+        diffSeconds < 60 -> "$diffSeconds сек назад"
+        diffMinutes < 60 -> "$diffMinutes мин назад"
+        diffMinutes < 24 * 60 -> "${diffMinutes / 60} ч назад"
+        diffMinutes < 7 * 24 * 60 -> java.text.SimpleDateFormat("EEEE, HH:mm", java.util.Locale("ru"))
+            .format(java.util.Date(millis)).replaceFirstChar { it.uppercase() }
+        else -> java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale("ru")).format(java.util.Date(millis))
     }
 }

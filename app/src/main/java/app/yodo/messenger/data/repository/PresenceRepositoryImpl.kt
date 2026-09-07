@@ -4,9 +4,15 @@ import app.yodo.messenger.domain.model.UserPresence
 import app.yodo.messenger.domain.repository.PresenceRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,16 +39,20 @@ class PresenceRepositoryImpl @Inject constructor(
 
     override fun setOnline(isOnline: Boolean) {
         val uid = firebaseAuth.currentUser?.uid ?: return
+        // ИСПРАВЛЕНО (баг 12): set-merge вместо update — update молча падает, если документ
+        // пользователя ещё не создан (гонка при первой регистрации), и статус "в сети"
+        // не публикуется до следующего перехода foreground/background. Merge создаёт
+        // документ при необходимости, не затирая остальные поля.
         firestore.collection("users").document(uid)
-            .update(
+            .set(
                 mapOf(
                     "isOnline" to isOnline,
                     "lastSeen" to System.currentTimeMillis()
-                )
+                ),
+                SetOptions.merge()
             )
             .addOnFailureListener {
-                // Не критично — если документ ещё не существует (гонка при первой регистрации),
-                // presence обновится при следующем переходе foreground/background.
+                // Не критично — следующий пульс (heartbeat) скорректирует значение.
             }
     }
 
@@ -50,8 +60,9 @@ class PresenceRepositoryImpl @Inject constructor(
         val uid = firebaseAuth.currentUser?.uid ?: return
         // Обновляем только lastSeen — если пользователь параллельно скрыл онлайн-статус,
         // isOnline трогать не нужно, этим управляет setOnline()/setOnlineStatusHidden().
+        // ИСПРАВЛЕНО (баг 12): set-merge по той же причине, что и в setOnline().
         firestore.collection("users").document(uid)
-            .update("lastSeen", System.currentTimeMillis())
+            .set(mapOf("lastSeen" to System.currentTimeMillis()), SetOptions.merge())
             .addOnFailureListener {
                 // Не критично — пропущенный пульс скорректируется следующим вызовом.
             }
@@ -82,48 +93,82 @@ class PresenceRepositoryImpl @Inject constructor(
         // Правило "в обе стороны": если Я скрыл(а) свой статус "в сети", я тоже не вижу
         // статус других (кроме себя самого). Слушаем свой документ, чтобы знать текущее
         // значение hideOnlineStatus и реагировать на него сразу же, без перезахода в экран.
-        var myHidden = false
+        val myHidden = AtomicBoolean(false)
         var otherListener: com.google.firebase.firestore.ListenerRegistration? = null
+
+        // НОВОЕ (баг 12): последние сырые данные собеседника. Хранятся в атомарной ссылке,
+        // чтобы секундный тикер (ниже) мог пересчитывать актуальность статуса без ожидания
+        // новых событий Firestore.
+        class RawPresence(val rawOnline: Boolean, val lastSeen: Long, val theirHidden: Boolean)
+        val latest = AtomicReference<RawPresence?>(null)
+
+        fun sendCurrent() {
+            val raw = latest.get()
+            if (raw == null) {
+                trySend(UserPresence(isOnline = false, lastSeenMillis = 0L))
+                return
+            }
+            // Скрыто, если ЛИБО собеседник скрыл свой статус, ЛИБО я скрыл(а) свой —
+            // работает в обе стороны. Само себя пользователь видит всегда.
+            if ((raw.theirHidden || myHidden.get()) && uid != myUid) {
+                trySend(UserPresence(isOnline = false, lastSeenMillis = 0L))
+                return
+            }
+            // Если isOnline = true, но lastSeen не обновлялся дольше порога — считаем,
+            // что процесс собеседника был убит системой без вызова onStop (heartbeat
+            // из PresenceLifecycleObserver перестал приходить). Показываем оффлайн,
+            // чтобы статус "в сети" не "залипал" неточно на неопределённое время.
+            val isStale = raw.rawOnline &&
+                (System.currentTimeMillis() - raw.lastSeen) > PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS
+            trySend(
+                UserPresence(
+                    isOnline = raw.rawOnline && !isStale,
+                    lastSeenMillis = raw.lastSeen
+                )
+            )
+        }
 
         fun attachOtherListener() {
             otherListener?.remove()
             otherListener = firestore.collection("users").document(uid)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null || snapshot == null || !snapshot.exists()) {
-                        trySend(UserPresence(isOnline = false, lastSeenMillis = 0L))
-                        return@addSnapshotListener
-                    }
-                    val theirHidden = snapshot.getBoolean("hideOnlineStatus") ?: false
-                    // Скрыто, если ЛИБО собеседник скрыл свой статус, ЛИБО я скрыл(а) свой —
-                    // работает в обе стороны. Само себя пользователь видит всегда.
-                    if ((theirHidden || myHidden) && uid != myUid) {
-                        trySend(UserPresence(isOnline = false, lastSeenMillis = 0L))
-                        return@addSnapshotListener
-                    }
-                    val rawIsOnline = snapshot.getBoolean("isOnline") ?: false
-                    val lastSeenMillis = snapshot.getLong("lastSeen") ?: 0L
-                    // Если isOnline = true, но lastSeen не обновлялся дольше порога — считаем,
-                    // что процесс собеседника был убит системой без вызова onStop (heartbeat
-                    // из PresenceLifecycleObserver перестал приходить). Показываем оффлайн,
-                    // чтобы статус "в сети" не "залипал" неточно на неопределённое время.
-                    val isStale = rawIsOnline &&
-                        (System.currentTimeMillis() - lastSeenMillis) > PresenceRepository.PRESENCE_STALE_THRESHOLD_MILLIS
-                    trySend(
-                        UserPresence(
-                            isOnline = rawIsOnline && !isStale,
-                            lastSeenMillis = lastSeenMillis
+                        latest.set(null)
+                    } else {
+                        latest.set(
+                            RawPresence(
+                                rawOnline = snapshot.getBoolean("isOnline") ?: false,
+                                lastSeen = snapshot.getLong("lastSeen") ?: 0L,
+                                theirHidden = snapshot.getBoolean("hideOnlineStatus") ?: false
+                            )
                         )
-                    )
+                    }
+                    sendCurrent()
                 }
+        }
+
+        // НОВОЕ (баг 12): тикер каждую секунду пересчитывает актуальность статуса.
+        // Раньше устаревание (isStale) вычислялось ТОЛЬКО при событии от Firestore:
+        // если процесс собеседника убит системой (heartbeat прекратился, но документ
+        // больше не меняется), события не приходили — и статус "в сети" висел бесконечно.
+        // Теперь переключение на "был(а)…" происходит в пределах секунды после порога
+        // устаревания, без единой дополнительной записи/чтения в Firestore.
+        val ticker = launch {
+            while (isActive) {
+                delay(1_000L)
+                sendCurrent()
+            }
         }
 
         val myListener = if (myUid != null) {
             firestore.collection("users").document(myUid)
                 .addSnapshotListener { snapshot, _ ->
                     val newHidden = snapshot?.getBoolean("hideOnlineStatus") ?: false
-                    if (newHidden != myHidden || otherListener == null) {
-                        myHidden = newHidden
+                    if (newHidden != myHidden.get() || otherListener == null) {
+                        myHidden.set(newHidden)
                         attachOtherListener()
+                    } else {
+                        sendCurrent()
                     }
                 }
         } else {
@@ -132,6 +177,7 @@ class PresenceRepositoryImpl @Inject constructor(
         }
 
         awaitClose {
+            ticker.cancel()
             myListener?.remove()
             otherListener?.remove()
         }

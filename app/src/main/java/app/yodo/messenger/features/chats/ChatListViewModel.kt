@@ -20,6 +20,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -80,6 +81,23 @@ class ChatListViewModel @Inject constructor(
     private val connectivityManager =
         application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
+    // ФИКС КРАША (NPE в combine() из-за порядка инициализации): chatFolders используется
+    // внутри observeChats(), которая раньше вызывалась из init{} ДО объявления этого поля
+    // в теле класса. На debug-сборке это проходило благодаря порядку байткода, но в
+    // релизе с R8-минификацией observeChats() иногда выполнялась до того, как chatFolders
+    // успевал получить значение (StateFlow ещё null) — combine() падал с NPE в CombineKt.
+    // Поле объявлено здесь, ДО init{}, чтобы гарантировать инициализацию первым.
+    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ФИКС КРАША (продолжение): _activeFilter тоже читается из observeChats() (внутри
+    // init{}), но в отличие от chatFolders оставался объявлен ПОСЛЕ блока init — из-за
+    // чего при синхронном запуске корутины combine() мог получить ещё не инициализированное
+    // значение и упасть с NPE. Переносим его наверх, до init{}, вместе с chatFolders.
+    /** Текущий выбранный фильтр */
+    private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
+    val activeFilter: StateFlow<ChatFilter> = _activeFilter
+
     init {
         observeNetworkState()
         observeChats()
@@ -134,20 +152,15 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    /** Текущий выбранный фильтр */
-    private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
-    val activeFilter: StateFlow<ChatFilter> = _activeFilter
-
-    // НОВОЕ (п.4): папки чатов — пользовательские группировки чатов
-    val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     // НОВОЕ (скрытые чаты): множество ID скрытых чатов (для пунктов меню).
     val hiddenChatIds: StateFlow<Set<String>> = userSettingsPreferences.hiddenChatIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     // НОВОЕ (скрытые чаты): задан ли основной PIN (нужно для шторки со скрытыми чатами).
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    // НОВОЕ: скрывать ли системный статус-бар на этом экране (настраивается пользователем).
+    val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     // НОВОЕ (скрытые чаты): полный список скрытых чатов (для отдельного окна).
@@ -211,17 +224,27 @@ class ChatListViewModel @Inject constructor(
             // умолчанию сразу же, не дожидаясь диска — черновики/папки просто "доедут"
             // следующим обновлением, когда будут готовы.
             // НОВОЕ (скрытые чаты): пятый источник — ID скрытых чатов и признак decoy-режима.
-            val hiddenInfo = combine(
+            val hiddenInfo: Flow<Pair<Set<String>, Boolean>> = combine(
                 userSettingsPreferences.hiddenChatIds.onStart { emit(emptySet()) },
                 userSettingsPreferences.decoyMode.onStart { emit(false) }
             ) { ids, decoy -> ids to decoy }
-            combine(
+
+            // ФИКС КРАША: варарг-перегрузка combine() с 5 Flow в связке с R8-минификацией
+            // релизной сборки иногда даёт NullPointerException внутри CombineKt (Flow.collect
+            // на null-ссылке из внутреннего Array<Flow<*>?>). Разбиваем на два вложенных
+            // combine() с фиксированной арностью (по 2-3 потока) — эти перегрузки не используют
+            // варарг-массив и не подвержены этому багу минификации.
+            val baseInfo = combine(
                 chatRepository.observeChatList(),
                 draftsPreferences.observeAllDrafts().onStart { emit(emptyMap()) },
-                _activeFilter,
+                _activeFilter
+            ) { result, drafts, filter -> Triple(result, drafts, filter) }
+
+            combine(
+                baseInfo,
                 chatFolders.onStart { emit(emptyList()) },
                 hiddenInfo
-            ) { result, drafts, filter, folders, hidden ->
+            ) { (result, drafts, filter), folders, hidden ->
                 when (result) {
                     is ChatListResult.Success -> {
                         val chatsWithDrafts = if (drafts.isEmpty()) {

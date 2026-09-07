@@ -13,6 +13,7 @@ import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.AdminActionType
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.Message
+import app.yodo.messenger.domain.model.SupportRestriction
 import app.yodo.messenger.domain.model.UserPresence
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.domain.repository.MessageRepository
@@ -93,7 +94,11 @@ data class ChatUiState(
     val chatInfoLoadingSeconds: Int = 0,
     // НОВОЕ (FAQ-бот поддержки): текущий экран бота поддержки. null == панель бота
     // скрыта (пользователь свернул её и печатает оператору вручную).
-    val supportFaqScreen: SupportFaqScreen? = null
+    val supportFaqScreen: SupportFaqScreen? = null,
+    // НОВОЕ (п.7 «вышел из чата и зашёл — сообщений нет»): false, пока от Firestore
+    // не пришёл первый снапшот сообщений (даже пустой). До этого момента в UI
+    // показывается индикатор загрузки, а не ложное «Сообщений пока нет».
+    val initialMessagesReceived: Boolean = false
 )
 
 // НОВОЕ (FAQ-бот поддержки): три состояния кнопочного бота внутри чата поддержки —
@@ -209,14 +214,26 @@ class ChatViewModel @Inject constructor(
     private var typingResetJob: Job? = null
     private var isCurrentlyMarkedTyping = false
 
+    // НОВОЕ (п.19 ТЗ): активное ограничение на переписку с поддержкой у текущего
+    // пользователя (null — ограничения нет). Обновляется в реальном времени, чтобы
+    // не пришлось выходить и заходить в чат заново после снятия/наложения ограничения.
+    private var mySupportRestriction: SupportRestriction? = null
+
+    // Это личный чат поддержки текущего пользователя (не админ, открывший чужое обращение).
+    private val isMySupportChat: Boolean
+        get() = chatId.startsWith(ChatRepository.SUPPORT_CHAT_PREFIX) && !chatRepository.isSupportAdmin()
+
     init {
         loadChatInfo()
         // НОВОЕ (FAQ-бот поддержки): в чате поддержки бот открыт по умолчанию —
         // пользователь сразу видит разделы вопросов вместо пустого поля ввода.
         // Если это чат поддержки не выяснится сразу (chatType грузится асинхронно
         // в loadChatInfo), панель включится тем же вызовом чуть ниже.
-        if (chatId.startsWith(ChatRepository.SUPPORT_CHAT_PREFIX) && !chatRepository.isSupportAdmin()) {
+        if (isMySupportChat) {
             _uiState.value = _uiState.value.copy(supportFaqScreen = SupportFaqScreen.SectionList)
+            viewModelScope.launch {
+                chatRepository.observeMySupportRestriction().collect { mySupportRestriction = it }
+            }
         }
         observeMessages()
         observePinnedMessages()
@@ -341,7 +358,7 @@ class ChatViewModel @Inject constructor(
     }
 
     // НОВОЕ (п.38): периодически (пока открыт чат) чистим уже истёкшие сообщения —
-    // best-effort ����ез Cloud Functions/cron. Достаточно, чтобы в реальном использовании
+    // best-effort через Cloud Functions/cron. Достаточно, чтобы в реальном использовании
     // сообщения пропадали вскоре после истечения таймера у любого из открывших чат.
     // Ранний выход: если в чате не включён TTL — не делаем запрос к Firestore вообще.
     private fun cleanupExpiredMessagesPeriodically() {
@@ -522,7 +539,12 @@ class ChatViewModel @Inject constructor(
     private fun observeMessages() {
         viewModelScope.launch {
             messageRepository.observeMessages(chatId, topicId).collect { messages ->
-                _uiState.value = _uiState.value.copy(messages = messages)
+                _uiState.value = _uiState.value.copy(
+                    messages = messages,
+                    // п.7: первый снапшот (даже пустой) означает, что данные получены —
+                    // дальше «Сообщений пока нет» уже не ложное, а настоящее состояние.
+                    initialMessagesReceived = true
+                )
                 // ФИКС (бейдж непрочитанных): markAsRead() раньше вызывался только при
                 // открытии чата. Если сообщение (например одноразовое фото) приходило, пока
                 // чат уже открыт, счётчик непрочитанных на сервере рос, а в главном меню бейдж
@@ -601,6 +623,8 @@ class ChatViewModel @Inject constructor(
         if (text.isBlank()) return
         // НОВОЕ (реальная блокировка): нельзя писать, если кто-то кого-то заблокировал.
         if (blockGuard()) return
+        // НОВОЕ (п.19 ТЗ): нельзя писать в поддержку при активном ограничении.
+        if (supportRestrictionGuard()) return
         val editing = _uiState.value.editingMessage
         // НОВОЕ (rate limiting): лимитируем только отправку новых сообщений, а не
         // редактирование уже существующих — правка не создаёт новый флуд.
@@ -627,6 +651,9 @@ class ChatViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null, replyingTo = null)
         viewModelScope.launch {
+            // НОВОЕ (п.18 ТЗ): только 1 активное обращение в поддержку без ответа —
+            // проверяем непосредственно перед отправкой (актуальное состояние из Firestore).
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendMessage(
                 chatId, text, replyContext,
                 hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds,
@@ -653,12 +680,44 @@ class ChatViewModel @Inject constructor(
         return false
     }
 
+    // НОВОЕ (п.19 ТЗ): проверка ограничения на переписку с поддержкой. true — отправка
+    // запрещена, в errorMessage — причина и (для временного ограничения) срок окончания.
+    private fun supportRestrictionGuard(): Boolean {
+        if (!isMySupportChat) return false
+        val restriction = mySupportRestriction ?: return false
+        if (!restriction.isActive()) return false
+        val until = restriction.expiresAt
+        val whenText = if (until == null) {
+            "навсегда"
+        } else {
+            "до " + java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale("ru")).format(java.util.Date(until))
+        }
+        val reasonSuffix = if (restriction.reason.isNotBlank()) " Причина: ${restriction.reason}." else ""
+        _uiState.value = _uiState.value.copy(
+            errorMessage = "Возможность писать в поддержку ограничена ($whenText).$reasonSuffix"
+        )
+        return true
+    }
+
+    // НОВОЕ (п.18 ТЗ): нельзя отправить новое сообщение в поддержку, пока предыдущее
+    // ещё без ответа (только 1 активное обращение одновременно).
+    private suspend fun awaitingSupportReplyGuard(): Boolean {
+        if (!isMySupportChat) return false
+        if (!chatRepository.hasAwaitingSupportReply()) return false
+        _uiState.value = _uiState.value.copy(
+            errorMessage = "У вас уже есть активное обращение в поддержку без ответа. Дождитесь ответа оператора, прежде чем писать снова."
+        )
+        return true
+    }
+
     // НОВОЕ (картинки из буфера + подпись): передаём необязательную подпись к фото.
     fun sendImage(base64: String, caption: String = "", isViewOnce: Boolean = false) {
         if (blockGuard()) return
+        if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -670,9 +729,11 @@ class ChatViewModel @Inject constructor(
     fun sendImages(imagesBase64: List<String>, caption: String = "") {
         if (imagesBase64.isEmpty()) return
         if (blockGuard()) return
+        if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -680,7 +741,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    // НОВОЕ (одноразовые ��едиа): вызывается экраном сразу после полноэкранного показа
+    // НОВОЕ (одноразовые медиа): вызывается экраном сразу после полноэкранного показа
     // view-once фото — стирает imageBase64 на сервере, чтобы повторно открыть было нельзя.
     fun markViewOnceImageOpened(messageId: String) {
         viewModelScope.launch {
@@ -700,9 +761,12 @@ class ChatViewModel @Inject constructor(
 
     // НОВОЕ (п.37): отправка записанного голосового сообщения.
     fun sendVoice(base64: String, durationMs: Long) {
+        if (blockGuard()) return
+        if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendVoiceMessage(chatId, base64, durationMs, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -713,9 +777,12 @@ class ChatViewModel @Inject constructor(
     // НОВОЕ: отправка файлового вложения — base64 + метаданные уже подготовлены
     // на уровне UI (см. FileUtils.prepareFileForSending), здесь только пересылка в репозиторий.
     fun sendFile(base64: String, fileName: String, mimeType: String, sizeBytes: Long) {
+        if (blockGuard()) return
+        if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendFileMessage(chatId, base64, fileName, mimeType, sizeBytes, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -725,9 +792,12 @@ class ChatViewModel @Inject constructor(
 
     // НОВОЕ: отправка геолокации — точки на карте.
     fun sendLocation(lat: Double, lng: Double) {
+        if (blockGuard()) return
+        if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendLocationMessage(chatId, lat, lng, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
@@ -749,9 +819,12 @@ class ChatViewModel @Inject constructor(
         correctOptionIndex: Int? = null,
         explanation: String? = null
     ) {
+        if (blockGuard()) return
+        if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendPollMessage(
                 chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis,
                 isQuiz, correctOptionIndex, explanation, topicId = topicId
@@ -784,14 +857,16 @@ class ChatViewModel @Inject constructor(
 
     fun deleteMessage(message: Message) {
         viewModelScope.launch {
-            when (val result = messageRepository.deleteMessage(chatId, message.id)) {
+            // НОВОЕ (баг 10): удаление чужого сообщения модератором/админом помечается
+            // флагом deletedByAdmin — в чате показывается «Сообщение удалено администратором».
+            val deletingOthersMessage = message.senderId != null && message.senderId != currentUserId
+            when (val result = messageRepository.deleteMessage(chatId, message.id, deletedByAdmin = deletingOthersMessage)) {
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
                 else -> {
                     // НОВОЕ (модерация): удаление чужого сообщения фиксируем в журнале
                     // администраторов ТОЛЬКО после успеха — иначе отказ правил (например,
                     // у снятого модератора) оставлял бы в журнале несуществующие действия.
-                    val myUid = currentUserId
-                    if (message.senderId != null && message.senderId != myUid) {
+                    if (deletingOthersMessage) {
                         chatRepository.logAdminAction(
                             chatId = chatId,
                             actionType = AdminActionType.MESSAGE_DELETED,
@@ -816,7 +891,9 @@ class ChatViewModel @Inject constructor(
         val ids = (mine + others).map { it.id }
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            when (val result = messageRepository.deleteMessages(chatId, ids)) {
+            // НОВОЕ (баг 10): если среди удаляемых есть чужие сообщения (модерация) —
+            // вся пачка помечается как административное удаление.
+            when (val result = messageRepository.deleteMessages(chatId, ids, deletedByAdmin = others.isNotEmpty())) {
                 is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
                 else -> {
                     if (others.isNotEmpty()) {

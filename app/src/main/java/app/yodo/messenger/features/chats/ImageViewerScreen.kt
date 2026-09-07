@@ -170,7 +170,7 @@ fun ImageViewerScreen(
                             }
                         }) {
                             if (isSaving) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
-                            else Icon(Icons.Filled.Download, contentDescription = "��качать", tint = Color.White)
+                            else Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = Color.White)
                         }
                         IconButton(onClick = { scope.launch { shareImage(context, bitmap) } }) {
                             Icon(Icons.Filled.Share, contentDescription = "Поделиться", tint = Color.White)

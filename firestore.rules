@@ -90,6 +90,17 @@ service cloud.firestore {
       return isSignedIn() &&
         (chatId == 'support_' + request.auth.uid || isOfficialChannelAdmin());
     }
+    // НОВОЕ (п.19 ТЗ): активное ограничение на переписку с поддержкой —
+    // либо навсегда (нет expiresAt), либо срок ещё не истёк.
+    function hasActiveSupportRestriction() {
+      let path = /databases/$(database)/documents/supportRestrictions/$(request.auth.uid);
+      return exists(path) &&
+        (
+          !('expiresAt' in get(path).data) ||
+          get(path).data.expiresAt == null ||
+          get(path).data.expiresAt > request.time.toMillis()
+        );
+    }
 
     // НОВОЕ (AD): глобальные блокировки аккаунтов. Читать свою запись может
     // сам пользователь (чтобы показать экран «Вы заблокированы»), а также
@@ -106,6 +117,48 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ (глобальный аудит-лог Админки): корневая коллекция adminAuditLog —
+    // история действий, не привязанных к конкретному чату (глобальный бан/
+    // разбан пользователя, изменение общих настроек приложения). Пишет и
+    // читает клиент напрямую (см. UserRepositoryImpl.logGlobalAdminAction /
+    // getGlobalAuditLog) — только два доверенных админа, симметрично
+    // globalBlocks/supportRestrictions выше. Записи неизменяемы после
+    // создания — update/delete не разрешены никому с клиента.
+    match /adminAuditLog/{entryId} {
+      allow read, create: if isOfficialChannelAdmin();
+      allow update, delete: if false;
+    }
+
+    // НОВОЕ (push о модерации): корневая коллекция moderationNotifications —
+    // очередь событий модерации (глобальный бан/разбан), которую периодически
+    // вычитывает push-worker/index.js через Admin SDK (обходит эти правила
+    // полностью, так что доступ воркера ими не ограничивается). С клиента
+    // разрешено только СОЗДАНИЕ — двум админам (UserRepositoryImpl.
+    // queueModerationNotification), когда они блокируют/разблокируют
+    // пользователя. Явного чтения с клиента не требуется — ни сам получатель,
+    // ни кто-либо ещё не просматривает эту очередь через приложение, только
+    // получает готовый push после того, как воркер её обработает и пометит
+    // notified: true. Update/delete с клиента не разрешены — это исключительно
+    // задача воркера (notified: true) через Admin SDK.
+    match /moderationNotifications/{notificationId} {
+      allow read: if false;
+      allow create: if isOfficialChannelAdmin();
+      allow update, delete: if false;
+    }
+
+    // НОВОЕ (п.19 ТЗ): ограничение возможности писать в поддержку — мера мягче
+    // globalBlocks (пользователь не блокируется целиком, только лишается доступа
+    // к отправке сообщений в чат поддержки). Та же модель прав: сам пользователь
+    // читает свою запись (чтобы показать причину в чате), два админа читают/пишут.
+    match /supportRestrictions/{restrictedUserId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid == restrictedUserId || isOfficialChannelAdmin());
+      allow create, update, delete: if isOfficialChannelAdmin();
+    }
+    match /supportRestrictions/{document=**} {
+      allow read: if isOfficialChannelAdmin();
+    }
+
     // НОВОЕ: глобальные настройки приложения (сейчас — только флаг
     // requireEmailVerification, переключатель "требовать подтверждение почты
     // при входе"). Читать может кто угодно, даже без авторизации — значение
@@ -114,6 +167,49 @@ service cloud.firestore {
     match /config/appSettings {
       allow read: if true;
       allow write: if isOfficialChannelAdmin();
+    }
+
+    // НОВОЕ (раздел «Школа»): динамический контент школьного справочника
+    // (перенос функционала Telegram-бота гимназии №196). Модель прав:
+    //  - schoolNews   — читают все авторизованные; писать/удалять — только админы;
+    //  - schoolPolls  — читают все авторизованные; голосовать (voters/votes)
+    //                    может любой авторизованный ровно один раз (rules не
+    //                    позволяют повторно голосовать или менять чужие поля);
+    //                    создавать/удалять — только админы;
+    //  - schoolIdeas  — создать может любой авторизованный (только от своего
+    //                    имени), читать — только админы (идеи приватны);
+    //  - schoolReviews— документ = uid автора: читать могут все авторизованные,
+    //                    писать можно ТОЛЬКО свой документ и только от своего имени.
+    match /schoolNews/{newsId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOfficialChannelAdmin();
+    }
+    match /schoolPolls/{pollId} {
+      allow read: if isSignedIn();
+      // Голосование: пользователь добавляет СВОЙ uid в voters и увеличивает
+      // счётчик одного варианта. Меняться могут только votes/voters, uid автора
+      // голоса обязан отсутствовать в voters до обновления (один голос на опрос)
+      // и добавляться как единственный новый ключ карты voters.
+      allow update: if isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes', 'voters']) &&
+        request.auth.uid in request.resource.data.voters &&
+        !(request.auth.uid in resource.data.voters) &&
+        request.resource.data.voters.diff(resource.data.voters).affectedKeys()
+          .hasOnly([request.auth.uid]);
+      allow create, delete: if isOfficialChannelAdmin();
+    }
+    match /schoolIdeas/{ideaId} {
+      allow read: if isOfficialChannelAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /schoolReviews/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.authorId == request.auth.uid;
+      allow delete: if false;
     }
 
     // НОВОЕ (вход по QR-коду): временный "мостик" между веб-версией (не авторизована)
@@ -314,6 +410,13 @@ service cloud.firestore {
       //    пользователем, уже присутствующим в adminIds. Это закрывает
       //    возможность обычного участника назначить себя администратором
       //    напрямую через Firestore SDK, в обход клиентских проверок прав.
+      //  ИСПРАВЛЕНИЕ (выход из группы не работал): раньше не было ветки,
+      //  разрешающей рядовому участнику удалить САМОГО СЕБЯ из чата — любой
+      //  arrayRemove(uid) в participantIds отклонялся, и leaveGroup() всегда
+      //  падал с PERMISSION_DENIED. Добавлена отдельная ветка ниже.
+      //  НОВОЕ (передача владения): поле createdBy теперь защищено явно —
+      //  менять его может только нынешний владелец, и только на пользователя,
+      //  который уже состоит в группе (see transferOwnership()).
       allow update: if isSignedIn() &&
         (isSupportChat(chatId)
           ? canAccessSupportChat(chatId)
@@ -325,11 +428,24 @@ service cloud.firestore {
                   // Поля управления доступом не меняются в этом запросе —
                   // обычное редактирование чата (сообщения, черновики и т.д.)
                   !request.resource.data.diff(resource.data).affectedKeys()
-                    .hasAny(['roles', 'adminIds', 'customRoles', 'participantIds'])
+                    .hasAny(['roles', 'adminIds', 'customRoles', 'participantIds', 'createdBy'])
                   ||
-                  // ...либо меняет их владелец чата или уже действующий админ.
-                  request.auth.uid == resource.data.createdBy ||
-                  request.auth.uid in (resource.data.adminIds is list ? resource.data.adminIds : [])
+                  // ...либо меняет их владелец чата или уже действующий админ,
+                  // но createdBy при этом может поменять ТОЛЬКО нынешний владелец,
+                  // и только на действующего участника чата (не на произвольный uid).
+                  (
+                    (
+                      request.auth.uid == resource.data.createdBy ||
+                      request.auth.uid in (resource.data.adminIds is list ? resource.data.adminIds : [])
+                    ) &&
+                    (
+                      request.resource.data.createdBy == resource.data.createdBy ||
+                      (
+                        request.auth.uid == resource.data.createdBy &&
+                        request.resource.data.createdBy in resource.data.participantIds
+                      )
+                    )
+                  )
                 )
                 ||
                 // НОВОЕ (админ-функции групп): вступление в открытую группу / подписка
@@ -353,6 +469,19 @@ service cloud.firestore {
                     request.auth.uid in resource.data.bannedUserIds
                   )
                 )
+                ||
+                // НОВОЕ (выход из группы): участник удаляет САМОГО СЕБЯ из
+                // participantIds (и adminIds, если был админом), не трогая
+                // остальные поля. Владельцу (createdBy) выход запрещён на
+                // уровне правил тоже — сначала обязан передать права.
+                (
+                  request.auth.uid in resource.data.participantIds &&
+                  request.auth.uid != resource.data.createdBy &&
+                  request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['participantIds', 'adminIds']) &&
+                  !(request.auth.uid in request.resource.data.participantIds) &&
+                  !(request.auth.uid in (request.resource.data.adminIds is list ? request.resource.data.adminIds : []))
+                )
               )
         );
 
@@ -362,9 +491,9 @@ service cloud.firestore {
 
       // Журнал действий администраторов: читать могут только участники чата
       // (право VIEW_ADMIN_LOG дополнительно проверяется на клиенте по
-      // roles/customRoles — здесь ��а уровне правил гарантируем только
+      // roles/customRoles — здесь на уровне правил гарантируем только
       // принадлежность к чату). Писать может только сам участник от своего
-      // имени, сразу после выполненного ��м действия.
+      // имени, сразу после выполненного им действия.
       // НОВОЕ (модерируемые каналы): заявки на вступление хранятся в подколлекции
       // joinRequests/{userId}. Создать/удалить свою заявку может сам пользователь;
       // читать список и удалять (одобрять/отклонять) — владелец или админ канала.
@@ -375,6 +504,21 @@ service cloud.firestore {
       // её прочитанной может любой участник, но ТОЛЬКО меняя свой собственный ключ
       // в картах pinned/unreadCounts — иначе можно было бы сбросить непрочитанные
       // у другого пользователя.
+      // ИСПРАВЛЕНИЕ (статистика канала не открывается): подколлекция событий
+      // подписки/отписки (subscriberEvents), на которой строится график роста
+      // аудитории в ChannelStatsScreen, не имела явного правила доступа — и
+      // read, и create молча отклонялись, из-за чего getChannelStats() ловил
+      // PERMISSION_DENIED в общем try/catch и возвращал null, а ViewModel
+      // трактовал это как accessDenied = true даже для настоящего владельца.
+      match /subscriberEvents/{eventId} {
+        allow read: if isSignedIn() &&
+          (request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.createdBy ||
+           request.auth.uid in (get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds is list
+             ? get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds : []));
+        allow create: if isSignedIn();
+        allow update, delete: if false;
+      }
+
       match /topics/{topicId} {
         allow read: if isSignedIn() &&
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
@@ -510,7 +654,16 @@ service cloud.firestore {
           (
             // Отправитель сообщения обязан совпадать с текущим пользователем —
             // запрещает отправку сообщений от чужого имени.
-            request.auth.uid == request.resource.data.senderId ||
+            (
+              request.auth.uid == request.resource.data.senderId &&
+              // НОВОЕ (п.19 ТЗ): при активном ограничении обычный пользователь
+              // (не админ) не может создать новое сообщение в СВОЁМ чате поддержки.
+              // Админы поддержки отвечают в чужие support-чаты своим senderId ==
+              // their uid, что тоже совпадает с request.auth.uid, но они не могут
+              // иметь ограничение сами на себя наложенное (нет смысла) — условие
+              // ниже применяется только когда это именно "свой" support-чат.
+              (!(isSupportChat(chatId) && chatId == 'support_' + request.auth.uid) || !hasActiveSupportRestriction())
+            ) ||
             // НОВОЕ (приветствие поддержки, без Cloud Functions): владелец support-чата
             // может один раз создать ровно ОДНО системное приветственное сообщение
             // от имени "support_system" — сразу при первом открытии чата поддержки.
@@ -540,14 +693,16 @@ service cloud.firestore {
             isViewOnceOpenUpdate() ||
             // Модератор: только форма «удаления» сообщения (isDeleted + очистка
             // медиа-полей), произвольно менять текст/автора/время нельзя.
+            // НОВОЕ (баг 10): в whitelist добавлен deletedByAdmin — пометка
+            // административного удаления («Сообщение удалено администратором»).
             (
               isChatModerator(chatId) &&
               request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['isDeleted', 'text', 'imageBase64', 'fileBase64', 'fileName',
+                .hasOnly(['isDeleted', 'deletedByAdmin', 'text', 'imageBase64', 'fileBase64', 'fileName',
                           'fileMimeType', 'fileSizeBytes', 'locationLat', 'locationLng'])
             ) ||
             // НОВОЕ (F1 реакции + F3 просмотры): любой авторизованный пользователь
-            // может ставить реакции и отмечать просмотр поста — обновля�� ТОЛЬКО эти поля.
+            // может ставить реакции и отмечать просмотр поста — обновляя ТОЛЬКО эти поля.
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['reactions', 'viewedBy', 'viewCount']) ||
             // Любой авторизованный пользователь может закрепить/открепить сообщение
@@ -571,13 +726,27 @@ service cloud.firestore {
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId)
           );
 
-        // Комментарии к сообщениям/постам: читать и оставлять может любой
-        // авторизованный пользователь (блокировка проверяется на клиенте). Автор
-        // комментария обязан совпадать с текущим пользователем.
+        // Комментарии к сообщениям/постам канала: кто может читать/писать зависит от
+        // настроек канала allowComments/commentPermission (владелец задаёт в настройках
+        // канала). ИСПРАВЛЕНО (кто может писать комментарии): раньше здесь стояло
+        // "блокировка проверяется на клиенте" — то есть эти правила пропускали
+        // ЛЮБОГО авторизованного пользователя независимо от allowComments и от
+        // commentPermission, и клиентскую проверку можно было обойти прямым запросом
+        // к Firestore. Теперь читаем настройки канала прямо в правиле.
         match /comments/{commentId} {
           allow read: if isSignedIn();
           allow create: if isSignedIn() &&
-            request.auth.uid == request.resource.data.senderId;
+            request.auth.uid == request.resource.data.senderId &&
+            get(/databases/$(database)/documents/chats/$(chatId)).data.get('allowComments', true) == true &&
+            (
+              get(/databases/$(database)/documents/chats/$(chatId)).data.get('commentPermission', 'EVERYONE') == 'EVERYONE' ||
+              request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.get('createdBy', '') ||
+              request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('adminIds', []) ||
+              (
+                get(/databases/$(database)/documents/chats/$(chatId)).data.get('commentPermission', 'EVERYONE') == 'SUBSCRIBERS_ONLY' &&
+                request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', [])
+              )
+            );
           allow delete: if isSignedIn() &&
             (request.auth.uid == resource.data.senderId || isOfficialChannelAdmin());
           allow update: if false;
