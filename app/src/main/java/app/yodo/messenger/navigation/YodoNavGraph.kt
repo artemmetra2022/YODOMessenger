@@ -395,12 +395,21 @@ fun YodoNavGraph(
                 onOpenReview = { navController.navigate(Routes.SchoolReview.route) },
                 onOpenFaq = { navController.navigate(Routes.SchoolFaq.route) },
                 onOpenParents = { navController.navigate(Routes.SchoolParents.route) },
-                onOpenAdmin = { navController.navigate(Routes.SchoolAdmin.route) }
+                onOpenAdmin = {
+                    navController.navigate(Routes.SchoolAdmin.route)
+                },
+                onOpenMyTeacherPage = {
+                    navController.navigate(Routes.SchoolTeacherPage.createRoute("", myPage = true))
+                }
             )
         }
         composable(Routes.SchoolTeachers.route) {
             app.yodo.messenger.features.school.SchoolTeachersScreen(
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                // НОВОЕ (учительские страницы): из карточки учителя — на его страницу.
+                onOpenTeacherPage = { teacherName ->
+                    navController.navigate(Routes.SchoolTeacherPage.createRoute(teacherName))
+                }
             )
         }
         composable(Routes.SchoolNews.route) {
@@ -445,11 +454,41 @@ fun YodoNavGraph(
         }
         composable(Routes.SchoolAdmin.route) {
             app.yodo.messenger.features.school.SchoolAdminScreen(
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                onOpenTeacherProfiles = {
+                    navController.navigate(Routes.SchoolTeacherAdmin.route)
+                }
             )
         }
         composable(Routes.SchoolSettings.route) {
             app.yodo.messenger.features.school.SchoolSettingsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (учительские страницы): страница учителя — для ученика (файл,
+        // вопросы, подписка) и для владельца (обновление файла, скрытие вопросов).
+        // Аргументы маршрута автоматически доступны ViewModel'и через
+        // SavedStateHandle (teacherName/mode), имя URL-декодируется там же.
+        composable(
+            route = Routes.SchoolTeacherPage.route,
+            arguments = listOf(
+                navArgument(Routes.SchoolTeacherPage.ARG_TEACHER_NAME) {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+                navArgument(Routes.SchoolTeacherPage.ARG_MODE) {
+                    type = NavType.StringType
+                    defaultValue = "page"
+                }
+            )
+        ) {
+            app.yodo.messenger.features.school.SchoolTeacherPageScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (учительские страницы): админ-панель профилей учителей.
+        composable(Routes.SchoolTeacherAdmin.route) {
+            app.yodo.messenger.features.school.SchoolTeacherAdminScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }

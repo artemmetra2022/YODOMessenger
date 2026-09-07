@@ -46,6 +46,10 @@ class SchoolViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000),
             SchoolPreferences.SectionIds.ALL.toSet())
 
+    // НОВОЕ (учительские страницы): показывать ли «Моя страница учителя».
+    val teacherModeEnabled: StateFlow<Boolean> = schoolPreferences.teacherModeEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     // Локальный прогресс игры/викторины (из бота: счёт сессии + победы в профиле).
     val gameWins: StateFlow<Int> = schoolPreferences.gameWins
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)

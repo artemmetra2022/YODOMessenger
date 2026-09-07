@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Schedule
@@ -49,10 +50,13 @@ private data class SchoolSectionUi(
 @Composable
 fun SchoolSettingsScreen(
     onBackClick: () -> Unit,
-    viewModel: SchoolSettingsViewModel = hiltViewModel()
+    viewModel: SchoolSettingsViewModel = hiltViewModel(),
+    teacherModeViewModel: SchoolTeacherModeViewModel = hiltViewModel()
 ) {
     val sectionEnabled by viewModel.sectionEnabled.collectAsState()
     val visibleSections by viewModel.visibleSections.collectAsState()
+    // НОВОЕ (учительские страницы): режим учителя — «Моя страница учителя».
+    val teacherModeEnabled by teacherModeViewModel.teacherModeEnabled.collectAsState()
     val colorTheme = LocalColorTheme.current
 
     val sections = listOf(
@@ -99,6 +103,21 @@ fun SchoolSettingsScreen(
                         subtitle = "Пункт «Школа» в Настройки → Аккаунт",
                         checked = sectionEnabled,
                         onCheckedChange = { viewModel.setSectionEnabled(it) },
+                        colorTheme = colorTheme
+                    )
+                }
+            }
+            // НОВОЕ (учительские страницы): «второй профиль» — режим учителя.
+            // Сама привязка аккаунта к учителю делается админом; переключатель
+            // лишь показывает/прячет вход «Моя страница учителя».
+            item {
+                SettingsCard {
+                    SettingsToggleRow(
+                        icon = Icons.Filled.Person,
+                        title = "Режим учителя",
+                        subtitle = "Показывать «Моя страница учителя» в разделе «Школа». Работает после привязки аккаунта администратором",
+                        checked = teacherModeEnabled,
+                        onCheckedChange = { teacherModeViewModel.setTeacherModeEnabled(it) },
                         colorTheme = colorTheme
                     )
                 }

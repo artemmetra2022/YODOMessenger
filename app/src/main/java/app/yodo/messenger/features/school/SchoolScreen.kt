@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Schedule
@@ -72,6 +73,7 @@ fun SchoolScreen(
     onOpenFaq: () -> Unit,
     onOpenParents: () -> Unit,
     onOpenAdmin: () -> Unit = {},
+    onOpenMyTeacherPage: () -> Unit = {},
     viewModel: SchoolViewModel = hiltViewModel()
 ) {
     val visibleSections by viewModel.visibleSections.collectAsState()
@@ -82,6 +84,8 @@ fun SchoolScreen(
     val quizTotal by viewModel.quizTotal.collectAsState()
     val myStars by viewModel.myStars.collectAsState()
     val message by viewModel.message.collectAsState()
+    // НОВОЕ (учительские страницы): режим учителя — «Моя страница учителя».
+    val teacherModeEnabled by viewModel.teacherModeEnabled.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(message) {
@@ -126,6 +130,18 @@ fun SchoolScreen(
                     tint = MaterialTheme.colorScheme.primary,
                     subtitleMaxLines = 3
                 )
+            }
+            // НОВОЕ (учительские страницы): вход для привязанного учителя —
+            // виден, только если включён «режим учителя» в настройках раздела.
+            if (teacherModeEnabled) {
+                item {
+                    SchoolSectionCard(
+                        icon = Icons.Filled.Person,
+                        title = "Моя страница учителя",
+                        subtitle = "Файл урока и вопросы учеников",
+                        onClick = onOpenMyTeacherPage
+                    )
+                }
             }
             if (isShown(SchoolPreferences.SectionIds.NEWS)) {
                 item {

@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -54,6 +55,7 @@ import app.yodo.messenger.ui.theme.YodoError
 @Composable
 fun SchoolAdminScreen(
     onBackClick: () -> Unit,
+    onOpenTeacherProfiles: () -> Unit = {},
     viewModel: SchoolAdminViewModel = hiltViewModel()
 ) {
     val news by viewModel.news.collectAsState()
@@ -202,6 +204,25 @@ fun SchoolAdminScreen(
                 )
             }
             item { IdeasAdminSection() }
+
+            item {
+                Text(
+                    "🏫 Профили учителей",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)
+                )
+            }
+            item {
+                Button(
+                    onClick = onOpenTeacherProfiles,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Person, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Профили учителей и привязка аккаунтов")
+                }
+            }
 
             item {
                 Text(

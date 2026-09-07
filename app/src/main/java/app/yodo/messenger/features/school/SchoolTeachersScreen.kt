@@ -44,7 +44,10 @@ import androidx.compose.foundation.clickable
  * персональную страницу (открывается в браузере).
  */
 @Composable
-fun SchoolTeachersScreen(onBackClick: () -> Unit) {
+fun SchoolTeachersScreen(
+    onBackClick: () -> Unit,
+    onOpenTeacherPage: (teacherName: String) -> Unit = {}
+) {
     var selectedSubject by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
@@ -114,7 +117,8 @@ fun SchoolTeachersScreen(onBackClick: () -> Unit) {
                             runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             }
-                        }
+                        },
+                        onOpenPage = { onOpenTeacherPage(teacher.name) }
                     )
                 }
             }
@@ -127,7 +131,8 @@ private fun TeacherCard(
     name: String,
     extra: String?,
     url: String?,
-    onOpenUrl: (String) -> Unit
+    onOpenUrl: (String) -> Unit,
+    onOpenPage: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -184,6 +189,32 @@ private fun TeacherCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier.size(12.dp))
             }
+        }
+        // НОВОЕ (учительские страницы): вход на страницу учителя внутри
+        // приложения (файл урока, вопросы, подписка). Показывается всегда —
+        // если профиль ещё не создан админом, экран покажет заглушку.
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                .clickable { onOpenPage() }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.Person, contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Страница учителя",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(12.dp))
         }
     }
 }

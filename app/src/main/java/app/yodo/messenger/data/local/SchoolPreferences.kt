@@ -29,6 +29,7 @@ class SchoolPreferences @Inject constructor(
 ) {
     private val sectionEnabledKey = booleanPreferencesKey("school_section_enabled")
     private val visibleSectionsKey = stringSetPreferencesKey("school_visible_sections")
+    private val teacherModeEnabledKey = booleanPreferencesKey("school_teacher_mode_enabled")
     private val gameWinsKey = intPreferencesKey("school_game_wins")
     private val gameLossesKey = intPreferencesKey("school_game_losses")
     private val quizCorrectKey = intPreferencesKey("school_quiz_correct")
@@ -58,6 +59,14 @@ class SchoolPreferences @Inject constructor(
     val visibleSections: Flow<Set<String>> =
         context.schoolDataStore.data.map { it[visibleSectionsKey] ?: SectionIds.ALL.toSet() }
 
+    /**
+     * НОВОЕ (учительские страницы): включён ли «режим учителя» — показывать
+     * пункт «Моя страница учителя» на главном экране «Школы». Сама привязка
+     * делается админом на сервере; переключатель лишь прячет/показывает вход.
+     */
+    val teacherModeEnabled: Flow<Boolean> =
+        context.schoolDataStore.data.map { it[teacherModeEnabledKey] ?: false }
+
     val gameWins: Flow<Int> = context.schoolDataStore.data.map { it[gameWinsKey] ?: 0 }
     val gameLosses: Flow<Int> = context.schoolDataStore.data.map { it[gameLossesKey] ?: 0 }
     val quizCorrect: Flow<Int> = context.schoolDataStore.data.map { it[quizCorrectKey] ?: 0 }
@@ -69,6 +78,10 @@ class SchoolPreferences @Inject constructor(
 
     suspend fun setSectionEnabled(enabled: Boolean) {
         context.schoolDataStore.edit { it[sectionEnabledKey] = enabled }
+    }
+
+    suspend fun setTeacherModeEnabled(enabled: Boolean) {
+        context.schoolDataStore.edit { it[teacherModeEnabledKey] = enabled }
     }
 
     suspend fun setSectionVisible(sectionId: String, visible: Boolean) {

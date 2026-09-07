@@ -48,3 +48,36 @@ data class SchoolReview(
     val disliked: String = "",
     val updatedAt: Long = 0L
 )
+
+/**
+ * НОВОЕ (учительские страницы): профиль учителя — «второй профиль» поверх
+ * обычного аккаунта мессенджера. Создаёт и привязывает к аккаунту админ
+ * (SchoolAdminScreen); учитель управляет файлом урока и вопросами.
+ * Документ schoolTeacherProfiles/{имя учителя}.
+ */
+data class SchoolTeacherProfile(
+    val id: String = "",
+    val name: String = "",
+    val subject: String = "",
+    /** uid аккаунта мессенджера, привязанного к учителю ("" = не привязан). */
+    val linkedUserId: String = "",
+    /** Отображаемое имя привязанного аккаунта (для админки, пишется при привязке). */
+    val linkedUserName: String = "",
+    /** Ссылка на файл урока (как /setlesson в Telegram-боте). */
+    val fileUrl: String = "",
+    /** Название/описание файла урока. */
+    val fileNote: String = "",
+    val fileUpdatedAt: Long = 0L,
+    /** Подписчики обновлений файла: uid -> true. */
+    val subscribers: Map<String, Boolean> = emptyMap()
+)
+
+/** Вопрос ученика на странице учителя (как /ask в Telegram-боте). */
+data class SchoolTeacherQuestion(
+    val id: String = "",
+    val fromUid: String = "",
+    val fromName: String = "",
+    val text: String = "",
+    val hidden: Boolean = false,
+    val createdAt: Long = 0L
+)

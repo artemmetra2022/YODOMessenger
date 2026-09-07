@@ -211,6 +211,60 @@ service cloud.firestore {
         request.resource.data.authorId == request.auth.uid;
       allow delete: if false;
     }
+    // НОВОЕ (учительские страницы): «второй профиль» учителя поверх обычного
+    // аккаунта мессенджера (перенос учительских страниц Telegram-бота).
+    //  - читать профили/вопросы могут все авторизованные;
+    //  - создавать профили и привязывать/отвязывать аккаунты — только админы;
+    //  - файл урока (fileUrl/fileNote/fileUpdatedAt) меняет ТОЛЬКО привязанный
+    //    учитель (linkedUserId == его uid) или админ;
+    //  - подписка: ученик добавляет/убирает только СВОЙ uid из массива
+    //    subscribers, не трогая другие поля;
+    //  - вопросы: задать может любой авторизованный (только от своего имени);
+    //    скрыть/показать — привязанный учитель или админ; чужие вопросы
+    //    редактировать нельзя.
+    match /schoolTeacherProfiles/{teacherName} {
+      allow read: if isSignedIn();
+      allow create, delete: if isOfficialChannelAdmin();
+      // Обновление профиля: три легитимных случая.
+      allow update: if isSignedIn() && (
+        // 1) Админ: полные права (создание профиля, привязка, отвязка).
+        isOfficialChannelAdmin() ||
+        // 2) Привязанный учитель: может менять ТОЛЬКО файл урока.
+        (resource.data.linkedUserId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fileUrl', 'fileNote', 'fileUpdatedAt'])) ||
+        // 3) Ученик: подписка/отписка — только свой uid в массиве subscribers.
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscribers']) &&
+          (
+            // отписка: uid удаляется из массива
+            (!(request.auth.uid in request.resource.data.subscribers) &&
+              request.auth.uid in resource.data.subscribers)
+            ||
+            // подписка: uid добавляется в массив
+            (request.auth.uid in request.resource.data.subscribers &&
+              !(request.auth.uid in resource.data.subscribers))
+          )
+      );
+      // Вопросы под страницей учителя (подколлекция questions).
+      match /questions/{questionId} {
+        allow read: if isSignedIn();
+        // Задать вопрос может любой авторизованный — но только от своего имени
+        // и со стартовым состоянием hidden=false.
+        allow create: if isSignedIn() &&
+          request.resource.data.fromUid == request.auth.uid &&
+          request.resource.data.hidden == false;
+        // Скрыть/показать вопрос — только привязанный учитель или админ,
+        // и меняется только поле hidden.
+        allow update: if isSignedIn() &&
+          (
+            isOfficialChannelAdmin() ||
+            get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
+              == request.auth.uid
+          ) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden']);
+        allow delete: if false;
+      }
+    }
 
     // НОВОЕ (вход по QR-коду): временный "мостик" между веб-версией (не авторизована)
     // и приложением на телефоне (уже авторизовано), через который телефон передаёт

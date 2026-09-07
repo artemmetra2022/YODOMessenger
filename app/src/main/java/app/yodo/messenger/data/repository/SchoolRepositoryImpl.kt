@@ -5,6 +5,8 @@ import app.yodo.messenger.domain.model.SchoolIdea
 import app.yodo.messenger.domain.model.SchoolNews
 import app.yodo.messenger.domain.model.SchoolPoll
 import app.yodo.messenger.domain.model.SchoolReview
+import app.yodo.messenger.domain.model.SchoolTeacherProfile
+import app.yodo.messenger.domain.model.SchoolTeacherQuestion
 import app.yodo.messenger.domain.repository.SchoolRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -45,6 +47,7 @@ class SchoolRepositoryImpl @Inject constructor(
         private const val COL_POLLS = "schoolPolls"
         private const val COL_IDEAS = "schoolIdeas"
         private const val COL_REVIEWS = "schoolReviews"
+        private const val COL_TEACHERS = "schoolTeacherProfiles"
         private const val FIELD_PINNED = "pinned"
         private const val FIELD_PUB_DATE = "pubDate"
         private const val FIELD_CREATED_AT = "createdAt"
@@ -238,6 +241,161 @@ class SchoolRepositoryImpl @Inject constructor(
         ).await()
         Unit
     }.onFailure { Log.w(TAG, "submitReview: ${it.message}") }
+
+    // ─────────────────────────────────────────────── Учительские страницы
+
+    override fun observeTeacherProfile(teacherName: String): Flow<SchoolTeacherProfile?> = callbackFlow {
+        val listener = teacherDoc(teacherName).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.w(TAG, "Ошибка чтения профиля учителя: ${error.message}")
+                return@addSnapshotListener
+            }
+            val profile = if (snapshot != null && snapshot.exists()) {
+                snapshot.toObject(SchoolTeacherProfileFirestore::class.java)?.toDomain(snapshot.id)
+            } else null
+            trySend(profile)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    override fun observeMyTeacherProfile(uid: String): Flow<SchoolTeacherProfile?> = callbackFlow {
+        // У одного учителя — один профиль; слушаем по linkedUserId. Как только
+        // админ привяжет аккаунт, документ появится в выдаче.
+        val listener = firestore.collection(COL_TEACHERS)
+            .whereEqualTo("linkedUserId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Ошибка чтения моего профиля учителя: ${error.message}")
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.documents?.firstOrNull()?.let { doc ->
+                    doc.toObject(SchoolTeacherProfileFirestore::class.java)?.toDomain(doc.id)
+                })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    override fun observeAllTeacherProfiles(): Flow<List<SchoolTeacherProfile>> = callbackFlow {
+        val listener = firestore.collection(COL_TEACHERS)
+            .orderBy("name", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Ошибка чтения профилей учителей: ${error.message}")
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(SchoolTeacherProfileFirestore::class.java)?.toDomain(doc.id)
+                }.orEmpty())
+            }
+        awaitClose { listener.remove() }
+    }
+
+    override fun observeTeacherQuestions(teacherName: String): Flow<List<SchoolTeacherQuestion>> = callbackFlow {
+        val listener = teacherDoc(teacherName).collection("questions")
+            .orderBy(FIELD_CREATED_AT, Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Ошибка чтения вопросов учителя: ${error.message}")
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(SchoolTeacherQuestionFirestore::class.java)?.toDomain(doc.id)
+                }.orEmpty())
+            }
+        awaitClose { listener.remove() }
+    }
+
+    override suspend fun upsertTeacherProfile(profile: SchoolTeacherProfile): Result<Unit> = runCatching {
+        if (profile.name.isBlank()) throw IllegalArgumentException("Имя учителя не задано")
+        // id документа = имя учителя (стабильный ключ, как в боте).
+        teacherDoc(profile.name).set(
+            mapOf(
+                "name" to profile.name,
+                "subject" to profile.subject,
+                "linkedUserId" to profile.linkedUserId,
+                "linkedUserName" to profile.linkedUserName
+            ),
+            SetOptions.merge()
+        ).await()
+        Unit
+    }.onFailure { Log.w(TAG, "upsertTeacherProfile: ${it.message}") }
+
+    override suspend fun linkTeacherProfile(teacherName: String, uid: String, userName: String): Result<Unit> =
+        runCatching {
+            // Профиль может быть уже привязан к другому аккаунту — перезапишем
+            // (админ осознанно выбирает нового владельца). Плюс снимаем старую
+            // привязку, если этот uid уже был привязан к другому учителю.
+            val previous = firestore.collection(COL_TEACHERS)
+                .whereEqualTo("linkedUserId", uid).get().await()
+            previous.documents.forEach { doc ->
+                doc.reference.set(
+                    mapOf("linkedUserId" to "", "linkedUserName" to ""),
+                    SetOptions.merge()
+                ).await()
+            }
+            teacherDoc(teacherName).set(
+                mapOf("linkedUserId" to uid, "linkedUserName" to userName),
+                SetOptions.merge()
+            ).await()
+            Unit
+        }.onFailure { Log.w(TAG, "linkTeacherProfile: ${it.message}") }
+
+    override suspend fun unlinkTeacherProfile(teacherName: String): Result<Unit> = runCatching {
+        teacherDoc(teacherName).set(
+            mapOf("linkedUserId" to "", "linkedUserName" to ""),
+            SetOptions.merge()
+        ).await()
+        Unit
+    }.onFailure { Log.w(TAG, "unlinkTeacherProfile: ${it.message}") }
+
+    override suspend fun setTeacherFile(teacherName: String, fileUrl: String, fileNote: String): Result<Unit> =
+        runCatching {
+            teacherDoc(teacherName).set(
+                mapOf(
+                    "fileUrl" to fileUrl,
+                    "fileNote" to fileNote,
+                    "fileUpdatedAt" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            ).await()
+            Unit
+        }.onFailure { Log.w(TAG, "setTeacherFile: ${it.message}") }
+
+    override suspend fun setTeacherSubscription(teacherName: String, uid: String, subscribed: Boolean): Result<Unit> =
+        runCatching {
+            val field = if (subscribed) FieldValue.arrayUnion(uid) else FieldValue.arrayRemove(uid)
+            teacherDoc(teacherName).update("subscribers", field).await()
+            Unit
+        }.onFailure { Log.w(TAG, "setTeacherSubscription: ${it.message}") }
+
+    override suspend fun askTeacherQuestion(teacherName: String, question: SchoolTeacherQuestion): Result<Unit> =
+        runCatching {
+            val uid = firebaseAuth.currentUser?.uid
+                ?: throw IllegalStateException("Требуется вход в аккаунт")
+            teacherDoc(teacherName).collection("questions").add(
+                mapOf(
+                    "fromUid" to uid,
+                    "fromName" to question.fromName,
+                    "text" to question.text,
+                    "hidden" to false,
+                    FIELD_CREATED_AT to System.currentTimeMillis()
+                )
+            ).await()
+            Unit
+        }.onFailure { Log.w(TAG, "askTeacherQuestion: ${it.message}") }
+
+    override suspend fun setTeacherQuestionHidden(
+        teacherName: String,
+        questionId: String,
+        hidden: Boolean
+    ): Result<Unit> = runCatching {
+        teacherDoc(teacherName).collection("questions").document(questionId)
+            .set(mapOf("hidden" to hidden), SetOptions.merge()).await()
+        Unit
+    }.onFailure { Log.w(TAG, "setTeacherQuestionHidden: ${it.message}") }
+
+    private fun teacherDoc(teacherName: String) =
+        firestore.collection(COL_TEACHERS).document(teacherName)
 }
 
 // ─────────────────────────────────────────────────────── POJO для toObject
@@ -291,5 +449,36 @@ private data class SchoolReviewFirestore(
     fun toDomain(id: String) = SchoolReview(
         id = id, authorId = authorId, authorName = authorName, stars = stars,
         liked = liked, disliked = disliked, updatedAt = updatedAt
+    )
+}
+
+private data class SchoolTeacherProfileFirestore(
+    val name: String = "",
+    val subject: String = "",
+    val linkedUserId: String = "",
+    val linkedUserName: String = "",
+    val fileUrl: String = "",
+    val fileNote: String = "",
+    val fileUpdatedAt: Long = 0L,
+    val subscribers: List<String> = emptyList()
+) {
+    fun toDomain(id: String) = SchoolTeacherProfile(
+        id = id, name = name, subject = subject,
+        linkedUserId = linkedUserId, linkedUserName = linkedUserName,
+        fileUrl = fileUrl, fileNote = fileNote, fileUpdatedAt = fileUpdatedAt,
+        subscribers = subscribers.associateWith { true }
+    )
+}
+
+private data class SchoolTeacherQuestionFirestore(
+    val fromUid: String = "",
+    val fromName: String = "",
+    val text: String = "",
+    val hidden: Boolean = false,
+    val createdAt: Long = 0L
+) {
+    fun toDomain(id: String) = SchoolTeacherQuestion(
+        id = id, fromUid = fromUid, fromName = fromName, text = text,
+        hidden = hidden, createdAt = createdAt
     )
 }

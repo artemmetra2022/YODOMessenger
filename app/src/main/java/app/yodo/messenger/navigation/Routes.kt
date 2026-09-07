@@ -89,6 +89,16 @@ sealed class Routes(val route: String) {
     data object SchoolParents : Routes("school_parents")
     data object SchoolAdmin : Routes("school_admin")
     data object SchoolSettings : Routes("school_settings")
+    // НОВОЕ (учительские страницы): страница учителя (mode=page из справочника,
+    // mode=my — «моя страница» для аккаунта, привязанного админом) и админ-
+    // панель профилей учителей с привязкой аккаунтов.
+    data object SchoolTeacherPage : Routes("school_teacher_page/{teacherName}/{mode}") {
+        const val ARG_TEACHER_NAME = "teacherName"
+        const val ARG_MODE = "mode"
+        fun createRoute(teacherName: String, myPage: Boolean = false): String =
+            "school_teacher_page/${java.net.URLEncoder.encode(teacherName, "UTF-8")}/${if (myPage) "my" else "page"}"
+    }
+    data object SchoolTeacherAdmin : Routes("school_teacher_admin")
 
     data object SecurityCenter : Routes("security_center")
     // НОВОЕ (вход по QR-коду): сканер QR из веб-версии в «Центре безопасности».
