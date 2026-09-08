@@ -86,7 +86,7 @@ class AppSettingsRepositoryImpl @Inject constructor(
     override suspend fun setSchoolSectionHidden(hidden: Boolean): Boolean =
         writeIfAdmin(mapOf(FIELD_SCHOOL_HIDDEN to hidden))
 
-    override fun observeSchoolScheduleStatus(): Flow<SchoolScheduleStatus> = callbackFlow {
+    override fun observeSchoolScheduleStatus(): Flow<SchoolScheduleStatus?> = callbackFlow {
         val listener = doc().addSnapshotListener { snapshot, error ->
             if (error != null) {
                 android.util.Log.w("AppSettingsRepository", "Ошибка слежения: ${error.message}")
@@ -97,8 +97,8 @@ class AppSettingsRepositoryImpl @Inject constructor(
             val updatedAt = snapshot?.getLong(FIELD_SCHEDULE_UPDATED) ?: 0L
             trySend(
                 if (updatedAt > 0L) SchoolScheduleStatus(
-                    actual = snapshot.getBoolean(FIELD_SCHEDULE_ACTUAL) ?: false,
-                    untilDate = snapshot.getString(FIELD_SCHEDULE_UNTIL) ?: "",
+                    actual = snapshot?.getBoolean(FIELD_SCHEDULE_ACTUAL) ?: false,
+                    untilDate = snapshot?.getString(FIELD_SCHEDULE_UNTIL) ?: "",
                     updatedAt = updatedAt
                 ) else null
             )
