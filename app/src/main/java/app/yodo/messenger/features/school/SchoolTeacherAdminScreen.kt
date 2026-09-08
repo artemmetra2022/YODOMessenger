@@ -302,7 +302,7 @@ private fun LinkUserDialog(
                         query = it
                         onQueryChanged(it)
                     },
-                    label = { Text("Имя или username пользователя") },
+                    label = { Text("Имя, username или ID (YODO-…-…)") },
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }
                 )

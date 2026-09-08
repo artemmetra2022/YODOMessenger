@@ -150,7 +150,8 @@ class UserRepositoryImpl @Inject constructor(
     }
 
     override suspend fun searchUsers(query: String): List<YodoUser> {
-        val normalized = query.trim().removePrefix("@").lowercase()
+        val trimmed = query.trim().removePrefix("@")
+        val normalized = trimmed.lowercase()
         if (normalized.isBlank()) return emptyList()
         val currentUid = firebaseAuth.currentUser?.uid
         val usersRef = firestore.collection("users")
@@ -159,7 +160,12 @@ class UserRepositoryImpl @Inject constructor(
                 .startAt(normalized).endAt(normalized + "\uf8ff").limit(20).get().await()
             val byUsername = usersRef.orderBy("usernameLowercase")
                 .startAt(normalized).endAt(normalized + "\uf8ff").limit(20).get().await()
-            (byName.documents + byUsername.documents)
+            // Публичный ID вида YODO-XXXX-XXXX хранится в верхнем регистре —
+            // точное совпадение, чтобы можно было привязать учителя по ID из профиля.
+            val byPublicId = if (normalized.startsWith("yodo-")) {
+                usersRef.whereEqualTo("publicId", trimmed.uppercase()).limit(20).get().await()
+            } else null
+            (byName.documents + byUsername.documents + (byPublicId?.documents ?: emptyList()))
                 .distinctBy { it.id }.filter { it.id != currentUid }
                 .map { it.toYodoUser(it.id) }
         } catch (e: Exception) { emptyList() }

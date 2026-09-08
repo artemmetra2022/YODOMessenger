@@ -660,7 +660,7 @@ function openUserSearch(link) {
   pendingLink = link;
   $("user-search-input").value = "";
   $("user-search-results").innerHTML =
-    '<p class="empty-note">Начните вводить имя или @username учителя</p>';
+    '<p class="empty-note">Начните вводить имя, @username или ID учителя (YODO-…-…)</p>';
   $("user-search-overlay").classList.remove("hidden");
   $("user-search-input").focus();
 }
@@ -671,7 +671,8 @@ function closeUserSearch() {
 }
 
 async function runUserSearch() {
-  const term = $("user-search-input").value.trim().toLowerCase().replace(/^@/, "");
+  const raw = $("user-search-input").value.trim();
+  const term = raw.toLowerCase().replace(/^@/, "");
   const resultsEl = $("user-search-results");
   if (term.length < 2) {
     resultsEl.innerHTML = '<p class="empty-note">Минимум 2 символа</p>';
@@ -681,10 +682,15 @@ async function runUserSearch() {
   try {
     const byUsername = await searchUsersByField("usernameLowercase", term);
     const byName = await searchUsersByField("displayNameLowercase", term);
+    // Публичный ID (YODO-XXXX-XXXX) хранится в верхнем регистре — точное совпадение.
+    const byPublicId = term.startsWith("yodo-")
+      ? await getDocs(query(collection(db, "users"), where("publicId", "==", raw.toUpperCase()), limit(10)))
+      : { docs: [] };
     const seen = new Set();
     const docs = [];
     for (const d of byUsername.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
     for (const d of byName.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
+    for (const d of byPublicId.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
     if (!docs.length) {
       resultsEl.innerHTML =
         '<p class="empty-note">Никого не найдено. Попробуйте другое имя или укажите UID вручную.</p>';
