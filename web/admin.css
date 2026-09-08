@@ -239,6 +239,21 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 
 .empty-note { color: var(--text-dim); font-size: 14px; }
 
+/* ===== Голова карточки (заголовок + действие справа) ===== */
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.card-head .card-hint { margin-bottom: 0; flex: 1; }
+.card-head + .item-list, .card-head + .card-hint { margin-top: 10px; }
+
+.modal-subhead { margin-top: 16px; }
+
+.item-sub a { color: var(--accent); word-break: break-all; }
+
 /* ===== Сводка (Обзор) ===== */
 
 .summary-grid {

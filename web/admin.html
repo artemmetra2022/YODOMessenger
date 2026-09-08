@@ -167,8 +167,11 @@
         </div>
 
         <div class="card hidden" id="questions-card">
-          <h2>Вопросы: <span id="questions-teacher-name"></span></h2>
+          <div class="card-head">
+            <h2>Вопросы: <span id="questions-teacher-name"></span></h2>
+          </div>
           <p class="card-hint">Ответ виден ученикам на странице учителя. Скрытие убирает вопрос с страницы.</p>
+          <p class="card-hint" id="questions-stats"></p>
           <button type="button" class="btn-link" id="btn-close-questions">← Закрыть вопросы</button>
           <div id="questions-list" class="item-list"></div>
         </div>
@@ -178,7 +181,10 @@
       <section id="section-ideas" class="admin-section">
         <h1>Идеи</h1>
         <div class="card">
-          <p class="card-hint">Предложения учеников из «Оценка и идеи». Удаление запрещено правилами безопасности — идеи только читаются.</p>
+          <div class="card-head">
+            <p class="card-hint">Предложения учеников из «Оценка и идеи». Удаление запрещено правилами безопасности — идеи только читаются.</p>
+            <button type="button" class="btn-secondary" id="btn-export-ideas">⬇ CSV</button>
+          </div>
           <div id="ideas-list" class="item-list"></div>
         </div>
       </section>
@@ -187,7 +193,10 @@
       <section id="section-reviews" class="admin-section">
         <h1>Отзывы</h1>
         <div class="card">
-          <p class="card-hint">Оценки раздела (1–5 звёзд). Только просмотр — удалять отзывы нельзя.</p>
+          <div class="card-head">
+            <p class="card-hint">Оценки раздела (1–5 звёзд). Только просмотр — удалять отзывы нельзя.</p>
+            <button type="button" class="btn-secondary" id="btn-export-reviews">⬇ CSV</button>
+          </div>
           <div id="reviews-list" class="item-list"></div>
         </div>
       </section>
@@ -214,6 +223,25 @@
       <div class="modal-actions">
         <button type="button" class="btn-link" id="btn-manual-uid">Указать UID вручную</button>
         <button type="button" class="btn-secondary" id="btn-cancel-user-search">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: файл урока учителя -->
+  <div id="file-modal-overlay" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h2>Файл урока: <span id="file-modal-teacher"></span></h2>
+      <p class="card-hint">Ссылка на файл (Google Drive и т.п.) и описание. При смене ссылки подписчики получат push, а прежняя версия попадёт в историю на странице учителя.</p>
+      <form id="form-teacher-file" class="form-col">
+        <input type="text" id="file-url" placeholder="Ссылка на файл (https://…)" autocomplete="off">
+        <input type="text" id="file-note" placeholder="Описание (например, Домашняя работа на 12.09)" autocomplete="off">
+        <button type="submit" class="btn-primary">Сохранить</button>
+      </form>
+      <p class="card-hint" id="file-modal-subscribers"></p>
+      <h2 class="modal-subhead">Предыдущие файлы</h2>
+      <div id="lesson-files-list" class="item-list"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="btn-close-file-modal">Закрыть</button>
       </div>
     </div>
   </div>

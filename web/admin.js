@@ -98,6 +98,16 @@ function fmtDate(ms) {
   });
 }
 
+/** Человекочитаемая длительность для среднего времени ответа. */
+function fmtDuration(ms) {
+  if (ms <= 0) return "—";
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return minutes + " мин";
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours + " ч";
+  return Math.round(hours / 24) + " дн";
+}
+
 /** Заменить список, не пересоздавая панель (снимает listeners). */
 function setLoading(listEl) {
   listEl.innerHTML = '<p class="empty-note">Загрузка…</p>';
@@ -134,6 +144,7 @@ const AUDIT_LABELS = {
   SCHOOL_TEACHER_LINKED: "Привязка аккаунта учителя",
   SCHOOL_TEACHER_UNLINKED: "Отвязка аккаунта учителя",
   SCHOOL_TEACHER_DELETED: "Удалён профиль учителя",
+  SCHOOL_TEACHER_FILE_SET: "Файл урока учителя обновлён",
   SCHOOL_QUESTION_ANSWERED: "Ответ на вопрос ученика",
   SCHOOL_QUESTION_HIDDEN: "Скрытие/показ вопроса",
   SCHOOL_SCHEDULE_STATUS_SET: "Пометка актуальности расписания",
@@ -568,15 +579,25 @@ function teacherItem(docSnap) {
       <span class="item-date">${t.subscribers ? "подписчиков: " + t.subscribers.length : ""}</span>
     </div>
     ${t.subject ? `<div class="item-sub">Предмет: ${esc(t.subject)}</div>` : ""}
+    ${
+      t.fileUrl
+        ? `<div class="item-sub">📎 <a href="${esc(t.fileUrl)}" target="_blank" rel="noopener">${esc(t.fileNote || t.fileUrl)}</a> · обновлён ${fmtDate(t.fileUpdatedAt)}</div>`
+        : ""
+    }
     <div class="item-sub">
       ${linked ? "🔗 Аккаунт: " + esc(t.linkedUserName || t.linkedUserId) : "ℓ Нет привязанного аккаунта"}
     </div>
     <div class="item-actions">
+      <button class="btn-secondary" data-act="file">Файл урока</button>
       <button class="btn-secondary" data-act="link">${linked ? "Перепривязать" : "Привязать аккаунт"}</button>
       ${linked ? '<button class="btn-secondary" data-act="unlink">Отвязать</button>' : ""}
       <button class="btn-secondary" data-act="questions">Вопросы</button>
       <button class="btn-danger" data-act="delete">Удалить профиль</button>
     </div>`;
+
+  el.querySelector('[data-act="file"]').addEventListener("click", () => {
+    openFileModal(docSnap.id, t);
+  });
 
   el.querySelector('[data-act="link"]').addEventListener("click", () => {
     openUserSearch({ teacherId: docSnap.id, teacherName: t.name || docSnap.id });
@@ -728,8 +749,9 @@ function initUserSearchModal() {
     if (e.target === $("user-search-overlay")) closeUserSearch();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$("user-search-overlay").classList.contains("hidden")) {
-      closeUserSearch();
+    if (e.key === "Escape") {
+      if (!$("user-search-overlay").classList.contains("hidden")) closeUserSearch();
+      if (!$("file-modal-overlay").classList.contains("hidden")) closeFileModal();
     }
   });
   // Fallback для случаев, когда учитель не находится поиском.
@@ -743,6 +765,120 @@ function initUserSearchModal() {
     const userName = prompt("Имя пользователя для отображения:", "") || "";
     closeUserSearch();
     performTeacherLink(link, uidTrim, userName.trim());
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Модалка файла урока (пайплайн setTeacherProfile.setTeacherFile)     */
+/* ------------------------------------------------------------------ */
+
+let fileModalTeacherId = null;
+let lessonFilesUnsub = null;
+
+function openFileModal(teacherId, t) {
+  fileModalTeacherId = teacherId;
+  $("file-modal-teacher").textContent = t.name || teacherId;
+  $("file-url").value = t.fileUrl || "";
+  $("file-note").value = t.fileNote || "";
+  $("file-modal-subscribers").textContent = t.subscribers && t.subscribers.length
+    ? "Подписчиков файла: " + t.subscribers.length + " — при смене ссылки им уйдёт push."
+    : "Подписчиков файла пока нет — push не отправится, но ссылка обновится.";
+  $("file-modal-overlay").classList.remove("hidden");
+
+  if (lessonFilesUnsub) lessonFilesUnsub();
+  const listEl = $("lesson-files-list");
+  setLoading(listEl);
+  lessonFilesUnsub = onSnapshot(
+    query(
+      collection(db, "schoolTeacherProfiles", teacherId, "lessonFiles"),
+      orderBy("updatedAt", "desc"),
+      limit(5)
+    ),
+    (snap) => {
+      if (snap.empty) {
+        listEl.innerHTML = '<p class="empty-note">История пуста — файл ещё не меняли.</p>';
+        return;
+      }
+      listEl.innerHTML = "";
+      snap.forEach((d) => {
+        const f = d.data();
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            <span class="item-title">📎 <a href="${esc(f.fileUrl)}" target="_blank" rel="noopener">${esc(f.fileUrl)}</a></span>
+            <span class="item-date">${fmtDate(f.updatedAt)}</span>
+          </div>
+          ${f.fileNote ? `<div class="item-text">${esc(f.fileNote)}</div>` : ""}`;
+        listEl.appendChild(el);
+      });
+    },
+    handleErr("Не удалось загрузить историю файлов")
+  );
+}
+
+function closeFileModal() {
+  fileModalTeacherId = null;
+  if (lessonFilesUnsub) lessonFilesUnsub();
+  lessonFilesUnsub = null;
+  $("file-modal-overlay").classList.add("hidden");
+}
+
+async function saveTeacherFile() {
+  const teacherId = fileModalTeacherId;
+  if (!teacherId) return;
+  const fileUrl = $("file-url").value.trim();
+  const fileNote = $("file-note").value.trim();
+  const teacherRef = doc(db, "schoolTeacherProfiles", teacherId);
+  try {
+    // Снимок ДО обновления: старая ссылка (дедупликация пуша) и подписчики —
+    // ровно как SchoolRepositoryImpl.setTeacherFile.
+    const before = await getDoc(teacherRef);
+    const oldUrl = before.exists() ? before.data().fileUrl || "" : "";
+    const subscribers = before.exists() && Array.isArray(before.data().subscribers)
+      ? before.data().subscribers
+      : [];
+    const now = Date.now();
+    await setDoc(
+      teacherRef,
+      { fileUrl, fileNote, fileUpdatedAt: now },
+      { merge: true }
+    );
+    // История — только при реальной смене ссылки (правка описания не спамит).
+    if (fileUrl !== oldUrl) {
+      await addDoc(collection(teacherRef, "lessonFiles"), {
+        fileUrl,
+        fileNote,
+        updatedAt: now,
+      });
+      if (subscribers.length > 0) {
+        await addDoc(collection(teacherRef, "fileNotifications"), {
+          subscribers,
+          fileNote,
+          createdAt: now,
+          notified: false,
+        });
+      }
+    }
+    toast("Файл урока сохранён" + (fileUrl !== oldUrl ? " — подписчики получат push" : ""));
+    logAdminAction(
+      "SCHOOL_TEACHER_FILE_SET",
+      teacherId + (fileUrl ? " → " + fileUrl.slice(0, 100) : " → (ссылка снята)")
+    );
+    closeFileModal();
+  } catch (err) {
+    handleErr("Не удалось сохранить файл урока")(err);
+  }
+}
+
+function initFileModal() {
+  $("form-teacher-file").addEventListener("submit", (e) => {
+    e.preventDefault();
+    saveTeacherFile();
+  });
+  $("btn-close-file-modal").addEventListener("click", closeFileModal);
+  $("file-modal-overlay").addEventListener("click", (e) => {
+    if (e.target === $("file-modal-overlay")) closeFileModal();
   });
 }
 
@@ -824,6 +960,18 @@ function openQuestions(teacherName, displayName) {
       limit(100)
     ),
     (snap) => {
+      // Статистика: сколько вопросов, сколько отвечено и среднее время ответа
+      // (answeredAt - createdAt по отвеченным, как на странице учителя).
+      const answered = snap.docs.filter((d) => d.data().answer);
+      const avgMs = answered.length
+        ? answered.reduce(
+            (sum, d) => sum + Math.max(0, (d.data().answeredAt || 0) - (d.data().createdAt || 0)),
+            0
+          ) / answered.length
+        : 0;
+      $("questions-stats").textContent =
+        "Вопросов: " + snap.size + " · отвечено: " + answered.length +
+        (avgMs > 0 ? " · ср. время ответа: " + fmtDuration(avgMs) : "");
       if (snap.empty) {
         listEl.innerHTML = '<p class="empty-note">Вопросов пока нет.</p>';
         return;
@@ -888,8 +1036,59 @@ function startTeachers() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Секции «Идеи» и «Отзывы» (только чтение)                            */
+/* Секции «Идеи» и «Отзывы» (только чтение) + CSV-экспорт              */
 /* ------------------------------------------------------------------ */
+
+let ideasCache = [];
+let reviewsCache = [];
+
+function csvEscape(value) {
+  return '"' + String(value ?? "").replace(/"/g, '""') + '"';
+}
+
+// BOM + «;» — чтобы CSV с кириллицей открывался в Excel без настройки импорта.
+function downloadCsv(filename, header, rows) {
+  const lines = [header, ...rows]
+    .map((row) => row.map(csvEscape).join(";"))
+    .join("\r\n");
+  const blob = new Blob(["\ufeff" + lines], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function initCsvExport() {
+  $("btn-export-ideas").addEventListener("click", () => {
+    if (!ideasCache.length) return toast("Идей пока нет — выгружать нечего", false);
+    downloadCsv(
+      "yodo-school-ideas.csv",
+      ["Автор", "Дата", "Идея"],
+      ideasCache.map((i) => [
+        i.authorName || "Ученик",
+        fmtDate(i.createdAt),
+        i.text || "",
+      ])
+    );
+    toast("CSV идей скачан (" + ideasCache.length + ")");
+  });
+  $("btn-export-reviews").addEventListener("click", () => {
+    if (!reviewsCache.length) return toast("Отзывов пока нет — выгружать нечего", false);
+    downloadCsv(
+      "yodo-school-reviews.csv",
+      ["Автор", "Оценка", "Понравилось", "Не понравилось", "Дата"],
+      reviewsCache.map((r) => [
+        r.authorName || "Ученик",
+        r.stars || 0,
+        r.liked || "",
+        r.disliked || "",
+        fmtDate(r.updatedAt),
+      ])
+    );
+    toast("CSV отзывов скачан (" + reviewsCache.length + ")");
+  });
+}
 
 function startIdeas() {
   const listEl = $("ideas-list");
@@ -897,6 +1096,7 @@ function startIdeas() {
   onSnapshot(
     query(collection(db, "schoolIdeas"), orderBy("createdAt", "desc"), limit(100)),
     (snap) => {
+      ideasCache = snap.docs.map((d) => d.data());
       if (snap.empty) {
         listEl.innerHTML = '<p class="empty-note">Идей пока нет.</p>';
         return;
@@ -925,6 +1125,7 @@ function startReviews() {
   onSnapshot(
     query(collection(db, "schoolReviews"), orderBy("updatedAt", "desc"), limit(100)),
     (snap) => {
+      reviewsCache = snap.docs.map((d) => d.data());
       if (snap.empty) {
         listEl.innerHTML = '<p class="empty-note">Отзывов пока нет.</p>';
         return;
@@ -1100,4 +1301,6 @@ function startPanel() {
   startReviews();
   startAudit();
   initUserSearchModal();
+  initFileModal();
+  initCsvExport();
 }
