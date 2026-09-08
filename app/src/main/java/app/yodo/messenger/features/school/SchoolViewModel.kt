@@ -130,7 +130,9 @@ class SchoolViewModel @Inject constructor(
  */
 @HiltViewModel
 class SchoolSettingsViewModel @Inject constructor(
-    private val schoolPreferences: SchoolPreferences
+    private val schoolPreferences: SchoolPreferences,
+    private val schoolRepository: SchoolRepository,
+    private val firebaseAuth: FirebaseAuth
 ) : ViewModel() {
 
     val sectionEnabled: StateFlow<Boolean> = schoolPreferences.sectionEnabled
@@ -139,6 +141,26 @@ class SchoolSettingsViewModel @Inject constructor(
     val visibleSections: StateFlow<Set<String>> = schoolPreferences.visibleSections
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000),
             SchoolPreferences.SectionIds.ALL.toSet())
+
+    // НОВОЕ (push о новостях/опросах): подписка хранится в Firestore
+    // (users/{uid}.schoolPushEnabled), а не локально — воркер рассылает по ней.
+    val schoolPushEnabled: StateFlow<Boolean> =
+        firebaseAuth.currentUser?.uid?.let { uid ->
+            schoolRepository.observeSchoolPushEnabled(uid)
+        }?.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+            ?: MutableStateFlow(true)
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message
+
+    fun consumeMessage() { _message.value = null }
+
+    fun setSchoolPushEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            schoolRepository.setSchoolPushEnabled(enabled)
+                .onFailure { _message.value = it.message ?: "Не удалось изменить подписку" }
+        }
+    }
 
     fun setSectionEnabled(enabled: Boolean) {
         viewModelScope.launch { schoolPreferences.setSectionEnabled(enabled) }

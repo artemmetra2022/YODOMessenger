@@ -161,6 +161,15 @@ fun SchoolTeacherPageScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            // НОВОЕ (время ответа учителя): среднее время от вопроса
+                            // до ответа — считается по отвеченным вопросам ниже.
+                            viewModel.avgResponseTimeLabel?.let { label ->
+                                Text(
+                                    "⏱ Отвечает: $label",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }

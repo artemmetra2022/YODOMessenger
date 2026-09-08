@@ -83,7 +83,10 @@ class SchoolRepositoryImpl @Inject constructor(
                 "text" to news.text,
                 "eventDate" to news.eventDate,
                 "pubDate" to System.currentTimeMillis(),
-                FIELD_PINNED to false
+                FIELD_PINNED to false,
+                // НОВОЕ (push о новостях): флаг очереди push-воркера — после
+                // рассылки подписчикам воркер ставит true (Admin SDK, мимо rules).
+                "notified" to false
             )
         ).await()
         Unit
@@ -161,7 +164,9 @@ class SchoolRepositoryImpl @Inject constructor(
                 "options" to options,
                 "votes" to votes,
                 "voters" to emptyMap<String, Long>(),
-                FIELD_CREATED_AT to System.currentTimeMillis()
+                FIELD_CREATED_AT to System.currentTimeMillis(),
+                // НОВОЕ (push об опросах): флаг очереди push-воркера (как у новостей).
+                "notified" to false
             )
         ).await()
         Unit
@@ -171,6 +176,31 @@ class SchoolRepositoryImpl @Inject constructor(
         firestore.collection(COL_POLLS).document(pollId).delete().await()
         Unit
     }.onFailure { Log.w(TAG, "deletePoll: ${it.message}") }
+
+    // ─────────────────────────────────────────────── Push о новостях и опросах
+
+    override fun observeSchoolPushEnabled(uid: String): Flow<Boolean> = callbackFlow {
+        // До инициализации поле отсутствует — считаем подписанным (дефолт true):
+        // push о новостях/опросах нужен всем по умолчанию, отключается тумблером.
+        val listener = firestore.collection("users").document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Ошибка чтения schoolPushEnabled: ${error.message}")
+                    return@addSnapshotListener
+                }
+                val enabled = snapshot?.getBoolean("schoolPushEnabled") ?: true
+                trySend(enabled)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    override suspend fun setSchoolPushEnabled(enabled: Boolean): Result<Unit> = runCatching {
+        val uid = firebaseAuth.currentUser?.uid
+            ?: throw IllegalStateException("Требуется вход в аккаунт")
+        firestore.collection("users").document(uid)
+            .set(mapOf("schoolPushEnabled" to enabled), SetOptions.merge()).await()
+        Unit
+    }.onFailure { Log.w(TAG, "setSchoolPushEnabled: ${it.message}") }
 
     // ─────────────────────────────────────────────── Идеи
 

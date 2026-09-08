@@ -101,9 +101,41 @@ class SchoolTeacherPageViewModel @Inject constructor(
     val amSubscribed: Boolean
         get() = myUid != null && profile.value?.subscribers?.get(myUid) == true
 
-    /** Сколько вопросов ещё ждут ответа (видно владельцу страницы). */
+    /** Сколько вопросов ещё ждут ответа (видит владелец страницы). */
     val unansweredCount: Int
         get() = if (isOwner) questions.value.count { !it.answered && !it.hidden } else 0
+
+    /**
+     * НОВОЕ (время ответа учителя): среднее время от вопроса до ответа по
+     * отвеченным вопросам. Null — ответов ещё не было (показывать нечего).
+     */
+    val avgResponseTimeMs: Long?
+        get() {
+            val answered = questions.value.filter {
+                it.answer.isNotBlank() && it.answeredAt > it.createdAt && it.createdAt > 0
+            }
+            if (answered.isEmpty()) return null
+            return answered.sumOf { it.answeredAt - it.createdAt } / answered.size
+        }
+
+    /** НОВОЕ (время ответа учителя): человекочитаемая строка среднего времени. */
+    val avgResponseTimeLabel: String?
+        get() {
+            val ms = avgResponseTimeMs ?: return null
+            val hours = ms / 3_600_000
+            val minutes = (ms % 3_600_000) / 60_000
+            return when {
+                hours >= 24 -> {
+                    val days = hours / 24
+                    if (days % 10 == 1 && days % 100 != 11) "~$days день"
+                    else if (days % 10 in 2..4 && days % 100 !in 12..14) "~$days дня"
+                    else "~$days дней"
+                }
+                hours >= 1 -> "~$hours ч"
+                minutes >= 1 -> "~$minutes мин"
+                else -> "меньше минуты"
+            }
+        }
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message

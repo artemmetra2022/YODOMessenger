@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.RateReview
@@ -20,10 +21,14 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,8 +60,15 @@ fun SchoolSettingsScreen(
 ) {
     val sectionEnabled by viewModel.sectionEnabled.collectAsState()
     val visibleSections by viewModel.visibleSections.collectAsState()
+    // НОВОЕ (push о новостях/опросах): тумблер подписки на школьные пуши.
+    val schoolPushEnabled by viewModel.schoolPushEnabled.collectAsState()
     // НОВОЕ (учительские страницы): режим учителя — «Моя страница учителя».
     val teacherModeEnabled by teacherModeViewModel.teacherModeEnabled.collectAsState()
+    val message by viewModel.message.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(message) {
+        message?.let { snackbarHostState.showSnackbar(it); viewModel.consumeMessage() }
+    }
     val colorTheme = LocalColorTheme.current
 
     val sections = listOf(
@@ -81,6 +93,7 @@ fun SchoolSettingsScreen(
     )
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = { SchoolTopBar("Настройки раздела «Школа»", onBackClick) },
         containerColor = Color.Transparent
     ) { padding ->
@@ -103,6 +116,20 @@ fun SchoolSettingsScreen(
                         subtitle = "Пункт «Школа» в Настройки → Аккаунт",
                         checked = sectionEnabled,
                         onCheckedChange = { viewModel.setSectionEnabled(it) },
+                        colorTheme = colorTheme
+                    )
+                }
+            }
+            // НОВОЕ (push о новостях/опросах): подписка на уведомления о новых
+            // новостях и опросах. Хранится в Firestore — воркер рассылает по ней.
+            item {
+                SettingsCard {
+                    SettingsToggleRow(
+                        icon = Icons.Filled.Notifications,
+                        title = "Push о новостях и опросах",
+                        subtitle = "Уведомлять о новых новостях гимназии и опросах",
+                        checked = schoolPushEnabled,
+                        onCheckedChange = { viewModel.setSchoolPushEnabled(it) },
                         colorTheme = colorTheme
                     )
                 }

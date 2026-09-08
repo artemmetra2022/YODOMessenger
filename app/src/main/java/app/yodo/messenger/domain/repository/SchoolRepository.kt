@@ -45,6 +45,16 @@ interface SchoolRepository {
 
     suspend fun deletePoll(pollId: String): Result<Unit>
 
+    // ─────────────────────── Push о новостях и опросах
+
+    /**
+     * Подписан ли текущий пользователь на push о новостях/опросах школы
+     * (флаг schoolPushEnabled в документе пользователя; до инициализации — true).
+     */
+    fun observeSchoolPushEnabled(uid: String): Flow<Boolean>
+
+    suspend fun setSchoolPushEnabled(enabled: Boolean): Result<Unit>
+
     // ─────────────────────── Учительские страницы (перенос из Telegram-бота)
 
     /** Профиль учителя по имени (страница в справочнике). Null — профиля нет. */

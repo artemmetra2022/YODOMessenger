@@ -17,6 +17,11 @@
  * кладёт туда UserRepositoryImpl.queueModerationNotification при действиях
  * Админки. Формат payload другой (нет chatId/senderName — есть title/body),
  * поэтому обрабатывается отдельным циклом, а не смешивается с сообщениями чата.
+ *
+ * НОВОЕ (push о новостях и опросах школы): последним шагом вычитывает
+ * schoolNews и schoolPolls с notified == false и рассылает их всем
+ * пользователям с users.schoolPushEnabled == true (тумблер в настройках
+ * раздела «Школа»; отсутствие поля = подписан).
  */
 
 const { initializeApp, cert } = require("firebase-admin/app");
@@ -361,6 +366,106 @@ async function sendLessonFileNotifications(db, messaging) {
   console.log(`Файлы уроков: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
 }
 
+// НОВОЕ (push о новостях и опросах школы): рассылка всем подписчикам.
+// Клиент создаёт новость/опрос с notified=false (SchoolRepositoryImpl.addNews/
+// addPoll — право есть только у админов). Подписчики — пользователи с
+// users/{uid}.schoolPushEnabled == true (флаг выключает тумблер в настройках
+// раздела «Школа»; до инициализации поле отсутствует = подписан). Отдельная
+// выборка через where("schoolPushEnabled", "==", true) не требует составного
+// индекса и читает только документы-подписки.
+// Отправка чанками по 500 токенов (лимит multicast).
+async function sendSchoolBroadcastNotifications(db, messaging) {
+  console.log("Ищу новые новости и опросы школы...");
+
+  const subscribersSnapshot = await db
+    .collection("users")
+    .where("schoolPushEnabled", "==", true)
+    .get();
+
+  const subscriberTokens = subscribersSnapshot.docs
+    .map((doc) => doc.data().fcmToken)
+    .filter(Boolean);
+
+  if (subscriberTokens.length === 0) {
+    console.log("Подписчиков на школьные пуши нет — пропускаю.");
+  }
+
+  // Рассылает один документ (новость или опрос) всем подписчикам.
+  // chunked multicast: FCM ограничивает sendEachForMulticast 500 токенами.
+  async function broadcast(title, body) {
+    if (subscriberTokens.length === 0) return;
+    for (let i = 0; i < subscriberTokens.length; i += 500) {
+      const tokens = subscriberTokens.slice(i, i + 500);
+      await messaging.sendEachForMulticast({
+        tokens,
+        data: { type: "school", title, body },
+        android: { priority: "high" },
+      });
+    }
+  }
+
+  // ── Новости (schoolNews, notified == false)
+  const newsSnapshot = await db
+    .collection("schoolNews")
+    .where("notified", "==", false)
+    .limit(200)
+    .get();
+
+  if (newsSnapshot.empty) {
+    console.log("Новых новостей нет.");
+  } else {
+    const batch = db.batch();
+    let sent = 0;
+    for (const doc of newsSnapshot.docs) {
+      try {
+        const news = doc.data();
+        await broadcast(
+          "📰 Новая новость школы",
+          (news.text || "").substring(0, 200)
+        );
+        sent++;
+      } catch (err) {
+        console.error(`Ошибка рассылки новости ${doc.id}:`, err.message);
+      } finally {
+        // Помечаем обработанным даже при ошибке — чтобы не зависало в очереди.
+        batch.update(doc.ref, { notified: true });
+      }
+    }
+    await batch.commit();
+    console.log(`Новости: отправлено ${sent}`);
+  }
+
+  // ── Опросы (schoolPolls, notified == false)
+  const pollsSnapshot = await db
+    .collection("schoolPolls")
+    .where("notified", "==", false)
+    .limit(200)
+    .get();
+
+  if (pollsSnapshot.empty) {
+    console.log("Новых опросов нет.");
+  } else {
+    const batch = db.batch();
+    let sent = 0;
+    for (const doc of pollsSnapshot.docs) {
+      try {
+        const poll = doc.data();
+        await broadcast(
+          "📊 Новый опрос школы",
+          (poll.question || "").substring(0, 200)
+        );
+        sent++;
+      } catch (err) {
+        console.error(`Ошибка рассылки опроса ${doc.id}:`, err.message);
+      } finally {
+        batch.update(doc.ref, { notified: true });
+      }
+    }
+    await batch.commit();
+    console.log(`Опросы: отправлено ${sent}`);
+  }
+}
+
 async function main() {
   initFirebase();
   const db = getFirestore();
@@ -370,6 +475,7 @@ async function main() {
   await sendModerationNotifications(db, messaging);
   await sendTeacherQuestionNotifications(db, messaging);
   await sendLessonFileNotifications(db, messaging);
+  await sendSchoolBroadcastNotifications(db, messaging);
 }
 
 main()
