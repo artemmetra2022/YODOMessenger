@@ -127,8 +127,10 @@ class SchoolTeacherPageViewModel @Inject constructor(
             return when {
                 hours >= 24 -> {
                     val days = hours / 24
-                    if (days % 10 == 1 && days % 100 != 11) "~$days день"
-                    else if (days % 10 in 2..4 && days % 100 !in 12..14) "~$days дня"
+                    val lastDigit = (days % 10).toInt()
+                    val lastTwo = (days % 100).toInt()
+                    if (lastDigit == 1 && lastTwo != 11) "~$days день"
+                    else if (lastDigit in 2..4 && lastTwo !in 12..14) "~$days дня"
                     else "~$days дней"
                 }
                 hours >= 1 -> "~$hours ч"
