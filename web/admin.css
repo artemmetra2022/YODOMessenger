@@ -239,6 +239,69 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 
 .empty-note { color: var(--text-dim); font-size: 14px; }
 
+/* ===== Сводка (Обзор) ===== */
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.summary-stat {
+  background: var(--bg-panel-2);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.summary-stat .stat-value { font-size: 22px; font-weight: 700; }
+.summary-stat .stat-label { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.summary-stat a { color: var(--accent); text-decoration: none; cursor: pointer; }
+
+/* ===== Модалка поиска пользователя ===== */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 20px;
+}
+
+.modal-card {
+  width: min(440px, 94vw);
+  background: var(--bg-panel);
+  border-radius: 16px;
+  padding: 22px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-card h2 { font-size: 16px; margin-bottom: 8px; }
+.modal-card input[type="text"] { width: 100%; }
+
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.user-search-results { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+
+.user-result {
+  background: var(--bg-panel-2);
+  border-radius: 10px;
+  padding: 11px 14px;
+  cursor: pointer;
+}
+.user-result:hover { background: var(--bg-input); }
+.user-result-name { font-weight: 600; font-size: 14px; }
+.user-result-username { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+
 /* ===== Мобильная версия ===== */
 
 @media (max-width: 720px) {

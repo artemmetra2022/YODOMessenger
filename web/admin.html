@@ -40,12 +40,14 @@
     <aside class="admin-sidebar">
       <div class="admin-brand">YODO <span>Admin</span></div>
       <nav class="admin-nav">
-        <button class="nav-btn active" data-section="settings">⚙️ Настройки</button>
+        <button class="nav-btn active" data-section="settings">⚙️ Обзор</button>
         <button class="nav-btn" data-section="news">📰 Новости</button>
         <button class="nav-btn" data-section="polls">📊 Опросы</button>
+        <button class="nav-btn" data-section="inbox">📥 Вопросы</button>
         <button class="nav-btn" data-section="teachers">👩‍🏫 Учителя</button>
         <button class="nav-btn" data-section="ideas">💡 Идеи</button>
         <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
+        <button class="nav-btn" data-section="audit">📜 Аудит</button>
       </nav>
       <div class="admin-sidebar-footer">
         <div id="admin-email" class="admin-email"></div>
@@ -55,9 +57,15 @@
 
     <main class="admin-content">
 
-      <!-- СЕКЦИЯ: Настройки -->
+      <!-- СЕКЦИЯ: Обзор и настройки -->
       <section id="section-settings" class="admin-section active">
-        <h1>Настройки</h1>
+        <h1>Обзор</h1>
+
+        <div class="card">
+          <h2>Сводка по разделу «Школа»</h2>
+          <div id="summary-grid" class="summary-grid"></div>
+          <button type="button" class="btn-secondary" id="btn-refresh-summary">Обновить сводку</button>
+        </div>
 
         <div class="card">
           <h2>Раздел «Школа»</h2>
@@ -130,6 +138,15 @@
         </div>
       </section>
 
+      <!-- СЕКЦИЯ: Входящие вопросы -->
+      <section id="section-inbox" class="admin-section">
+        <h1>Вопросы учеников <span id="inbox-count" class="badge badge-yellow hidden"></span></h1>
+        <div class="card">
+          <p class="card-hint">Неотвеченные вопросы со страниц всех учителей. Ответ виден ученику на странице учителя.</p>
+          <div id="inbox-list" class="item-list"></div>
+        </div>
+      </section>
+
       <!-- СЕКЦИЯ: Учителя -->
       <section id="section-teachers" class="admin-section">
         <h1>Учителя</h1>
@@ -175,7 +192,30 @@
         </div>
       </section>
 
+      <!-- СЕКЦИЯ: Аудит -->
+      <section id="section-audit" class="admin-section">
+        <h1>Аудит</h1>
+        <div class="card">
+          <p class="card-hint">Журнал действий администраторов (adminAuditLog): блокировки, настройки и действия этой панели. Последние 50 записей.</p>
+          <div id="audit-list" class="item-list"></div>
+        </div>
+      </section>
+
     </main>
+  </div>
+
+  <!-- МОДАЛКА: поиск пользователя для привязки учителя -->
+  <div id="user-search-overlay" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h2>Привязка аккаунта учителя</h2>
+      <p class="card-hint">Найдите аккаунт учителя по имени или @username. Учитель должен быть зарегистрирован в мессенджере.</p>
+      <input type="text" id="user-search-input" placeholder="Имя или @username (минимум 2 символа)" autocomplete="off">
+      <div id="user-search-results" class="user-search-results"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-link" id="btn-manual-uid">Указать UID вручную</button>
+        <button type="button" class="btn-secondary" id="btn-cancel-user-search">Отмена</button>
+      </div>
+    </div>
   </div>
 
   <div id="toast" class="toast hidden"></div>

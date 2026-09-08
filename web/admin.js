@@ -30,12 +30,14 @@ import {
 import {
   getFirestore,
   doc,
+  getDoc,
   getDocs,
   addDoc,
   setDoc,
   updateDoc,
   deleteDoc,
   collection,
+  collectionGroup,
   query,
   where,
   orderBy,
@@ -115,6 +117,56 @@ function handleErr(prefix) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Аудит действий панели (adminAuditLog)                               */
+/* ------------------------------------------------------------------ */
+
+const AUDIT_LABELS = {
+  USER_GLOBALLY_BLOCKED: "Глобальная блокировка пользователя",
+  USER_GLOBALLY_UNBLOCKED: "Снятие глобальной блокировки",
+  REQUIRE_EMAIL_VERIFICATION_CHANGED: "Изменение требования подтверждения email",
+  SCHOOL_NEWS_ADDED: "Новая новость",
+  SCHOOL_NEWS_EDITED: "Правка новости",
+  SCHOOL_NEWS_PINNED: "Закрепление новости",
+  SCHOOL_NEWS_DELETED: "Удаление новости",
+  SCHOOL_POLL_ADDED: "Новый опрос",
+  SCHOOL_POLL_DELETED: "Удаление опроса",
+  SCHOOL_TEACHER_CREATED: "Создан профиль учителя",
+  SCHOOL_TEACHER_LINKED: "Привязка аккаунта учителя",
+  SCHOOL_TEACHER_UNLINKED: "Отвязка аккаунта учителя",
+  SCHOOL_TEACHER_DELETED: "Удалён профиль учителя",
+  SCHOOL_QUESTION_ANSWERED: "Ответ на вопрос ученика",
+  SCHOOL_QUESTION_HIDDEN: "Скрытие/показ вопроса",
+  SCHOOL_SCHEDULE_STATUS_SET: "Пометка актуальности расписания",
+  SCHOOL_SECTION_VISIBILITY: "Видимость раздела «Школа»",
+};
+
+// Отображаемое имя админа для записей аудита (users/{uid}.displayName).
+let adminActorName = "";
+
+async function loadAdminActorName(uid) {
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    adminActorName = snap.exists() ? snap.data().displayName || "" : "";
+  } catch (e) { /* best-effort */ }
+}
+
+// Best-effort запись действия в adminAuditLog — формат 1:1 с
+// UserRepositoryImpl.logGlobalAdminAction. Неизвестные Android-клиенту
+// actionType просто не показываются в его журнале (runCatching valueOf).
+function logAdminAction(actionType, details = "", targetUserId = null, targetUserName = null) {
+  if (!auth.currentUser) return;
+  addDoc(collection(db, "adminAuditLog"), {
+    actorId: auth.currentUser.uid,
+    actorName: adminActorName || auth.currentUser.email || "Админ",
+    actionType,
+    details,
+    targetUserId,
+    targetUserName,
+    timestamp: Date.now(),
+  }).catch(() => {});
+}
+
+/* ------------------------------------------------------------------ */
 /* Навигация по секциям                                                */
 /* ------------------------------------------------------------------ */
 
@@ -182,6 +234,7 @@ onAuthStateChanged(auth, async (user) => {
   $("screen-denied").classList.add("hidden");
   $("screen-admin").classList.remove("hidden");
   $("admin-email").textContent = user.email;
+  loadAdminActorName(user.uid);
   if (!panelStarted) {
     panelStarted = true;
     startPanel();
@@ -226,6 +279,10 @@ function startSettings() {
     try {
       await setDoc(settingsRef, { schoolSectionHidden: e.target.checked }, { merge: true });
       toast(e.target.checked ? "Раздел «Школа» скрыт у всех" : "Раздел «Школа» снова виден");
+      logAdminAction(
+        "SCHOOL_SECTION_VISIBILITY",
+        e.target.checked ? "раздел скрыт у всех" : "раздел снова виден"
+      );
     } catch (err) {
       e.target.checked = !e.target.checked;
       handleErr("Не удалось изменить видимость раздела")(err);
@@ -240,6 +297,12 @@ function startSettings() {
         { merge: true }
       );
       toast(e.target.checked ? "Подтверждение email обязательно" : "Подтверждение email не требуется");
+      // Тот же actionType, что у Android (UserRepositoryImpl) — запись видна
+      // в журнале и в приложении.
+      logAdminAction(
+        "REQUIRE_EMAIL_VERIFICATION_CHANGED",
+        e.target.checked ? "включено" : "выключено"
+      );
     } catch (err) {
       e.target.checked = !e.target.checked;
       handleErr("Не удалось изменить настройку")(err);
@@ -262,6 +325,10 @@ function startSettings() {
         { merge: true }
       );
       toast("Пометка расписания сохранена");
+      logAdminAction(
+        "SCHOOL_SCHEDULE_STATUS_SET",
+        (actual ? "актуально" : "неактуально") + (untilDate ? " до " + untilDate : "")
+      );
     } catch (err) {
       handleErr("Не удалось сохранить пометку")(err);
     }
@@ -279,6 +346,9 @@ function newsItem(docSnap) {
   el.innerHTML = `
     <div class="item-head">
       ${n.pinned ? '<span class="badge badge-blue">📌 Закреплена</span>' : ""}
+      ${n.notified === false
+        ? '<span class="badge badge-yellow">push: в очереди</span>'
+        : '<span class="badge badge-green">push: отправлен</span>'}
       <span class="item-title">${esc(n.sender || "")}</span>
       <span class="item-date">${fmtDate(n.pubDate)}</span>
     </div>
@@ -297,13 +367,22 @@ function newsItem(docSnap) {
     if (newText === null) return;
     if (!newText.trim()) return toast("Текст не может быть пустым", false);
     updateDoc(doc(db, "schoolNews", docSnap.id), { text: newText.trim() })
-      .then(() => toast("Текст новости обновлён"))
+      .then(() => {
+        toast("Текст новости обновлён");
+        logAdminAction("SCHOOL_NEWS_EDITED", (n.sender || "") + ": " + newText.trim().slice(0, 100));
+      })
       .catch(handleErr("Не удалось обновить новость"));
   });
   el.querySelector('[data-act="delete"]').addEventListener("click", () => {
     if (!confirm("Удалить эту новость?")) return;
     deleteDoc(doc(db, "schoolNews", docSnap.id))
-      .then(() => toast("Новость удалена"))
+      .then(() => {
+        toast("Новость удалена");
+        logAdminAction(
+          "SCHOOL_NEWS_DELETED",
+          (n.sender || "") + ": " + (n.text || "").slice(0, 100)
+        );
+      })
       .catch(handleErr("Не удалось удалить новость"));
   });
   return el;
@@ -325,6 +404,7 @@ async function setNewsPinned(newsId, pinned) {
     }
     await updateDoc(doc(db, "schoolNews", newsId), { pinned });
     toast(pinned ? "Новость закреплена" : "Новость откреплена");
+    logAdminAction("SCHOOL_NEWS_PINNED", pinned ? "закреплена" : "откреплена");
   } catch (err) {
     handleErr("Не удалось закрепить новость")(err);
   }
@@ -349,6 +429,7 @@ function startNews() {
       $("news-text").value = "";
       $("news-event-date").value = "";
       toast("Новость опубликована — push уйдёт подписчикам автоматически");
+      logAdminAction("SCHOOL_NEWS_ADDED", sender + ": " + text.slice(0, 100));
     } catch (err) {
       handleErr("Не удалось опубликовать новость")(err);
     }
@@ -391,6 +472,9 @@ function pollItem(docSnap) {
   el.innerHTML = `
     <div class="item-head">
       <span class="item-title">${esc(p.question || "")}</span>
+      ${p.notified === false
+        ? '<span class="badge badge-yellow">push: в очереди</span>'
+        : '<span class="badge badge-green">push: отправлен</span>'}
       <span class="item-date">${fmtDate(p.createdAt)} · голосов: ${votersCount}</span>
     </div>
     ${options
@@ -412,7 +496,10 @@ function pollItem(docSnap) {
   el.querySelector('[data-act="delete"]').addEventListener("click", () => {
     if (!confirm("Удалить опрос вместе с результатами?")) return;
     deleteDoc(doc(db, "schoolPolls", docSnap.id))
-      .then(() => toast("Опрос удалён"))
+      .then(() => {
+        toast("Опрос удалён");
+        logAdminAction("SCHOOL_POLL_DELETED", p.question || "");
+      })
       .catch(handleErr("Не удалось удалить опрос"));
   });
   return el;
@@ -442,6 +529,7 @@ function startPolls() {
       $("poll-question").value = "";
       $("poll-options").value = "";
       toast("Опрос создан — push уйдёт подписчикам автоматически");
+      logAdminAction("SCHOOL_POLL_ADDED", question);
     } catch (err) {
       handleErr("Не удалось создать опрос")(err);
     }
@@ -490,42 +578,8 @@ function teacherItem(docSnap) {
       <button class="btn-danger" data-act="delete">Удалить профиль</button>
     </div>`;
 
-  el.querySelector('[data-act="link"]').addEventListener("click", async () => {
-    const uid = prompt(
-      "UID аккаунта учителя (см. Firebase Console → Authentication):\n" +
-        "Перед привязкой учитель должен зарегистрироваться в мессенджере.",
-      linked ? t.linkedUserId || "" : ""
-    );
-    if (uid === null) return;
-    const uidTrim = uid.trim();
-    if (!uidTrim) return toast("UID не может быть пустым", false);
-    const userName = prompt("Имя пользователя для отображения:", t.linkedUserName || "") || "";
-    try {
-      // Снимаем привязку с прошлых профилей этого uid (как linkTeacherProfile).
-      const previous = await getDocs(
-        query(
-          collection(db, "schoolTeacherProfiles"),
-          where("linkedUserId", "==", uidTrim)
-        )
-      );
-      for (const d of previous.docs) {
-        if (d.id !== docSnap.id) {
-          await setDoc(
-            doc(db, "schoolTeacherProfiles", d.id),
-            { linkedUserId: "", linkedUserName: "" },
-            { merge: true }
-          );
-        }
-      }
-      await setDoc(
-        doc(db, "schoolTeacherProfiles", docSnap.id),
-        { linkedUserId: uidTrim, linkedUserName: userName.trim() },
-        { merge: true }
-      );
-      toast("Аккаунт привязан");
-    } catch (err) {
-      handleErr("Не удалось привязать аккаунт")(err);
-    }
+  el.querySelector('[data-act="link"]').addEventListener("click", () => {
+    openUserSearch({ teacherId: docSnap.id, teacherName: t.name || docSnap.id });
   });
 
   el.querySelector('[data-act="unlink"]')?.addEventListener("click", () => {
@@ -535,7 +589,10 @@ function teacherItem(docSnap) {
       { linkedUserId: "", linkedUserName: "" },
       { merge: true }
     )
-      .then(() => toast("Аккаунт отвязан"))
+      .then(() => {
+        toast("Аккаунт отвязан");
+        logAdminAction("SCHOOL_TEACHER_UNLINKED", t.name || docSnap.id);
+      })
       .catch(handleErr("Не удалось отвязать аккаунт"));
   });
 
@@ -551,18 +608,151 @@ function teacherItem(docSnap) {
     )
       return;
     deleteDoc(doc(db, "schoolTeacherProfiles", docSnap.id))
-      .then(() => toast("Профиль удалён"))
+      .then(() => {
+        toast("Профиль удалён");
+        logAdminAction("SCHOOL_TEACHER_DELETED", t.name || docSnap.id);
+      })
       .catch(handleErr("Не удалось удалить профиль"));
   });
   return el;
 }
 
-function questionItem(teacherName, docSnap) {
+/* ------------------------------------------------------------------ */
+/* Модалка поиска пользователя (привязка учителя)                      */
+/* ------------------------------------------------------------------ */
+
+let pendingLink = null; // { teacherId, teacherName } — ждём выбор аккаунта
+let userSearchTimer = null;
+
+// Префиксный поиск по users (как runSearch в app.js): displayNameLowercase
+// и usernameLowercase поддерживаются индексами по умолчанию.
+async function searchUsersByField(field, term) {
+  return getDocs(query(
+    collection(db, "users"),
+    where(field, ">=", term),
+    where(field, "<=", term + "\uf8ff"),
+    limit(10)
+  ));
+}
+
+function openUserSearch(link) {
+  pendingLink = link;
+  $("user-search-input").value = "";
+  $("user-search-results").innerHTML =
+    '<p class="empty-note">Начните вводить имя или @username учителя</p>';
+  $("user-search-overlay").classList.remove("hidden");
+  $("user-search-input").focus();
+}
+
+function closeUserSearch() {
+  pendingLink = null;
+  $("user-search-overlay").classList.add("hidden");
+}
+
+async function runUserSearch() {
+  const term = $("user-search-input").value.trim().toLowerCase().replace(/^@/, "");
+  const resultsEl = $("user-search-results");
+  if (term.length < 2) {
+    resultsEl.innerHTML = '<p class="empty-note">Минимум 2 символа</p>';
+    return;
+  }
+  resultsEl.innerHTML = '<p class="empty-note">Поиск…</p>';
+  try {
+    const byUsername = await searchUsersByField("usernameLowercase", term);
+    const byName = await searchUsersByField("displayNameLowercase", term);
+    const seen = new Set();
+    const docs = [];
+    for (const d of byUsername.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
+    for (const d of byName.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
+    if (!docs.length) {
+      resultsEl.innerHTML =
+        '<p class="empty-note">Никого не найдено. Попробуйте другое имя или укажите UID вручную.</p>';
+      return;
+    }
+    resultsEl.innerHTML = "";
+    docs.forEach((d) => {
+      const u = d.data();
+      const el = document.createElement("div");
+      el.className = "user-result";
+      el.innerHTML = `
+        <div class="user-result-name">${esc(u.displayName || "Без имени")}</div>
+        <div class="user-result-username">@${esc(u.username || "—")}</div>`;
+      el.addEventListener("click", () => {
+        const link = pendingLink;
+        closeUserSearch();
+        if (!link) return;
+        performTeacherLink(link, d.id, u.displayName || u.username || d.id);
+      });
+      resultsEl.appendChild(el);
+    });
+  } catch (err) {
+    handleErr("Поиск пользователей")(err);
+  }
+}
+
+async function performTeacherLink(link, uid, userName) {
+  const { teacherId, teacherName } = link;
+  try {
+    // Снимаем привязку с прошлых профилей этого uid (как linkTeacherProfile).
+    const previous = await getDocs(
+      query(collection(db, "schoolTeacherProfiles"), where("linkedUserId", "==", uid))
+    );
+    for (const d of previous.docs) {
+      if (d.id !== teacherId) {
+        await setDoc(
+          doc(db, "schoolTeacherProfiles", d.id),
+          { linkedUserId: "", linkedUserName: "" },
+          { merge: true }
+        );
+      }
+    }
+    await setDoc(
+      doc(db, "schoolTeacherProfiles", teacherId),
+      { linkedUserId: uid, linkedUserName: userName },
+      { merge: true }
+    );
+    toast("Аккаунт " + userName + " привязан к «" + teacherName + "»");
+    logAdminAction("SCHOOL_TEACHER_LINKED", teacherName + " → " + userName, uid, userName);
+  } catch (err) {
+    handleErr("Не удалось привязать аккаунт")(err);
+  }
+}
+
+function initUserSearchModal() {
+  $("user-search-input").addEventListener("input", () => {
+    clearTimeout(userSearchTimer);
+    userSearchTimer = setTimeout(runUserSearch, 350);
+  });
+  $("btn-cancel-user-search").addEventListener("click", closeUserSearch);
+  $("user-search-overlay").addEventListener("click", (e) => {
+    if (e.target === $("user-search-overlay")) closeUserSearch();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("user-search-overlay").classList.contains("hidden")) {
+      closeUserSearch();
+    }
+  });
+  // Fallback для случаев, когда учитель не находится поиском.
+  $("btn-manual-uid").addEventListener("click", () => {
+    const link = pendingLink;
+    if (!link) return;
+    const uid = prompt("UID аккаунта учителя (Firebase Console → Authentication):");
+    if (uid === null) return;
+    const uidTrim = uid.trim();
+    if (!uidTrim) return toast("UID не может быть пустым", false);
+    const userName = prompt("Имя пользователя для отображения:", "") || "";
+    closeUserSearch();
+    performTeacherLink(link, uidTrim, userName.trim());
+  });
+}
+
+function questionItem(teacherName, docSnap, showTeacher = false) {
   const q = docSnap.data();
   const el = document.createElement("div");
   el.className = "item";
   el.innerHTML = `
     <div class="item-head">
+      ${showTeacher ? '<span class="badge badge-blue">👩\u200d🏫 ' + esc(teacherName) + "</span>" : ""}
       <span class="item-title">${esc(q.fromName || "Ученик")}</span>
       ${q.hidden ? '<span class="badge badge-dim">Скрыт</span>' : ""}
       <span class="item-date">${fmtDate(q.createdAt)}</span>
@@ -594,6 +784,10 @@ function questionItem(teacherName, docSnap) {
       .then(() => {
         input.value = "";
         toast("Ответ сохранён");
+        logAdminAction(
+          "SCHOOL_QUESTION_ANSWERED",
+          teacherName + " · вопрос: " + (q.text || "").slice(0, 80)
+        );
       })
       .catch(handleErr("Не удалось сохранить ответ"));
   });
@@ -604,7 +798,13 @@ function questionItem(teacherName, docSnap) {
       { hidden: !q.hidden },
       { merge: true }
     )
-      .then(() => toast(q.hidden ? "Вопрос показан" : "Вопрос скрыт"))
+      .then(() => {
+        toast(q.hidden ? "Вопрос показан" : "Вопрос скрыт");
+        logAdminAction(
+          "SCHOOL_QUESTION_HIDDEN",
+          (q.hidden ? "показан" : "скрыт") + " · " + teacherName
+        );
+      })
       .catch(handleErr("Не удалось изменить видимость вопроса"));
   });
   return el;
@@ -662,6 +862,10 @@ function startTeachers() {
       $("teacher-name").value = "";
       $("teacher-subject").value = "";
       toast("Профиль учителя создан");
+      logAdminAction(
+        "SCHOOL_TEACHER_CREATED",
+        name + (subject ? " · " + subject : "")
+      );
     } catch (err) {
       handleErr("Не удалось создать профиль")(err);
     }
@@ -754,14 +958,146 @@ function startReviews() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Секция «Вопросы» — неотвеченные вопросы всех учителей               */
+/* ------------------------------------------------------------------ */
+
+function startInbox() {
+  const listEl = $("inbox-list");
+  const countEl = $("inbox-count");
+  setLoading(listEl);
+  // collectionGroup, как у push-воркера; фильтр «без ответа» на клиенте,
+  // чтобы не требовать составной индекс answer+createdAt.
+  onSnapshot(
+    query(collectionGroup(db, "questions"), orderBy("createdAt", "desc"), limit(200)),
+    (snap) => {
+      const pending = snap.docs.filter((d) => {
+        const q = d.data();
+        return !q.answer && q.hidden !== true;
+      });
+      countEl.textContent = pending.length ? "без ответа: " + pending.length : "";
+      countEl.classList.toggle("hidden", !pending.length);
+      if (!pending.length) {
+        listEl.innerHTML = '<p class="empty-note">Неотвеченных вопросов нет — всё чисто! ✅</p>';
+        return;
+      }
+      listEl.innerHTML = "";
+      pending.forEach((d) => {
+        // Имя учителя = id родительского документа schoolTeacherProfiles.
+        const teacherName = d.ref.parent.parent.id;
+        listEl.appendChild(questionItem(teacherName, d, true));
+      });
+    },
+    handleErr("Не удалось загрузить вопросы")
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Секция «Аудит» — журнал действий администраторов                    */
+/* ------------------------------------------------------------------ */
+
+function startAudit() {
+  const listEl = $("audit-list");
+  setLoading(listEl);
+  onSnapshot(
+    query(collection(db, "adminAuditLog"), orderBy("timestamp", "desc"), limit(50)),
+    (snap) => {
+      if (snap.empty) {
+        listEl.innerHTML = '<p class="empty-note">Записей пока нет.</p>';
+        return;
+      }
+      listEl.innerHTML = "";
+      snap.forEach((d) => {
+        const a = d.data();
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            <span class="item-title">${esc(AUDIT_LABELS[a.actionType] || a.actionType || "?")}</span>
+            <span class="item-date">${fmtDate(a.timestamp)}</span>
+          </div>
+          <div class="item-sub">${esc(a.actorName || a.actorId || "")}${a.targetUserName ? " → " + esc(a.targetUserName) : ""}</div>
+          ${a.details ? `<div class="item-text">${esc(a.details)}</div>` : ""}`;
+        listEl.appendChild(el);
+      });
+    },
+    handleErr("Не удалось загрузить журнал")
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Сводка (Обзор)                                                      */
+/* ------------------------------------------------------------------ */
+
+async function refreshSummary() {
+  const grid = $("summary-grid");
+  grid.innerHTML = '<p class="empty-note">Считаю…</p>';
+  try {
+    const [news, polls, ideas, reviews, teachers, questions] = await Promise.all([
+      getDocs(collection(db, "schoolNews")),
+      getDocs(collection(db, "schoolPolls")),
+      getDocs(collection(db, "schoolIdeas")),
+      getDocs(collection(db, "schoolReviews")),
+      getDocs(collection(db, "schoolTeacherProfiles")),
+      getDocs(query(collectionGroup(db, "questions"), orderBy("createdAt", "desc"), limit(300))),
+    ]);
+    let starsSum = 0;
+    reviews.forEach((d) => (starsSum += d.data().stars || 0));
+    const unanswered = questions.docs.filter((d) => {
+      const q = d.data();
+      return !q.answer && q.hidden !== true;
+    }).length;
+    const linked = teachers.docs.filter((d) => !!d.data().linkedUserId).length;
+    const stats = [
+      { value: news.size, label: "новостей", section: "news" },
+      { value: polls.size, label: "опросов", section: "polls" },
+      { value: unanswered, label: "вопросов без ответа", section: "inbox" },
+      { value: teachers.size + " (" + linked + " привяз.)", label: "учителей", section: "teachers" },
+      { value: ideas.size, label: "идей", section: "ideas" },
+      {
+        value: reviews.size
+          ? (starsSum / reviews.size).toFixed(1) + " / 5 (" + reviews.size + ")"
+          : "—",
+        label: "средняя оценка",
+        section: "reviews",
+      },
+    ];
+    grid.innerHTML = "";
+    for (const s of stats) {
+      const el = document.createElement("div");
+      el.className = "summary-stat";
+      el.innerHTML =
+        '<a href="#"><div class="stat-value">' + esc(String(s.value)) +
+        '</div><div class="stat-label">' + esc(s.label) + "</div></a>";
+      el.querySelector("a").addEventListener("click", (e) => {
+        e.preventDefault();
+        document.querySelector('.nav-btn[data-section="' + s.section + '"]').click();
+      });
+      grid.appendChild(el);
+    }
+  } catch (err) {
+    grid.innerHTML = "";
+    handleErr("Не удалось собрать сводку")(err);
+  }
+}
+
+function startSummary() {
+  $("btn-refresh-summary").addEventListener("click", refreshSummary);
+  refreshSummary();
+}
+
+/* ------------------------------------------------------------------ */
 /* Старт панели                                                        */
 /* ------------------------------------------------------------------ */
 
 function startPanel() {
+  startSummary();
   startSettings();
   startNews();
   startPolls();
+  startInbox();
   startTeachers();
   startIdeas();
   startReviews();
+  startAudit();
+  initUserSearchModal();
 }
