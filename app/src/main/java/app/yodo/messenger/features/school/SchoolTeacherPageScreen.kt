@@ -116,6 +116,12 @@ fun SchoolTeacherPageScreen(
             return@Scaffold
         }
 
+        // История файлов урока без текущего (совпадает по времени обновления).
+        // Вычисляется до LazyColumn: её content-лямбда — не composable-контекст.
+        val previousFiles = remember(lessonFiles, profile?.fileUpdatedAt) {
+            lessonFiles.filter { it.updatedAt != profile?.fileUpdatedAt }.take(3)
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
@@ -247,9 +253,6 @@ fun SchoolTeacherPageScreen(
             }
 
             // ── История файлов урока (без текущего, последние 3)
-            val previousFiles = remember(lessonFiles, profile?.fileUpdatedAt) {
-                lessonFiles.filter { it.updatedAt != profile?.fileUpdatedAt }.take(3)
-            }
             if (previousFiles.isNotEmpty()) {
                 item {
                     Column(
