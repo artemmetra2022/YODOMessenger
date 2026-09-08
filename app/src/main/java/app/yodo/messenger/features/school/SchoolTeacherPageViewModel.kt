@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.data.local.SchoolPreferences
+import app.yodo.messenger.domain.model.SchoolLessonFile
 import app.yodo.messenger.domain.model.SchoolTeacherProfile
 import app.yodo.messenger.domain.model.SchoolTeacherQuestion
 import app.yodo.messenger.domain.model.YodoUser
@@ -79,6 +80,21 @@ class SchoolTeacherPageViewModel @Inject constructor(
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         } else {
             schoolRepository.observeTeacherQuestions(teacherName)
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        }
+
+    /** НОВОЕ (история файлов урока): последние обновления файла (новые сверху). */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val lessonFiles: StateFlow<List<SchoolLessonFile>> =
+        if (isMyPage) {
+            profile
+                .flatMapLatest { p ->
+                    if (p == null) flowOf(emptyList())
+                    else schoolRepository.observeLessonFiles(p.name)
+                }
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        } else {
+            schoolRepository.observeLessonFiles(teacherName)
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         }
 

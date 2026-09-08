@@ -86,3 +86,15 @@ data class SchoolTeacherQuestion(
 ) {
     val answered: Boolean get() = answer.isNotBlank()
 }
+
+/**
+ * НОВОЕ (история файлов урока): запись в истории обновлений файла урока
+ * (подколлекция lessonFiles). Создаётся при каждом обновлении файла
+ * привязанным учителем; на странице показываются последние несколько.
+ */
+data class SchoolLessonFile(
+    val id: String = "",
+    val fileUrl: String = "",
+    val fileNote: String = "",
+    val updatedAt: Long = 0L
+)

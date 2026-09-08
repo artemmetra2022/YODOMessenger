@@ -293,6 +293,23 @@ service cloud.firestore {
           request.resource.data.notified == false;
         allow update, delete: if false;
       }
+
+      // НОВОЕ (история файлов урока): подколлекция lessonFiles — история
+      // обновлений файла урока (запись создаётся в
+      // SchoolRepositoryImpl.setTeacherFile при каждом обновлении). Читать
+      // могут все авторизованные (блок «Предыдущие файлы» на странице
+      // учителя), писать — только привязанный учитель или админ, только
+      // создавать (история неизменяема и не удаляется с клиента).
+      match /lessonFiles/{fileId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+          (
+            isOfficialChannelAdmin() ||
+            get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
+              == request.auth.uid
+          );
+        allow update, delete: if false;
+      }
     }
 
     // НОВОЕ (вход по QR-коду): временный "мостик" между веб-версией (не авторизована)

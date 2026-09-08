@@ -67,6 +67,7 @@ fun SchoolTeacherPageScreen(
     val context = LocalContext.current
     val profile by viewModel.profile.collectAsState()
     val questions by viewModel.questions.collectAsState()
+    val lessonFiles by viewModel.lessonFiles.collectAsState()
     val message by viewModel.message.collectAsState()
 
     var showSetFileDialog by remember { mutableStateOf(false) }
@@ -240,6 +241,62 @@ fun SchoolTeacherPageScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                }
+            }
+
+            // ── История файлов урока (без текущего, последние 3)
+            val previousFiles = remember(lessonFiles, profile?.fileUpdatedAt) {
+                lessonFiles.filter { it.updatedAt != profile?.fileUpdatedAt }.take(3)
+            }
+            if (previousFiles.isNotEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            "🗂 Предыдущие файлы",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        previousFiles.forEachIndexed { index, file ->
+                            if (index > 0) Spacer(modifier = Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Filled.Description, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        file.fileNote.ifBlank { "Файл урока" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1
+                                    )
+                                    if (file.updatedAt > 0) {
+                                        val df = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
+                                        Text(
+                                            df.format(Date(file.updatedAt)),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                TextButton(onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(file.fileUrl)))
+                                    }
+                                }) {
+                                    Text("Открыть")
+                                }
+                            }
                         }
                     }
                 }

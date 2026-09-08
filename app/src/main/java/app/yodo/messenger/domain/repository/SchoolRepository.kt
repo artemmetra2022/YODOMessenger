@@ -1,6 +1,7 @@
 package app.yodo.messenger.domain.repository
 
 import app.yodo.messenger.domain.model.SchoolIdea
+import app.yodo.messenger.domain.model.SchoolLessonFile
 import app.yodo.messenger.domain.model.SchoolNews
 import app.yodo.messenger.domain.model.SchoolPoll
 import app.yodo.messenger.domain.model.SchoolReview
@@ -68,6 +69,9 @@ interface SchoolRepository {
 
     /** Файл урока — задаёт привязанный учитель (как /setlesson в боте). */
     suspend fun setTeacherFile(teacherName: String, fileUrl: String, fileNote: String): Result<Unit>
+
+    /** История файлов урока (подколлекция lessonFiles, новые сверху). */
+    fun observeLessonFiles(teacherName: String): Flow<List<SchoolLessonFile>>
 
     /** Подписка/отписка от обновлений файла урока. */
     suspend fun setTeacherSubscription(teacherName: String, uid: String, subscribed: Boolean): Result<Unit>

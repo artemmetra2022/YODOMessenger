@@ -2,6 +2,7 @@ package app.yodo.messenger.data.repository
 
 import android.util.Log
 import app.yodo.messenger.domain.model.SchoolIdea
+import app.yodo.messenger.domain.model.SchoolLessonFile
 import app.yodo.messenger.domain.model.SchoolNews
 import app.yodo.messenger.domain.model.SchoolPoll
 import app.yodo.messenger.domain.model.SchoolReview
@@ -51,6 +52,9 @@ class SchoolRepositoryImpl @Inject constructor(
         private const val FIELD_PINNED = "pinned"
         private const val FIELD_PUB_DATE = "pubDate"
         private const val FIELD_CREATED_AT = "createdAt"
+
+        /** Сколько записей истории файлов урока хранить/читать (показываются последние 3). */
+        private const val LESSON_FILES_LIMIT = 10L
     }
 
     // ─────────────────────────────────────────────── Новости
@@ -351,31 +355,63 @@ class SchoolRepositoryImpl @Inject constructor(
     override suspend fun setTeacherFile(teacherName: String, fileUrl: String, fileNote: String): Result<Unit> =
         runCatching {
             val teacherRef = teacherDoc(teacherName)
+            // Снимок ДО обновления: старая ссылка (дедупликация пуша) и подписчики.
+            val before = teacherRef.get().await()
+            val oldUrl = before.getString("fileUrl") ?: ""
+            val subscribers = (before.get("subscribers") as? List<*>).orEmpty().filterIsInstance<String>()
+            val now = System.currentTimeMillis()
             teacherRef.set(
                 mapOf(
                     "fileUrl" to fileUrl,
                     "fileNote" to fileNote,
-                    "fileUpdatedAt" to System.currentTimeMillis()
+                    "fileUpdatedAt" to now
                 ),
                 SetOptions.merge()
             ).await()
+            // НОВОЕ (история файлов урока): запись при каждой смене файла —
+            // страница учителя показывает несколько последних. Правка описания
+            // без смены ссылки историю не засоряет.
+            if (fileUrl != oldUrl) {
+                teacherRef.collection("lessonFiles").add(
+                    mapOf(
+                        "fileUrl" to fileUrl,
+                        "fileNote" to fileNote,
+                        "updatedAt" to now
+                    )
+                ).await()
+            }
             // НОВОЕ (push подписчикам): событие для push-воркера — снимок
-            // подписчиков на момент обновления. Пишется только если файл
-            // реально меняется (не только описание), чтобы не дублировать пуши.
-            val snap = teacherRef.get().await()
-            val subscribers = (snap.get("subscribers") as? List<*>).orEmpty().filterIsInstance<String>()
-            if (subscribers.isNotEmpty()) {
+            // подписчиков на момент обновления. Отправляется, только когда
+            // ссылка на файл реально изменилась (правка описания не спамит
+            // подписчиков лишними уведомлениями).
+            if (subscribers.isNotEmpty() && fileUrl != oldUrl) {
                 teacherRef.collection("fileNotifications").add(
                     mapOf(
                         "subscribers" to subscribers,
                         "fileNote" to fileNote,
-                        "createdAt" to System.currentTimeMillis(),
+                        "createdAt" to now,
                         "notified" to false
                     )
                 ).await()
             }
             Unit
         }.onFailure { Log.w(TAG, "setTeacherFile: ${it.message}") }
+
+    override fun observeLessonFiles(teacherName: String): Flow<List<SchoolLessonFile>> = callbackFlow {
+        val listener = teacherDoc(teacherName).collection("lessonFiles")
+            .orderBy("updatedAt", Query.Direction.DESCENDING)
+            .limit(LESSON_FILES_LIMIT)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Ошибка чтения истории файлов урока: ${error.message}")
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(SchoolLessonFileFirestore::class.java)?.toDomain(doc.id)
+                }.orEmpty())
+            }
+        awaitClose { listener.remove() }
+    }
 
     override suspend fun setTeacherSubscription(teacherName: String, uid: String, subscribed: Boolean): Result<Unit> =
         runCatching {
@@ -518,5 +554,16 @@ private data class SchoolTeacherQuestionFirestore(
     fun toDomain(id: String) = SchoolTeacherQuestion(
         id = id, fromUid = fromUid, fromName = fromName, text = text,
         hidden = hidden, answer = answer, answeredAt = answeredAt, createdAt = createdAt
+    )
+}
+
+/** НОВОЕ (история файлов урока): POJO для подколлекции lessonFiles. */
+private data class SchoolLessonFileFirestore(
+    val fileUrl: String = "",
+    val fileNote: String = "",
+    val updatedAt: Long = 0L
+) {
+    fun toDomain(id: String) = SchoolLessonFile(
+        id = id, fileUrl = fileUrl, fileNote = fileNote, updatedAt = updatedAt
     )
 }
