@@ -89,6 +89,15 @@
         </div>
 
         <div class="card">
+          <h2>Дата каникул</h2>
+          <p class="card-hint">Дата начала каникул для отсчёта «До каникул» на экране «Расписание и звонки» в приложении. Пустое поле или «-» — используется зашитая дата из сборки.</p>
+          <form id="form-holiday" class="form-row">
+            <input type="text" id="holiday-date" placeholder="ГГГГ-ММ-ДД, например 2026-10-26">
+            <button type="submit" class="btn-primary">Сохранить дату</button>
+          </form>
+        </div>
+
+        <div class="card">
           <h2>Безопасность входа</h2>
           <label class="toggle-row">
             <input type="checkbox" id="toggle-require-email-verification">

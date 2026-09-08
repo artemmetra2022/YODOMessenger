@@ -30,6 +30,7 @@ class AppSettingsRepositoryImpl @Inject constructor(
         private const val FIELD_SCHEDULE_ACTUAL = "schoolScheduleActual"
         private const val FIELD_SCHEDULE_UNTIL = "schoolScheduleUntilDate"
         private const val FIELD_SCHEDULE_UPDATED = "schoolScheduleUpdatedAt"
+        private const val FIELD_HOLIDAY_DATE = "schoolHolidayDate"
     }
 
     private fun doc() = firestore.document(DOC_PATH)
@@ -114,6 +115,20 @@ class AppSettingsRepositoryImpl @Inject constructor(
                 FIELD_SCHEDULE_UPDATED to System.currentTimeMillis()
             )
         )
+
+    override fun observeHolidayDate(): Flow<String> = callbackFlow {
+        val listener = doc().addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                android.util.Log.w("AppSettingsRepository", "Ошибка слежения: ${error.message}")
+                return@addSnapshotListener
+            }
+            trySend(snapshot?.getString(FIELD_HOLIDAY_DATE) ?: "")
+        }
+        awaitClose { listener.remove() }
+    }
+
+    override suspend fun setHolidayDate(isoDate: String): Boolean =
+        writeIfAdmin(mapOf(FIELD_HOLIDAY_DATE to isoDate.trim()))
 
     private suspend fun writeIfAdmin(fields: Map<String, Any?>): Boolean {
         val myEmail = firebaseAuth.currentUser?.email?.lowercase()

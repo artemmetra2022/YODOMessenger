@@ -66,10 +66,12 @@ fun SchoolAdminScreen(
     // пометка актуальности расписания уроков.
     val schoolSectionHidden by viewModel.schoolSectionHidden.collectAsState()
     val scheduleStatus by viewModel.scheduleStatus.collectAsState()
+    val holidayDateIso by viewModel.holidayDateIso.collectAsState()
 
     var showAddNewsDialog by remember { mutableStateOf(false) }
     var showAddPollDialog by remember { mutableStateOf(false) }
     var showScheduleStatusDialog by remember { mutableStateOf(false) }
+    var showHolidayDateDialog by remember { mutableStateOf(false) }
     var editNewsTarget by remember { mutableStateOf<SchoolNews?>(null) }
     var deleteNewsTarget by remember { mutableStateOf<SchoolNews?>(null) }
     var deletePollTarget by remember { mutableStateOf<String?>(null) }
@@ -177,6 +179,33 @@ fun SchoolAdminScreen(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         OutlinedButton(onClick = { showScheduleStatusDialog = true }) {
+                            Text("Изменить")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // НОВОЕ (каникулы): дата начала каникул для отсчёта
+                    // «До каникул» на экране расписания.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "📅 Дата каникул",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                if (holidayDateIso.isBlank())
+                                    "Не задана админом — используется зашитая (${SchoolData.HOLIDAY_DATE_ISO})"
+                                else "Каникулы с $holidayDateIso",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (holidayDateIso.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        OutlinedButton(onClick = { showHolidayDateDialog = true }) {
                             Text("Изменить")
                         }
                     }
@@ -345,6 +374,17 @@ fun SchoolAdminScreen(
             onConfirm = { actual, untilDate ->
                 viewModel.setScheduleStatus(actual, untilDate)
                 showScheduleStatusDialog = false
+            }
+        )
+    }
+    // НОВОЕ (каникулы): дата начала каникул (ISO yyyy-MM-dd) или «-» для сброса.
+    if (showHolidayDateDialog) {
+        HolidayDateDialog(
+            initialDate = holidayDateIso,
+            onDismiss = { showHolidayDateDialog = false },
+            onConfirm = { isoDate ->
+                viewModel.setHolidayDate(isoDate)
+                showHolidayDateDialog = false
             }
         )
     }
@@ -634,6 +674,50 @@ private fun ScheduleStatusDialog(
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(actual, untilDate) }) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+/**
+ * НОВОЕ (каникулы): диалог даты начала каникул в ISO (yyyy-MM-dd). «-» или
+ * пустая строка — сброс к зашитой дате из SchoolData.HOLIDAY_DATE_ISO.
+ */
+@Composable
+private fun HolidayDateDialog(
+    initialDate: String,
+    onDismiss: () -> Unit,
+    onConfirm: (isoDate: String) -> Unit
+) {
+    var date by remember { mutableStateOf(initialDate) }
+    // Пустое поле при сбросе удобно предзаполнить текущей зашитой датой.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (date.isBlank()) date = SchoolData.HOLIDAY_DATE_ISO
+    }
+    val valid = date.isBlank() || date == "-" ||
+        runCatching { java.time.LocalDate.parse(date) }.isSuccess
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Дата каникул") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = date, onValueChange = { date = it },
+                    label = { Text("Дата начала каникул (ГГГГ-ММ-ДД)") },
+                    singleLine = true
+                )
+                Text(
+                    if (valid) "«-» — сбросить (использовать зашитую ${SchoolData.HOLIDAY_DATE_ISO})"
+                    else "Формат даты: ГГГГ-ММ-ДД, например 2026-10-26",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (valid) MaterialTheme.colorScheme.onSurfaceVariant else YodoError
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(if (date == "-") "" else date) }, enabled = valid) {
+                Text("Сохранить")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )

@@ -17,7 +17,7 @@
  *                      — только чтение
  *  - config/appSettings: {requireEmailVerification, schoolSectionHidden,
  *                      schoolScheduleActual, schoolScheduleUntilDate,
- *                      schoolScheduleUpdatedAt}
+ *                      schoolScheduleUpdatedAt, schoolHolidayDate}
  */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -148,6 +148,7 @@ const AUDIT_LABELS = {
   SCHOOL_QUESTION_ANSWERED: "Ответ на вопрос ученика",
   SCHOOL_QUESTION_HIDDEN: "Скрытие/показ вопроса",
   SCHOOL_SCHEDULE_STATUS_SET: "Пометка актуальности расписания",
+  SCHOOL_HOLIDAY_DATE_SET: "Дата каникул",
   SCHOOL_SECTION_VISIBILITY: "Видимость раздела «Школа»",
 };
 
@@ -284,6 +285,9 @@ function startSettings() {
     } else {
       $("schedule-updated-at").textContent = "Пометка ещё не ставилась.";
     }
+
+    // Дата каникул от админа (пустая строка — используется зашитая из сборки).
+    $("holiday-date").value = snap.get("schoolHolidayDate") || "";
   }, handleErr("Не удалось загрузить настройки"));
 
   $("toggle-school-hidden").addEventListener("change", async (e) => {
@@ -342,6 +346,34 @@ function startSettings() {
       );
     } catch (err) {
       handleErr("Не удалось сохранить пометку")(err);
+    }
+  });
+
+  // Дата каникул: ISO-строка yyyy-MM-dd или "" (сброс к зашитой из сборки).
+  $("form-holiday").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    let value = $("holiday-date").value.trim();
+    if (value === "-") value = "";
+    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      toast("Формат даты: ГГГГ-ММ-ДД, например 2026-10-26", false);
+      return;
+    }
+    if (value) {
+      const d = new Date(value + "T00:00:00");
+      if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+        toast("Такой даты не существует — проверьте ГГГГ-ММ-ДД", false);
+        return;
+      }
+    }
+    try {
+      await setDoc(settingsRef, { schoolHolidayDate: value }, { merge: true });
+      toast(value ? "Дата каникул сохранена: " + value : "Дата каникул сброшена");
+      logAdminAction(
+        "SCHOOL_HOLIDAY_DATE_SET",
+        value ? "каникулы с " + value : "сброшена (используется зашитая)"
+      );
+    } catch (err) {
+      handleErr("Не удалось сохранить дату каникул")(err);
     }
   });
 }

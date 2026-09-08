@@ -49,6 +49,16 @@ interface AppSettingsRepository {
 
     /** Поставить пометку. False — нет прав (не админ). */
     suspend fun setSchoolScheduleStatus(status: SchoolScheduleStatus): Boolean
+
+    /**
+     * Дата ближайших каникул в ISO (yyyy-MM-dd), выставляется админом.
+     * Пустая строка (или поле не задано) — админ не задавал дату, отсчёт
+     * «До каникул» использует зашитую в SchoolData.HOLIDAY_DATE_ISO.
+     */
+    fun observeHolidayDate(): Flow<String>
+
+    /** Задать дату каникул (ISO yyyy-MM-dd, "" — сбросить к зашитой). False — нет прав. */
+    suspend fun setHolidayDate(isoDate: String): Boolean
 }
 
 /** Статус актуальности расписания уроков (config/appSettings). */

@@ -60,6 +60,11 @@ class SchoolScheduleViewModel @Inject constructor(
     val scheduleStatus: StateFlow<app.yodo.messenger.domain.repository.SchoolScheduleStatus?> =
         appSettingsRepository.observeSchoolScheduleStatus()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // НОВОЕ (каникулы): дата от админа; пустая строка — не задана, тогда
+    // HolidaysCard использует зашитую SchoolData.HOLIDAY_DATE_ISO.
+    val holidayDateIso: StateFlow<String> = appSettingsRepository.observeHolidayDate()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 }
 
 /**
@@ -74,6 +79,8 @@ fun SchoolScheduleScreen(
     val context = LocalContext.current
     // НОВОЕ (пометка расписания): статус от админа (null — пометка не ставилась).
     val scheduleStatus by viewModel.scheduleStatus.collectAsState()
+    // НОВОЕ (каникулы): дата от админа (пустая — используем зашитую).
+    val holidayDateIso by viewModel.holidayDateIso.collectAsState()
 
     // НОВОЕ (живой статус уроков): минутный тикер, выровненный по границе
     // минуты, чтобы статус переключался ровно со звонком.
@@ -199,15 +206,19 @@ fun SchoolScheduleScreen(
                 }
             }
             item {
-                HolidaysCard()
+                HolidaysCard(holidayDateIso)
             }
         }
     }
 }
 
 @Composable
-private fun HolidaysCard() {
-    val holidayDate = runCatching { LocalDate.parse(SchoolData.HOLIDAY_DATE_ISO) }.getOrNull()
+private fun HolidaysCard(adminHolidayDateIso: String) {
+    // НОВОЕ (каникулы): приоритет — дата, заданная админом; пустая строка —
+    // fallback на зашитую (SchoolData.HOLIDAY_DATE_ISO).
+    val holidayDate = runCatching {
+        LocalDate.parse(adminHolidayDateIso.ifBlank { SchoolData.HOLIDAY_DATE_ISO })
+    }.getOrNull()
     Column(
         modifier = Modifier
             .fillMaxWidth()

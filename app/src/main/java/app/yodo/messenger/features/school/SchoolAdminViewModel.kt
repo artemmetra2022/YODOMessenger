@@ -53,6 +53,9 @@ class SchoolAdminViewModel @Inject constructor(
         appSettingsRepository.observeSchoolScheduleStatus()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val holidayDateIso: StateFlow<String> = appSettingsRepository.observeHolidayDate()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
@@ -79,6 +82,17 @@ class SchoolAdminViewModel @Inject constructor(
             ) {
                 _message.value = if (actual) "✅ Расписание отмечено актуальным"
                 else "⚠️ Расписание отмечено неактуальным"
+            } else {
+                _message.value = "Не хватает прав для изменения"
+            }
+        }
+    }
+
+    fun setHolidayDate(isoDate: String) {
+        viewModelScope.launch {
+            if (appSettingsRepository.setHolidayDate(isoDate)) {
+                _message.value = if (isoDate.isBlank()) "Дата каникул сброшена (используется зашитая)"
+                else "✅ Дата каникул: $isoDate"
             } else {
                 _message.value = "Не хватает прав для изменения"
             }
