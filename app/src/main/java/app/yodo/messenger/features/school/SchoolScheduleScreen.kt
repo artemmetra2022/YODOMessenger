@@ -23,8 +23,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,10 +40,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
@@ -69,6 +75,22 @@ fun SchoolScheduleScreen(
     // НОВОЕ (пометка расписания): статус от админа (null — пометка не ставилась).
     val scheduleStatus by viewModel.scheduleStatus.collectAsState()
 
+    // НОВОЕ (живой статус уроков): минутный тикер, выровненный по границе
+    // минуты, чтобы статус переключался ровно со звонком.
+    var nowMinutes by remember {
+        mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute })
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val ts = System.currentTimeMillis()
+            delay(60_000 - ts % 60_000 + 50)
+            nowMinutes = LocalTime.now().let { it.hour * 60 + it.minute }
+        }
+    }
+    val lessonStatus = remember(nowMinutes) {
+        currentLessonStatus(nowMinutes / 60, nowMinutes % 60)
+    }
+
     Scaffold(
         topBar = { SchoolTopBar("Расписание и звонки", onBackClick) },
         containerColor = Color.Transparent
@@ -78,6 +100,8 @@ fun SchoolScheduleScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // НОВОЕ (живой статус уроков): карточка «что сейчас в школе».
+            item { LessonStatusCard(lessonStatus) }
             item {
                 Column {
                     SchoolRowCard(
@@ -127,11 +151,28 @@ fun SchoolScheduleScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(10.dp))
-                    SchoolData.BELL_SCHEDULE.forEach { (name, time) ->
+                    SchoolData.BELL_SCHEDULE.forEachIndexed { index, (name, time) ->
+                        // НОВОЕ (живой статус уроков): текущий урок подсвечен,
+                        // следующий на перемене помечен «скоро».
+                        val isCurrent = lessonStatus is LessonStatus.InLesson &&
+                                lessonStatus.number == index + 1
+                        val isNext = lessonStatus is LessonStatus.Break &&
+                                lessonStatus.beforeLesson == index + 1
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 6.dp),
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    when {
+                                        isCurrent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                        isNext -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .padding(
+                                    horizontal = if (isCurrent || isNext) 8.dp else 0.dp,
+                                    vertical = 6.dp
+                                ),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Filled.Schedule, contentDescription = null,
@@ -139,10 +180,20 @@ fun SchoolScheduleScreen(
                                 modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(name, style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                                 modifier = Modifier.weight(1f))
                             Text(time, style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.primary)
+                            if (isCurrent || isNext) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    if (isCurrent) "сейчас" else "скоро",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.tertiary
+                                )
+                            }
                         }
                     }
                 }
@@ -201,5 +252,66 @@ private fun HolidaysCard() {
                 )
             }
         }
+    }
+}
+
+/**
+ * НОВОЕ (живой статус уроков): карточка «что сейчас в школе» — идёт урок,
+ * перемена, до начала занятий или после их окончания. Обновляется тикером из
+ * SchoolScheduleScreen раз в минуту.
+ */
+@Composable
+private fun LessonStatusCard(status: LessonStatus) {
+    val (title, subtitle, tint) = when (status) {
+        is LessonStatus.InLesson -> Triple(
+            "🟢 Сейчас идёт урок ${status.number}",
+            "До звонка ${status.minutesLeft} ${pluralRu(status.minutesLeft, "минута", "минуты", "минут")}",
+            MaterialTheme.colorScheme.primary
+        )
+        is LessonStatus.Break -> Triple(
+            "🟡 Перемена",
+            "Урок ${status.beforeLesson} начнётся через ${status.minutesLeft} " +
+                pluralRu(status.minutesLeft, "минуту", "минуты", "минут"),
+            MaterialTheme.colorScheme.tertiary
+        )
+        is LessonStatus.BeforeSchool -> Triple(
+            "⏰ Уроки ещё не начались",
+            "Первый звонок через ${status.minutesLeft} " +
+                pluralRu(status.minutesLeft, "минуту", "минуты", "минут"),
+            MaterialTheme.colorScheme.tertiary
+        )
+        LessonStatus.AfterSchool -> Triple(
+            "🎉 Уроки закончились",
+            "Отдыхайте!",
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp)
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = tint
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(subtitle, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/** Русская плюрализация минут для живого статуса уроков. */
+private fun pluralRu(n: Int, one: String, few: String, many: String): String {
+    val mod100 = n % 100
+    val mod10 = n % 10
+    return when {
+        mod100 in 11..14 -> many
+        mod10 == 1 -> one
+        mod10 in 2..4 -> few
+        else -> many
     }
 }

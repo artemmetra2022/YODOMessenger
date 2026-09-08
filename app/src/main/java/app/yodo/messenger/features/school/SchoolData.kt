@@ -138,6 +138,53 @@ object SchoolData {
         "6 Урок" to "13:35 - 14:20",
         "7 Урок" to "14:30 - 15:15"
     )
+
+    /**
+     * НОВОЕ (живой статус уроков): разбор строки "ЧЧ:ММ - ЧЧ:ММ" из
+     * BELL_SCHEDULE в минуты от начала дня. Null — строка не распарсилась.
+     */
+    fun parseBellRange(time: String): Pair<Int, Int>? {
+        val m = Regex("(\\d{1,2}):(\\d{2})\\s*-\\s*(\\d{1,2}):(\\d{2})").find(time) ?: return null
+        val (sh, sm, eh, em) = m.destructured
+        val start = sh.toInt() * 60 + sm.toInt()
+        val end = eh.toInt() * 60 + em.toInt()
+        return if (end > start) start to end else null
+    }
+}
+
+/** Текущее состояние школьного дня для живого статуса уроков. */
+sealed class LessonStatus {
+    /** Урок number идёт, до звонка minutes минут. */
+    data class InLesson(val number: Int, val minutesLeft: Int) : LessonStatus()
+    /** Перемена перед уроком number, до звонка minutes минут. */
+    data class Break(val beforeLesson: Int, val minutesLeft: Int) : LessonStatus()
+    /** Уроки ещё не начались, первый звонок через minutes минут. */
+    data class BeforeSchool(val minutesLeft: Int) : LessonStatus()
+    /** Все уроки закончились. */
+    object AfterSchool : LessonStatus()
+}
+
+/**
+ * НОВОЕ (живой статус уроков): вычисляет состояние школьного дня по
+ * BELL_SCHEDULE и текущему времени. Расчёт чистый (без побочных эффектов),
+ * чтобы вызывать из Compose-таймера каждую минуту.
+ */
+fun currentLessonStatus(hour: Int, minute: Int): LessonStatus {
+    val now = hour * 60 + minute
+    SchoolData.BELL_SCHEDULE.forEachIndexed { index, (_, time) ->
+        val range = SchoolData.parseBellRange(time) ?: return@forEachIndexed
+        when {
+            now < range.first -> {
+                // До начала этого урока: перемена (если не первый) или до школы.
+                val minutesLeft = range.first - now
+                return if (index == 0) LessonStatus.BeforeSchool(minutesLeft)
+                else LessonStatus.Break(index + 1, minutesLeft)
+            }
+            now < range.second ->
+                return LessonStatus.InLesson(index + 1, range.second - now)
+        }
+    }
+    return LessonStatus.AfterSchool
 }
 
 data class QuizQuestion(
