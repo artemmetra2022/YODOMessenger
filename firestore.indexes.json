@@ -95,6 +95,14 @@
         { "fieldPath": "topicId", "order": "ASCENDING" },
         { "fieldPath": "timestamp", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "schoolNews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pinned", "order": "DESCENDING" },
+        { "fieldPath": "pubDate", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

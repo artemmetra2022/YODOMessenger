@@ -1,0 +1,257 @@
+/* YODO Admin — панель раздела «Школа». Палитра как у веб-версии мессенджера
+   (styles.css), но стили самостоятельные: главный CSS держит layout чата
+   (overflow: hidden и т.п.), несовместимый со скроллящейся панелью. */
+
+:root {
+  --bg: #0f1419;
+  --bg-panel: #17212b;
+  --bg-panel-2: #1d2733;
+  --bg-input: #242f3d;
+  --accent: #4aa3ff;
+  --accent-dark: #2b7fd4;
+  --text: #e9eef3;
+  --text-dim: #7d8b99;
+  --danger: #e7515a;
+  --ok: #3fbf6f;
+  --warn: #e8b13f;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.hidden { display: none !important; }
+
+button { font-family: inherit; }
+input, textarea, select {
+  font-family: inherit;
+  background: var(--bg-input);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: vertical; }
+input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--accent); }
+
+/* ===== Логин / доступ запрещён ===== */
+
+.auth-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.auth-card {
+  width: min(380px, 92vw);
+  background: var(--bg-panel);
+  border-radius: 16px;
+  padding: 36px 28px;
+  text-align: center;
+}
+
+.auth-logo { font-size: 42px; font-weight: 800; letter-spacing: 4px; color: var(--accent); }
+.auth-subtitle { color: var(--text-dim); margin: 6px 0 24px; font-size: 15px; }
+.auth-card form { display: flex; flex-direction: column; gap: 12px; }
+.auth-error { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 16px; }
+.auth-hint { color: var(--text-dim); font-size: 13px; margin-top: 16px; }
+.auth-back { display: block; margin-top: 18px; color: var(--accent); text-decoration: none; font-size: 14px; }
+
+/* ===== Каркас панели ===== */
+
+.admin-wrap { display: flex; min-height: 100vh; }
+
+.admin-sidebar {
+  width: 230px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 12px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.admin-brand { font-size: 22px; font-weight: 800; letter-spacing: 2px; padding: 0 12px 18px; }
+.admin-brand span { color: var(--accent); font-size: 14px; letter-spacing: 0; }
+
+.admin-nav { display: flex; flex-direction: column; gap: 4px; }
+
+.nav-btn {
+  background: none;
+  border: none;
+  border-radius: 10px;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 11px 12px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.nav-btn:hover { background: var(--bg-panel-2); color: var(--text); }
+.nav-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+.admin-sidebar-footer { margin-top: auto; padding: 12px 12px 0; border-top: 1px solid var(--bg-panel-2); }
+.admin-email { color: var(--text-dim); font-size: 12px; word-break: break-all; margin-bottom: 6px; }
+
+.admin-content { flex: 1; padding: 28px 32px 60px; max-width: 860px; }
+
+.admin-section { display: none; }
+.admin-section.active { display: block; }
+
+h1 { font-size: 24px; margin-bottom: 20px; }
+
+/* ===== Карточки и формы ===== */
+
+.card {
+  background: var(--bg-panel);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.card h2 { font-size: 16px; margin-bottom: 10px; }
+.card-hint { color: var(--text-dim); font-size: 13px; margin-bottom: 12px; }
+
+.form-col { display: flex; flex-direction: column; gap: 10px; }
+.form-col input, .form-col textarea { width: 100%; }
+.form-row { display: flex; flex-direction: column; gap: 10px; }
+
+.toggle-row { display: flex; align-items: center; gap: 10px; font-size: 15px; cursor: pointer; }
+.radio-row { display: flex; align-items: center; gap: 8px; font-size: 15px; cursor: pointer; }
+
+/* ===== Списки записей ===== */
+
+.item-list { display: flex; flex-direction: column; gap: 10px; }
+
+.item {
+  background: var(--bg-panel-2);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.item-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.item-title { font-weight: 600; font-size: 15px; word-break: break-word; }
+.item-date { color: var(--text-dim); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.item-text { margin-top: 6px; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+.item-sub { color: var(--text-dim); font-size: 13px; margin-top: 4px; word-break: break-word; }
+
+.item-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 11px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:hover { background: var(--accent-dark); }
+.btn-primary:disabled { opacity: 0.5; cursor: default; }
+
+.btn-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-secondary:hover { background: var(--bg-input); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-danger:hover { background: var(--danger); color: #fff; }
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: underline;
+  padding: 0;
+}
+.btn-link:hover { color: var(--accent); }
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.badge-green { background: rgba(63, 191, 111, 0.15); color: var(--ok); }
+.badge-yellow { background: rgba(232, 177, 63, 0.15); color: var(--warn); }
+.badge-blue { background: rgba(74, 163, 255, 0.15); color: var(--accent); }
+.badge-dim { background: var(--bg-input); color: var(--text-dim); }
+
+/* Результаты опроса */
+.poll-option { margin-top: 8px; }
+.poll-option-label { display: flex; justify-content: space-between; font-size: 14px; }
+.poll-bar-bg { height: 8px; background: var(--bg-input); border-radius: 4px; margin-top: 4px; overflow: hidden; }
+.poll-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+
+/* Вопросы учителя */
+.question-answer { margin-top: 8px; padding: 10px 12px; background: var(--bg-input); border-radius: 10px; font-size: 14px; }
+.question-answer .item-sub { margin-top: 2px; }
+.answer-form { display: flex; gap: 8px; margin-top: 8px; }
+.answer-form input { flex: 1; }
+
+/* ===== Тосты ===== */
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 20px;
+  font-size: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  max-width: 90vw;
+}
+.toast.ok { border-left: 3px solid var(--ok); }
+.toast.err { border-left: 3px solid var(--danger); }
+
+.empty-note { color: var(--text-dim); font-size: 14px; }
+
+/* ===== Мобильная версия ===== */
+
+@media (max-width: 720px) {
+  .admin-wrap { flex-direction: column; }
+  .admin-sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    padding: 12px;
+  }
+  .admin-nav { flex-direction: row; overflow-x: auto; }
+  .nav-btn { white-space: nowrap; }
+  .admin-sidebar-footer { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; border-top: none; padding-top: 4px; }
+  .admin-content { padding: 16px 14px 40px; }
+  .item-date { margin-left: 0; width: 100%; }
+}

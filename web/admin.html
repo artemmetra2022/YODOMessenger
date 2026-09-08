@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YODO Admin — Школа</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+  <!-- ЭКРАН: Логин -->
+  <div id="screen-login" class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Админ-панель · Раздел «Школа»</div>
+      <form id="form-login">
+        <input type="email" id="login-email" placeholder="Email администратора" autocomplete="username">
+        <input type="password" id="login-password" placeholder="Пароль" autocomplete="current-password">
+        <button type="submit" class="btn-primary">Войти</button>
+      </form>
+      <div class="auth-error" id="login-error"></div>
+      <p class="auth-hint">Вход только для аккаунтов администраторов.</p>
+      <a class="auth-back" href="index.html">← К мессенджеру</a>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: нет доступа -->
+  <div id="screen-denied" class="auth-wrap hidden">
+    <div class="auth-card">
+      <div class="auth-logo">YODO</div>
+      <div class="auth-subtitle">Доступ запрещён</div>
+      <p class="auth-hint">Этот аккаунт не является администратором.</p>
+      <button type="button" class="btn-primary" id="btn-denied-logout">Выйти</button>
+      <a class="auth-back" href="index.html">← К мессенджеру</a>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: Панель -->
+  <div id="screen-admin" class="admin-wrap hidden">
+    <aside class="admin-sidebar">
+      <div class="admin-brand">YODO <span>Admin</span></div>
+      <nav class="admin-nav">
+        <button class="nav-btn active" data-section="settings">⚙️ Настройки</button>
+        <button class="nav-btn" data-section="news">📰 Новости</button>
+        <button class="nav-btn" data-section="polls">📊 Опросы</button>
+        <button class="nav-btn" data-section="teachers">👩‍🏫 Учителя</button>
+        <button class="nav-btn" data-section="ideas">💡 Идеи</button>
+        <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
+      </nav>
+      <div class="admin-sidebar-footer">
+        <div id="admin-email" class="admin-email"></div>
+        <button type="button" class="btn-link" id="btn-logout">Выйти</button>
+      </div>
+    </aside>
+
+    <main class="admin-content">
+
+      <!-- СЕКЦИЯ: Настройки -->
+      <section id="section-settings" class="admin-section active">
+        <h1>Настройки</h1>
+
+        <div class="card">
+          <h2>Раздел «Школа»</h2>
+          <p class="card-hint">Скрытие действует глобально для всех пользователей (кроме админов).</p>
+          <label class="toggle-row">
+            <input type="checkbox" id="toggle-school-hidden">
+            <span>Скрыть раздел «Школа» у всех пользователей</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <h2>Пометка актуальности расписания</h2>
+          <p class="card-hint">Показывается на экране «Расписание и звонки» в приложении.</p>
+          <form id="form-schedule" class="form-row">
+            <label class="radio-row"><input type="radio" name="schedule-actual" value="true" checked> ✅ Актуально</label>
+            <label class="radio-row"><input type="radio" name="schedule-actual" value="false"> ⚠️ Может быть неактуальным</label>
+            <input type="text" id="schedule-until" placeholder="Дата, например 15.09.2026 (необязательно)">
+            <button type="submit" class="btn-primary">Сохранить пометку</button>
+          </form>
+          <p class="card-hint" id="schedule-updated-at"></p>
+        </div>
+
+        <div class="card">
+          <h2>Безопасность входа</h2>
+          <label class="toggle-row">
+            <input type="checkbox" id="toggle-require-email-verification">
+            <span>Требовать подтверждение email при входе (для всех новых входов)</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Новости -->
+      <section id="section-news" class="admin-section">
+        <h1>Новости</h1>
+
+        <div class="card">
+          <h2>Новая новость</h2>
+          <p class="card-hint">После публикации push-уведомление подписчикам отправит воркер (в течение ~5 минут).</p>
+          <form id="form-add-news" class="form-col">
+            <input type="text" id="news-sender" placeholder="Отправитель (например, Администрация)" required>
+            <textarea id="news-text" rows="4" placeholder="Текст новости" required></textarea>
+            <input type="text" id="news-event-date" placeholder="Дата события (необязательно, например 12.09)">
+            <button type="submit" class="btn-primary">Опубликовать</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Опубликованные</h2>
+          <div id="news-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Опросы -->
+      <section id="section-polls" class="admin-section">
+        <h1>Опросы</h1>
+
+        <div class="card">
+          <h2>Новый опрос</h2>
+          <p class="card-hint">После создания push-уведомление отправит воркер. Один голос на пользователя.</p>
+          <form id="form-add-poll" class="form-col">
+            <input type="text" id="poll-question" placeholder="Вопрос" required>
+            <textarea id="poll-options" rows="4" placeholder="Варианты ответа — по одному в строке (минимум два)" required></textarea>
+            <button type="submit" class="btn-primary">Создать опрос</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Активные опросы</h2>
+          <div id="polls-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Учителя -->
+      <section id="section-teachers" class="admin-section">
+        <h1>Учителя</h1>
+
+        <div class="card">
+          <h2>Создать профиль учителя</h2>
+          <form id="form-add-teacher" class="form-row">
+            <input type="text" id="teacher-name" placeholder="Имя учителя (например, Егорова С.В.)" required>
+            <input type="text" id="teacher-subject" placeholder="Предмет (необязательно)">
+            <button type="submit" class="btn-primary">Создать</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Профили и привязки</h2>
+          <p class="card-hint">Привязка даёт учителю доступ к «Моей странице учителя»: файл урока и ответы на вопросы.</p>
+          <div id="teachers-list" class="item-list"></div>
+        </div>
+
+        <div class="card hidden" id="questions-card">
+          <h2>Вопросы: <span id="questions-teacher-name"></span></h2>
+          <p class="card-hint">Ответ виден ученикам на странице учителя. Скрытие убирает вопрос с страницы.</p>
+          <button type="button" class="btn-link" id="btn-close-questions">← Закрыть вопросы</button>
+          <div id="questions-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Идеи -->
+      <section id="section-ideas" class="admin-section">
+        <h1>Идеи</h1>
+        <div class="card">
+          <p class="card-hint">Предложения учеников из «Оценка и идеи». Удаление запрещено правилами безопасности — идеи только читаются.</p>
+          <div id="ideas-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Отзывы -->
+      <section id="section-reviews" class="admin-section">
+        <h1>Отзывы</h1>
+        <div class="card">
+          <p class="card-hint">Оценки раздела (1–5 звёзд). Только просмотр — удалять отзывы нельзя.</p>
+          <div id="reviews-list" class="item-list"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="admin.js"></script>
+</body>
+</html>
