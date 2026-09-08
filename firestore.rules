@@ -249,20 +249,49 @@ service cloud.firestore {
       match /questions/{questionId} {
         allow read: if isSignedIn();
         // Задать вопрос может любой авторизованный — но только от своего имени
-        // и со стартовым состоянием hidden=false.
+        // и в стартовом состоянии: скрытый=false, БЕЗ ответа (подделать ответ
+        // учителя при создании нельзя), notified=false (флаг очереди push-
+        // воркера). Отсутствие полей у старых версий клиента допускается —
+        // главное, чтобы они не содержали непустых значений.
         allow create: if isSignedIn() &&
           request.resource.data.fromUid == request.auth.uid &&
-          request.resource.data.hidden == false;
-        // Скрыть/показать вопрос — только привязанный учитель или админ,
-        // и меняется только поле hidden.
+          request.resource.data.hidden == false &&
+          (!('answer' in request.resource.data) || request.resource.data.answer == '') &&
+          (!('notified' in request.resource.data) || request.resource.data.notified == false);
+        // Изменить вопрос может только привязанный учитель или админ — и ровно
+        // одним из двух способов: скрыть/показать (hidden) или ответить/
+        // отредактировать ответ (answer + answeredAt). Ученик не может ни
+        // скрыть чужой вопрос, ни написать ответ за учителя.
         allow update: if isSignedIn() &&
           (
             isOfficialChannelAdmin() ||
             get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
               == request.auth.uid
           ) &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden']);
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden']) ||
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['answer', 'answeredAt'])
+          );
         allow delete: if false;
+      }
+
+      // НОВОЕ (push подписчикам): подколлекция fileNotifications — события
+      // «файл урока обновлён» для push-воркера (запись создаёт клиент в
+      // SchoolRepositoryImpl.setTeacherFile, воркер вычитывает через
+      // collectionGroup и помечает notified=true через Admin SDK). С клиента
+      // разрешено только создание записи с notified=false — и только
+      // привязанному учителю или админу. Чтение с клиента не нужно.
+      match /fileNotifications/{notifId} {
+        allow read: if false;
+        allow create: if isSignedIn() &&
+          (
+            isOfficialChannelAdmin() ||
+            get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
+              == request.auth.uid
+          ) &&
+          request.resource.data.notified == false;
+        allow update, delete: if false;
       }
     }
 

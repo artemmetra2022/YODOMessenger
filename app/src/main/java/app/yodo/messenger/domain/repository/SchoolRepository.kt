@@ -75,6 +75,9 @@ interface SchoolRepository {
     /** Задать вопрос учителю (как /ask в боте). */
     suspend fun askTeacherQuestion(teacherName: String, question: SchoolTeacherQuestion): Result<Unit>
 
+    /** Ответить на вопрос / изменить ответ — привязанный учитель или админ. */
+    suspend fun answerTeacherQuestion(teacherName: String, questionId: String, answer: String): Result<Unit>
+
     /** Скрыть/показать вопрос — владелец страницы или админ. */
     suspend fun setTeacherQuestionHidden(teacherName: String, questionId: String, hidden: Boolean): Result<Unit>
 }

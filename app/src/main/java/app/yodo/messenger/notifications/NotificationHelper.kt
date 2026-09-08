@@ -32,6 +32,11 @@ object NotificationHelper {
     // такие уведомления всегда со звуком, так как они важны и редки.
     const val CHANNEL_ID_MODERATION = "yodo_moderation"
 
+    // НОВОЕ (раздел «Школа»): канал событий школьного раздела — новый вопрос
+    // учителю, обновление файла урока. Пользователь может отдельно отключить
+    // его в системных настройках приложения.
+    const val CHANNEL_ID_SCHOOL = "yodo_school"
+
     // Старые каналы (для миграции — удаляем, чтобы не засорять настройки приложения).
     private const val LEGACY_CHANNEL_ID_MESSAGES_SOUND = "yodo_messages_sound"
     private const val LEGACY_CHANNEL_ID_MESSAGES_SILENT = "yodo_messages_silent"
@@ -99,6 +104,18 @@ object NotificationHelper {
             enableVibration(true)
         }
         manager.createNotificationChannel(moderation)
+
+        // НОВОЕ (раздел «Школа»): канал событий школьного раздела (вопросы
+        // учителю, обновления файла урока) — пользователь может отключить его
+        // отдельно от сообщений в системных настройках.
+        val school = NotificationChannel(
+            CHANNEL_ID_SCHOOL,
+            "Школа",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Вопросы учеников и обновления файлов уроков"
+        }
+        manager.createNotificationChannel(school)
     }
 
     // Канал выбирается по обоим флагам сразу — так тумблеры "звук" и "вибрация" работают
@@ -329,6 +346,37 @@ object NotificationHelper {
     // Фиксированный ID — уведомления о модерации не группируются по чату, как
     // сообщения (там ID = chatId.hashCode()), поэтому используем отдельную константу.
     private const val MODERATION_NOTIFICATION_ID = -1001
+
+    // НОВОЕ (раздел «Школа»): уведомление о событиях школьного раздела —
+    // новый вопрос учителю или обновление файла урока (см.
+    // YodoFirebaseMessagingService — ветка data.type == "school"). Как и
+    // модерация, без диплинка: тап просто открывает приложение. ID — хэш от
+    // заголовка, чтобы разные события не затирали друг друга.
+    fun showSchoolNotification(context: Context, title: String, body: String) {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val requestCode = title.hashCode()
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID_SCHOOL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+
+        runCatching {
+            NotificationManagerCompat.from(context).notify(requestCode, builder.build())
+        }
+    }
 
     const val EXTRA_CHAT_ID = "extra_chat_id"
 }

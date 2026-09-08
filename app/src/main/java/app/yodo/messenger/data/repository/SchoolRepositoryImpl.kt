@@ -350,7 +350,8 @@ class SchoolRepositoryImpl @Inject constructor(
 
     override suspend fun setTeacherFile(teacherName: String, fileUrl: String, fileNote: String): Result<Unit> =
         runCatching {
-            teacherDoc(teacherName).set(
+            val teacherRef = teacherDoc(teacherName)
+            teacherRef.set(
                 mapOf(
                     "fileUrl" to fileUrl,
                     "fileNote" to fileNote,
@@ -358,6 +359,21 @@ class SchoolRepositoryImpl @Inject constructor(
                 ),
                 SetOptions.merge()
             ).await()
+            // НОВОЕ (push подписчикам): событие для push-воркера — снимок
+            // подписчиков на момент обновления. Пишется только если файл
+            // реально меняется (не только описание), чтобы не дублировать пуши.
+            val snap = teacherRef.get().await()
+            val subscribers = (snap.get("subscribers") as? List<*>).orEmpty().filterIsInstance<String>()
+            if (subscribers.isNotEmpty()) {
+                teacherRef.collection("fileNotifications").add(
+                    mapOf(
+                        "subscribers" to subscribers,
+                        "fileNote" to fileNote,
+                        "createdAt" to System.currentTimeMillis(),
+                        "notified" to false
+                    )
+                ).await()
+            }
             Unit
         }.onFailure { Log.w(TAG, "setTeacherFile: ${it.message}") }
 
@@ -378,11 +394,31 @@ class SchoolRepositoryImpl @Inject constructor(
                     "fromName" to question.fromName,
                     "text" to question.text,
                     "hidden" to false,
-                    FIELD_CREATED_AT to System.currentTimeMillis()
+                    "answer" to "",
+                    "answeredAt" to 0L,
+                    FIELD_CREATED_AT to System.currentTimeMillis(),
+                    // НОВОЕ (push учителю): воркер push-worker/index.js вычитывает
+                    // вопросы через collectionGroup("questions") и отправляет
+                    // учителю уведомление по флагу notified ниже.
+                    "notified" to false
                 )
             ).await()
             Unit
         }.onFailure { Log.w(TAG, "askTeacherQuestion: ${it.message}") }
+
+    override suspend fun answerTeacherQuestion(teacherName: String, questionId: String, answer: String): Result<Unit> =
+        runCatching {
+            if (answer.isBlank()) throw IllegalArgumentException("Ответ не может быть пустым")
+            teacherDoc(teacherName).collection("questions").document(questionId)
+                .set(
+                    mapOf(
+                        "answer" to answer.trim(),
+                        "answeredAt" to System.currentTimeMillis()
+                    ),
+                    SetOptions.merge()
+                ).await()
+            Unit
+        }.onFailure { Log.w(TAG, "answerTeacherQuestion: ${it.message}") }
 
     override suspend fun setTeacherQuestionHidden(
         teacherName: String,
@@ -475,10 +511,12 @@ private data class SchoolTeacherQuestionFirestore(
     val fromName: String = "",
     val text: String = "",
     val hidden: Boolean = false,
+    val answer: String = "",
+    val answeredAt: Long = 0L,
     val createdAt: Long = 0L
 ) {
     fun toDomain(id: String) = SchoolTeacherQuestion(
         id = id, fromUid = fromUid, fromName = fromName, text = text,
-        hidden = hidden, createdAt = createdAt
+        hidden = hidden, answer = answer, answeredAt = answeredAt, createdAt = createdAt
     )
 }

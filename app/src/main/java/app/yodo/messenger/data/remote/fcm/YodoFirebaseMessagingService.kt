@@ -21,6 +21,9 @@ import javax.inject.Inject
  * (глобальный бан/разбан); намеренно не проверяет mute/quiet hours/snooze —
  * это редкое и важное системное уведомление, которое не должно теряться
  * из-за пользовательских настроек тишины для обычных сообщений.
+ * data: { type: "school", title, body } — события школьного раздела
+ * (новый вопрос учителю, обновление файла урока); показываются как простое
+ * уведомление (см. NotificationHelper.showSchoolNotification).
  */
 @AndroidEntryPoint
 class YodoFirebaseMessagingService : FirebaseMessagingService() {
@@ -54,6 +57,20 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
             val title = message.data["title"] ?: "Yodo Messenger"
             val body = message.data["body"] ?: ""
             app.yodo.messenger.notifications.NotificationHelper.showModerationNotification(
+                context = applicationContext,
+                title = title,
+                body = body
+            )
+            return
+        }
+
+        // НОВОЕ (раздел «Школа»): события школьного раздела — новый вопрос
+        // учителю или обновление файла урока. Тот же формат title/body, что и
+        // у модерации, но отдельный канал уведомлений.
+        if (message.data["type"] == "school") {
+            val title = message.data["title"] ?: "Школа"
+            val body = message.data["body"] ?: ""
+            app.yodo.messenger.notifications.NotificationHelper.showSchoolNotification(
                 context = applicationContext,
                 title = title,
                 body = body

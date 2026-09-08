@@ -215,6 +215,152 @@ async function sendModerationNotifications(db, messaging) {
   console.log(`Модерация: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
 }
 
+// НОВОЕ (раздел «Школа», push учителю): очередь новых вопросов учеников.
+// Клиент пишет вопрос в schoolTeacherProfiles/{имя}/questions с notified=false
+// (см. SchoolRepositoryImpl.askTeacherQuestion); воркер находит такие вопросы
+// через collectionGroup, берёт linkedUserId профиля учителя из родительского
+// документа и отправляет учителю уведомление с type=school.
+// collectionGroup("questions") безопасен: подколлекция с таким именем есть
+// только у учительских страниц.
+async function sendTeacherQuestionNotifications(db, messaging) {
+  console.log("Ищу новые вопросы учеников для учителей...");
+
+  const pendingSnapshot = await db
+    .collectionGroup("questions")
+    .where("notified", "==", false)
+    .limit(200)
+    .get();
+
+  if (pendingSnapshot.empty) {
+    console.log("Нет новых вопросов для учителей.");
+    return;
+  }
+
+  console.log(`Найдено вопросов: ${pendingSnapshot.size}`);
+
+  const batch = db.batch();
+  let sentCount = 0;
+  let errorCount = 0;
+
+  for (const questionDoc of pendingSnapshot.docs) {
+    try {
+      // .../schoolTeacherProfiles/{имя учителя}/questions/{id}
+      const teacherDocRef = questionDoc.ref.parent.parent;
+      const teacherName = teacherDocRef ? teacherDocRef.id : "";
+      if (!teacherName) {
+        batch.update(questionDoc.ref, { notified: true });
+        continue;
+      }
+
+      const teacherDoc = await teacherDocRef.get();
+      const teacherData = teacherDoc.exists ? teacherDoc.data() : null;
+      const teacherUid = teacherData && teacherData.linkedUserId;
+      if (!teacherUid) {
+        // Профиль не привязан к аккаунту — уведомлять некого.
+        batch.update(questionDoc.ref, { notified: true });
+        continue;
+      }
+
+      const question = questionDoc.data();
+      const userDoc = await db.collection("users").doc(teacherUid).get();
+      const token = userDoc.exists ? userDoc.data().fcmToken : null;
+      if (token) {
+        const response = await messaging.sendEachForMulticast({
+          tokens: [token],
+          data: {
+            type: "school",
+            title: `Вопрос ученика · ${teacherName}`,
+            body: (question.text || "").substring(0, 200),
+          },
+          android: { priority: "high" },
+        });
+        sentCount += response.successCount;
+        errorCount += response.failureCount;
+      }
+
+      batch.update(questionDoc.ref, { notified: true });
+    } catch (err) {
+      console.error(`Ошибка обработки вопроса ${questionDoc.id}:`, err.message);
+      batch.update(questionDoc.ref, { notified: true });
+      errorCount++;
+    }
+  }
+
+  await batch.commit();
+  console.log(`Вопросы учителям: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
+}
+
+// НОВОЕ (раздел «Школа», push подписчикам): очередь обновлений файла урока.
+// Когда привязанный учитель обновляет файл урока, клиент пишет в подколлекцию
+// schoolTeacherProfiles/{имя}/fileNotifications документ {notified: false,
+// subscribers: [...uid]} (см. SchoolRepositoryImpl.setTeacherFile) — воркер
+// рассылает уведомление каждому подписчику с type=school.
+async function sendLessonFileNotifications(db, messaging) {
+  console.log("Ищу обновления файлов уроков...");
+
+  const pendingSnapshot = await db
+    .collectionGroup("fileNotifications")
+    .where("notified", "==", false)
+    .limit(200)
+    .get();
+
+  if (pendingSnapshot.empty) {
+    console.log("Нет обновлений файлов уроков.");
+    return;
+  }
+
+  console.log(`Найдено обновлений файла урока: ${pendingSnapshot.size}`);
+
+  const batch = db.batch();
+  let sentCount = 0;
+  let errorCount = 0;
+
+  for (const notifDoc of pendingSnapshot.docs) {
+    try {
+      const notif = notifDoc.data();
+      const teacherDocRef = notifDoc.ref.parent.parent; // профиль учителя
+      const teacherName = teacherDocRef ? teacherDocRef.id : "";
+      const subscribers = Array.isArray(notif.subscribers) ? notif.subscribers : [];
+      if (!teacherName || subscribers.length === 0) {
+        batch.update(notifDoc.ref, { notified: true });
+        continue;
+      }
+
+      const tokens = [];
+      for (const uid of subscribers) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        const token = userDoc.exists ? userDoc.data().fcmToken : null;
+        if (token) tokens.push(token);
+      }
+
+      if (tokens.length > 0) {
+        const response = await messaging.sendEachForMulticast({
+          tokens,
+          data: {
+            type: "school",
+            title: `Файл урока обновлён · ${teacherName}`,
+            body: notif.fileNote
+              ? `${notif.fileNote} — откройте страницу учителя, чтобы скачать`
+              : "Откройте страницу учителя, чтобы посмотреть файл",
+          },
+          android: { priority: "high" },
+        });
+        sentCount += response.successCount;
+        errorCount += response.failureCount;
+      }
+
+      batch.update(notifDoc.ref, { notified: true });
+    } catch (err) {
+      console.error(`Ошибка обработки обновления файла ${notifDoc.id}:`, err.message);
+      batch.update(notifDoc.ref, { notified: true });
+      errorCount++;
+    }
+  }
+
+  await batch.commit();
+  console.log(`Файлы уроков: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
+}
+
 async function main() {
   initFirebase();
   const db = getFirestore();
@@ -222,6 +368,8 @@ async function main() {
 
   await sendChatMessageNotifications(db, messaging);
   await sendModerationNotifications(db, messaging);
+  await sendTeacherQuestionNotifications(db, messaging);
+  await sendLessonFileNotifications(db, messaging);
 }
 
 main()

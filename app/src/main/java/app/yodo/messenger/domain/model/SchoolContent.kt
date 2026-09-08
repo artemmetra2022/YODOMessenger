@@ -79,5 +79,10 @@ data class SchoolTeacherQuestion(
     val fromName: String = "",
     val text: String = "",
     val hidden: Boolean = false,
+    /** Ответ учителя ("" = ещё не отвечен). */
+    val answer: String = "",
+    val answeredAt: Long = 0L,
     val createdAt: Long = 0L
-)
+) {
+    val answered: Boolean get() = answer.isNotBlank()
+}

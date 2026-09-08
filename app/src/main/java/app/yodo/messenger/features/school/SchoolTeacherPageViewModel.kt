@@ -85,6 +85,10 @@ class SchoolTeacherPageViewModel @Inject constructor(
     val amSubscribed: Boolean
         get() = myUid != null && profile.value?.subscribers?.get(myUid) == true
 
+    /** Сколько вопросов ещё ждут ответа (видно владельцу страницы). */
+    val unansweredCount: Int
+        get() = if (isOwner) questions.value.count { !it.answered && !it.hidden } else 0
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
@@ -135,6 +139,16 @@ class SchoolTeacherPageViewModel @Inject constructor(
                     _message.value = if (hidden) "Вопрос скрыт со страницы" else "Вопрос снова виден"
                 }
                 .onFailure { _message.value = it.message ?: "Не удалось изменить вопрос" }
+        }
+    }
+
+    fun answerQuestion(questionId: String, answer: String) {
+        if (answer.isBlank()) return
+        val name = profile.value?.name ?: return
+        viewModelScope.launch {
+            schoolRepository.answerTeacherQuestion(name, questionId, answer.trim())
+                .onSuccess { _message.value = "✅ Ответ опубликован" }
+                .onFailure { _message.value = it.message ?: "Не удалось опубликовать ответ" }
         }
     }
 }

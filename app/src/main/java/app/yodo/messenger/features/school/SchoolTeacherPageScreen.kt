@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.yodo.messenger.domain.model.SchoolTeacherQuestion
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,6 +71,7 @@ fun SchoolTeacherPageScreen(
 
     var showSetFileDialog by remember { mutableStateOf(false) }
     var showAskDialog by remember { mutableStateOf(false) }
+    var showAnswerDialogFor by remember { mutableStateOf<SchoolTeacherQuestion?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(message) {
@@ -245,6 +247,7 @@ fun SchoolTeacherPageScreen(
 
             // ── Вопросы (/ask)
             item {
+                val unanswered = viewModel.unansweredCount
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -257,6 +260,15 @@ fun SchoolTeacherPageScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
+                    if (isOwner && unanswered > 0) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Ждут ответа: $unanswered",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                     if (!isOwner) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
@@ -274,7 +286,10 @@ fun SchoolTeacherPageScreen(
                     )
                 }
             }
-            if (questions.isEmpty()) {
+            // Скрытые вопросы ученикам не показываются (только владельцу/админу).
+            val visibleQuestions = if (isOwner || viewModel.isAppAdmin) questions
+            else questions.filter { !it.hidden }
+            if (visibleQuestions.isEmpty()) {
                 item {
                     Text(
                         "Вопросов пока нет.",
@@ -284,15 +299,19 @@ fun SchoolTeacherPageScreen(
                     )
                 }
             } else {
-                items(questions.size) { index ->
-                    val q = questions[index]
+                items(visibleQuestions.size) { index ->
+                    val q = visibleQuestions[index]
                     QuestionCard(
                         fromName = q.fromName,
                         text = q.text,
                         createdAt = q.createdAt,
                         hidden = q.hidden,
+                        answer = q.answer,
+                        answeredAt = q.answeredAt,
                         canManage = isOwner || viewModel.isAppAdmin,
-                        onToggleHidden = { viewModel.setHidden(q.id, !q.hidden) }
+                        canAnswer = isOwner || viewModel.isAppAdmin,
+                        onToggleHidden = { viewModel.setHidden(q.id, !q.hidden) },
+                        onAnswer = { showAnswerDialogFor = q }
                     )
                 }
             }
@@ -321,6 +340,17 @@ fun SchoolTeacherPageScreen(
             }
         )
     }
+    showAnswerDialogFor?.let { question ->
+        AnswerQuestionDialog(
+            questionText = question.text,
+            initialAnswer = question.answer,
+            onDismiss = { showAnswerDialogFor = null },
+            onConfirm = { answer ->
+                viewModel.answerQuestion(question.id, answer)
+                showAnswerDialogFor = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -329,8 +359,12 @@ private fun QuestionCard(
     text: String,
     createdAt: Long,
     hidden: Boolean,
+    answer: String,
+    answeredAt: Long,
     canManage: Boolean,
-    onToggleHidden: () -> Unit
+    canAnswer: Boolean,
+    onToggleHidden: () -> Unit,
+    onAnswer: () -> Unit
 ) {
     val df = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
     Column(
@@ -347,6 +381,13 @@ private fun QuestionCard(
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.weight(1f))
+            if (answer.isBlank()) {
+                Text(
+                    "ждёт ответа",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
             if (createdAt > 0) {
                 Text(
                     df.format(Date(createdAt)),
@@ -380,6 +421,42 @@ private fun QuestionCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error
             )
+        }
+        // ── Ответ учителя
+        if (answer.isNotBlank()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Ответ учителя",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                if (answeredAt > 0) {
+                    Text(
+                        df.format(Date(answeredAt)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                answer,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (canAnswer) {
+                TextButton(onClick = onAnswer) {
+                    Text("✏️ Изменить ответ")
+                }
+            }
+        } else if (canAnswer) {
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedButton(onClick = onAnswer, modifier = Modifier.fillMaxWidth()) {
+                Text("✍️ Ответить")
+            }
         }
     }
 }
@@ -447,6 +524,46 @@ private fun AskQuestionDialog(
                 onClick = { onConfirm(text) },
                 enabled = text.isNotBlank()
             ) { Text("Отправить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+/**
+ * НОВОЕ (ответы учителя): диалог ответа на вопрос ученика. Открыть может
+ * владелец страницы или админ; если ответ уже есть — предзаполняется для
+ * редактирования.
+ */
+@Composable
+private fun AnswerQuestionDialog(
+    questionText: String,
+    initialAnswer: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var answer by remember { mutableStateOf(initialAnswer) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ответ на вопрос") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    questionText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = answer, onValueChange = { answer = it },
+                    label = { Text("Ваш ответ") },
+                    minLines = 3
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(answer) },
+                enabled = answer.isNotBlank()
+            ) { Text(if (initialAnswer.isBlank()) "Опубликовать" else "Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
