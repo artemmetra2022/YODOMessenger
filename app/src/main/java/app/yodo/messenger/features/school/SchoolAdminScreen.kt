@@ -22,10 +22,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,9 +62,14 @@ fun SchoolAdminScreen(
 ) {
     val news by viewModel.news.collectAsState()
     val message by viewModel.message.collectAsState()
+    // НОВОЕ (глобальное управление разделом): скрытие «Школы» у всех и
+    // пометка актуальности расписания уроков.
+    val schoolSectionHidden by viewModel.schoolSectionHidden.collectAsState()
+    val scheduleStatus by viewModel.scheduleStatus.collectAsState()
 
     var showAddNewsDialog by remember { mutableStateOf(false) }
     var showAddPollDialog by remember { mutableStateOf(false) }
+    var showScheduleStatusDialog by remember { mutableStateOf(false) }
     var editNewsTarget by remember { mutableStateOf<SchoolNews?>(null) }
     var deleteNewsTarget by remember { mutableStateOf<SchoolNews?>(null) }
     var deletePollTarget by remember { mutableStateOf<String?>(null) }
@@ -102,6 +109,79 @@ fun SchoolAdminScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            item {
+                Text(
+                    "⚙️ Раздел и расписание",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
+            }
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(16.dp)
+                ) {
+                    // НОВОЕ (глобальное скрытие «Школы»): прячет кнопку у всех
+                    // обычных пользователей; админы видят её всегда.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "🙈 Скрыть раздел «Школа» у всех",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "Обычные пользователи не увидят кнопку «Школа». Админы видят её всегда",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Switch(
+                            checked = schoolSectionHidden,
+                            onCheckedChange = { viewModel.setSchoolSectionHidden(it) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // НОВОЕ (пометка расписания): актуально/неактуально + дата.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "📄 Пометка расписания уроков",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            val status = scheduleStatus
+                            Text(
+                                if (status == null) "Пометка ещё не ставилась"
+                                else if (status.actual)
+                                    if (status.untilDate.isBlank()) "✅ Актуально"
+                                    else "✅ Актуально на ${status.untilDate}"
+                                else
+                                    if (status.untilDate.isBlank()) "⚠️ Неактуальное"
+                                    else "⚠️ Неактуальное (было на ${status.untilDate})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (status?.actual == true) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        OutlinedButton(onClick = { showScheduleStatusDialog = true }) {
+                            Text("Изменить")
+                        }
+                    }
+                }
+            }
             item {
                 Text(
                     "📰 Управление новостями",
@@ -252,6 +332,19 @@ fun SchoolAdminScreen(
             onConfirm = { question, options ->
                 viewModel.createPoll(question, options)
                 showAddPollDialog = false
+            }
+        )
+    }
+    // НОВОЕ (пометка расписания): актуально/неактуально + дата, на которую
+    // расписание актуально (свободная строка, показывается как есть).
+    if (showScheduleStatusDialog) {
+        ScheduleStatusDialog(
+            initialActual = scheduleStatus?.actual ?: false,
+            initialUntilDate = scheduleStatus?.untilDate ?: "",
+            onDismiss = { showScheduleStatusDialog = false },
+            onConfirm = { actual, untilDate ->
+                viewModel.setScheduleStatus(actual, untilDate)
+                showScheduleStatusDialog = false
             }
         )
     }
@@ -500,6 +593,47 @@ private fun EditTextDialog(
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+/**
+ * НОВОЕ (пометка расписания): диалог «актуально/неактуально» с датой, на
+ * которую расписание актуально. Дата — свободная строка («15.09.2026»),
+ * валидации не требует: показывается ученикам как есть.
+ */
+@Composable
+private fun ScheduleStatusDialog(
+    initialActual: Boolean,
+    initialUntilDate: String,
+    onDismiss: () -> Unit,
+    onConfirm: (actual: Boolean, untilDate: String) -> Unit
+) {
+    var actual by remember { mutableStateOf(initialActual) }
+    var untilDate by remember { mutableStateOf(initialUntilDate) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Пометка расписания уроков") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (actual) "✅ Расписание актуально" else "⚠️ Расписание неактуально",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(checked = actual, onCheckedChange = { actual = it })
+                }
+                OutlinedTextField(
+                    value = untilDate, onValueChange = { untilDate = it },
+                    label = { Text("Актуально на дату (напр. 15.09.2026, можно «-»)") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(actual, untilDate) }) { Text("Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )

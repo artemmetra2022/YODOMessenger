@@ -25,6 +25,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SchoolAdminViewModel @Inject constructor(
     private val schoolRepository: SchoolRepository,
+    private val appSettingsRepository: app.yodo.messenger.domain.repository.AppSettingsRepository,
     private val firebaseAuth: FirebaseAuth
 ) : ViewModel() {
 
@@ -43,10 +44,46 @@ class SchoolAdminViewModel @Inject constructor(
     val reviews = schoolRepository.observeReviews()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // НОВОЕ (глобальное управление разделом): скрытие кнопки «Школа» у всех
+    // (админы видят всегда) и пометка актуальности расписания уроков.
+    val schoolSectionHidden: StateFlow<Boolean> = appSettingsRepository.observeSchoolSectionHidden()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val scheduleStatus: StateFlow<app.yodo.messenger.domain.repository.SchoolScheduleStatus?> =
+        appSettingsRepository.observeSchoolScheduleStatus()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
     fun consumeMessage() { _message.value = null }
+
+    fun setSchoolSectionHidden(hidden: Boolean) {
+        viewModelScope.launch {
+            if (appSettingsRepository.setSchoolSectionHidden(hidden)) {
+                _message.value = if (hidden) "🙈 Раздел «Школа» скрыт у всех пользователей"
+                else "✅ Раздел «Школа» снова виден всем"
+            } else {
+                _message.value = "Не хватает прав для изменения"
+            }
+        }
+    }
+
+    fun setScheduleStatus(actual: Boolean, untilDate: String) {
+        viewModelScope.launch {
+            if (appSettingsRepository.setSchoolScheduleStatus(
+                    app.yodo.messenger.domain.repository.SchoolScheduleStatus(
+                        actual = actual, untilDate = untilDate.trim()
+                    )
+                )
+            ) {
+                _message.value = if (actual) "✅ Расписание отмечено актуальным"
+                else "⚠️ Расписание отмечено неактуальным"
+            } else {
+                _message.value = "Не хватает прав для изменения"
+            }
+        }
+    }
 
     fun addNews(sender: String, text: String, eventDate: String) {
         if (text.isBlank()) return

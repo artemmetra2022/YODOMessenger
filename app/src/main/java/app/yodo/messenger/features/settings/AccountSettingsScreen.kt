@@ -77,8 +77,12 @@ fun AccountSettingsScreen(
     val showSettingsInGlobalSearch by viewModel.showSettingsInGlobalSearch.collectAsState()
     val hideStatusBarOnChatList by viewModel.hideStatusBarOnChatList.collectAsState()
     // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» (переключатель
-    // на экране «Настройки раздела „Школа“»).
+    // на экране «Настройки раздела „Школа“»). Плюс глобальное скрытие админом:
+    // обычные пользователи кнопку не видят, админы — всегда (чтобы вернуть).
     val schoolSectionEnabled by viewModel.schoolSectionEnabled.collectAsState()
+    val schoolSectionGloballyHidden by viewModel.schoolSectionGloballyHidden.collectAsState()
+    val showSchoolSection = schoolSectionEnabled &&
+        (!schoolSectionGloballyHidden || viewModel.isAppAdmin)
 
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
 
@@ -179,8 +183,9 @@ fun AccountSettingsScreen(
                 }
             }
             // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 и
-            // настройка его отображения. Пункт скрывается переключателем.
-            if (schoolSectionEnabled) {
+            // настройка его отображения. Пункт скрывается переключателем или
+            // глобально админом (showSchoolSection уже учитывает оба случая).
+            if (showSchoolSection) {
                 item {
                     SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SCHOOL, anchorPositions, highlightedAnchor, colorTheme)) {
                         SettingsNavigateRow(

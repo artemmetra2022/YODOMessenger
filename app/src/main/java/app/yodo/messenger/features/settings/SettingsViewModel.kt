@@ -42,6 +42,7 @@ class SettingsViewModel @Inject constructor(
     private val languagePreferences: LanguagePreferences,
     private val draftsPreferences: DraftsPreferences,
     private val authRepository: AuthRepository,
+    private val appSettingsRepository: app.yodo.messenger.domain.repository.AppSettingsRepository,
     private val firebaseAuth: FirebaseAuth,
     private val presenceRepository: PresenceRepository,
     private val userRepository: UserRepository
@@ -75,6 +76,12 @@ class SettingsViewModel @Inject constructor(
 
     // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» в разделе «Аккаунт».
     val schoolSectionEnabled: StateFlow<Boolean> = schoolPreferences.sectionEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    // НОВОЕ (глобальное скрытие «Школы»): админ прячет раздел у всех; админы
+    // кнопку видят всегда, чтобы вернуть раздел. До подгрузки — false (видно).
+    val schoolSectionGloballyHidden: StateFlow<Boolean> =
+        appSettingsRepository.observeSchoolSectionHidden()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val pinRequirement: StateFlow<PinRequirement> = userSettingsPreferences.pinRequirement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PinRequirement.NEVER)
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)

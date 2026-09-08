@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,16 +32,42 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
+import javax.inject.Inject
+
+/**
+ * НОВОЕ (пометка расписания): ViewModel экрана расписания — статус
+ * актуальности, который ставит админ (config/appSettings).
+ */
+@HiltViewModel
+class SchoolScheduleViewModel @Inject constructor(
+    appSettingsRepository: app.yodo.messenger.domain.repository.AppSettingsRepository
+) : ViewModel() {
+    val scheduleStatus: StateFlow<app.yodo.messenger.domain.repository.SchoolScheduleStatus?> =
+        appSettingsRepository.observeSchoolScheduleStatus()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+}
 
 /**
  * НОВОЕ (раздел «Школа»): расписание звонков, ссылка на расписание уроков и
  * обратный отсчёт до каникул — перенос раздела «Для учеников» из бота.
  */
 @Composable
-fun SchoolScheduleScreen(onBackClick: () -> Unit) {
+fun SchoolScheduleScreen(
+    onBackClick: () -> Unit,
+    viewModel: SchoolScheduleViewModel = hiltViewModel()
+) {
     val context = LocalContext.current
+    // НОВОЕ (пометка расписания): статус от админа (null — пометка не ставилась).
+    val scheduleStatus by viewModel.scheduleStatus.collectAsState()
 
     Scaffold(
         topBar = { SchoolTopBar("Расписание и звонки", onBackClick) },
@@ -51,18 +79,39 @@ fun SchoolScheduleScreen(onBackClick: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                SchoolRowCard(
-                    icon = Icons.Filled.Event,
-                    title = "📄 Расписание уроков",
-                    subtitle = "Открывается в Google Drive",
-                    onClick = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(SchoolData.LESSONS_SCHEDULE_URL))
-                            )
+                Column {
+                    SchoolRowCard(
+                        icon = Icons.Filled.Event,
+                        title = "📄 Расписание уроков",
+                        subtitle = "Открывается в Google Drive",
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(SchoolData.LESSONS_SCHEDULE_URL))
+                                )
+                            }
                         }
+                    )
+                    // НОВОЕ (пометка расписания): зелёная галочка или жёлтое
+                    // предупреждение от админа; ничего — пометку не ставили.
+                    scheduleStatus?.let { status ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            if (status.actual) {
+                                if (status.untilDate.isBlank()) "✅ Расписание актуально"
+                                else "✅ Расписание актуально на ${status.untilDate}"
+                            } else {
+                                if (status.untilDate.isBlank())
+                                    "⚠️ Расписание может быть неактуальным — уточните у учителя"
+                                else "⚠️ Расписание может быть неактуальным (было актуально на ${status.untilDate})"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (status.actual) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
                     }
-                )
+                }
             }
             item {
                 Column(
