@@ -711,7 +711,20 @@ service cloud.firestore {
              request.auth.uid == request.resource.data.targetUserId)
           );
         allow update: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+          (
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds ||
+            // НОВОЕ (веб-админка: раздел «Жалобы»): два главных админа закрывают
+            // жалобы (обновляют ТОЛЬКО поля рассмотрения — status/resolution/
+            // reviewedBy/reviewedByName/reviewedAt/reviewerComment), не будучи
+            // участниками чата. Белый список полей повторяет ReportRepositoryImpl.
+            // finalizeReport — произвольный rewrite чужой жалобы запрещён.
+            (
+              isOfficialChannelAdmin() &&
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['status', 'resolution', 'reviewedBy', 'reviewedByName',
+                          'reviewedAt', 'reviewerComment'])
+            )
+          );
         allow delete: if false;
 
         match /comments/{commentId} {

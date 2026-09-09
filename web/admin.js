@@ -38,6 +38,7 @@ import {
   deleteDoc,
   collection,
   collectionGroup,
+  deleteField,
   query,
   where,
   orderBy,
@@ -1197,6 +1198,504 @@ function startReviews() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Секция «Жалобы» — сквозная очередь модерации (chats/*/reports)      */
+/* ------------------------------------------------------------------ */
+
+// 1:1 с Report.kt — значения enum и подписи причин/статусов.
+const REPORT_REASONS = {
+  SPAM: "Спам",
+  HARASSMENT: "Оскорбления или травля",
+  VIOLENCE: "Насилие или угрозы",
+  ILLEGAL_CONTENT: "Запрещённый контент",
+  FRAUD: "Мошенничество",
+  OTHER: "Другое",
+  APPEAL: "Обжалование блокировки",
+};
+const REPORT_STATUS_LABELS = {
+  PENDING: "На рассмотрении",
+  RESOLVED: "Решена",
+  DISMISSED: "Отклонена",
+};
+
+let reportsCache = []; // снапшот последнего запроса для CSV
+let reportsFilter = "PENDING";
+let reportsUnsub = null;
+
+// Мягкое удаление сообщения — поля 1:1 с MessageRepositoryImpl.deleteMessage
+// (deletedByAdmin=true показывает в чате «Сообщение удалено администратором»).
+async function softDeleteMessage(chatId, messageId) {
+  await updateDoc(doc(db, "chats", chatId, "messages", messageId), {
+    isDeleted: true,
+    text: "",
+    deletedByAdmin: true,
+    imageBase64: deleteField(),
+    fileBase64: deleteField(),
+    fileName: deleteField(),
+    fileMimeType: deleteField(),
+    fileSizeBytes: deleteField(),
+    locationLat: deleteField(),
+    locationLng: deleteField(),
+  });
+}
+
+// Пересчёт превью списка чатов, если удалили последнее сообщение —
+// перенос refreshLastMessagePreviewIfNeeded (иначе в списке чатов
+// останется висеть текст удалённого сообщения).
+async function refreshChatPreviewAfterDelete(chatId, messageId) {
+  const chatRef = doc(db, "chats", chatId);
+  const chatSnap = await getDoc(chatRef);
+  if (!chatSnap.exists()) return;
+  // lastMessageId может отсутствовать у старых чатов — тогда пересчёт не нужен.
+  if (chatSnap.get("lastMessageId") !== messageId) return;
+  const latest = await getDocs(
+    query(collection(db, "chats", chatId, "messages"), orderBy("timestamp", "desc"), limit(20))
+  );
+  // isDeleted отсутствует у неудалённых сообщений — фильтруем на клиенте.
+  const remaining = latest.docs.find((d) => d.get("isDeleted") !== true);
+  if (!remaining) {
+    await updateDoc(chatRef, {
+      lastMessage: "",
+      lastMessageSenderId: null,
+      lastMessageStatus: null,
+      lastMessageId: null,
+    });
+    return;
+  }
+  const r = remaining.data();
+  const previewText =
+    r.encrypted ? "🔒 Сообщение"
+    : r.text ? r.text
+    : r.voiceBase64 ? "🎤 Голосовое сообщение"
+    : r.isViewOnce ? "📷 Фото (один просмотр)"
+    : r.imagesBase64 ? "📷 Фото (" + (r.imagesBase64.length || 1) + ")"
+    : r.imageBase64 ? "📷 Фото"
+    : r.locationLat != null ? "📍 Геопозиция"
+    : r.fileBase64 ? "📎 " + (r.fileName || "Файл")
+    : "";
+  await updateDoc(chatRef, {
+    lastMessage: previewText,
+    lastMessageTimestamp: r.timestamp || 0,
+    lastMessageSenderId: r.senderId || null,
+    lastMessageStatus: r.status || "SENT",
+    lastMessageId: remaining.id,
+  });
+}
+
+// Блокировка аккаунта — формат 1:1 с UserRepositoryImpl.setGlobalBlock.
+async function setGlobalBlock(uid, reason) {
+  await setDoc(doc(db, "globalBlocks", uid), {
+    reason: reason || "",
+    blockedBy: auth.currentUser.uid,
+    blockedByName: adminActorName || auth.currentUser.email || "Админ",
+    blockedAt: Date.now(),
+  });
+  addDoc(collection(db, "moderationNotifications"), {
+    userId: uid,
+    title: "Аккаунт заблокирован",
+    body: reason ? "Причина: " + reason.slice(0, 200) : "Ваш аккаунт заблокирован администрацией",
+    notified: false,
+    createdAt: Date.now(),
+  }).catch(() => {});
+}
+
+function reportItem(docSnap) {
+  const r = docSnap.data();
+  const status = r.status || "PENDING";
+  const isPending = status === "PENDING";
+  const el = document.createElement("div");
+  el.className = "item";
+  const statusBadge =
+    status === "PENDING" ? '<span class="badge badge-yellow">На рассмотрении</span>'
+    : status === "RESOLVED" ? '<span class="badge badge-green">Решена</span>'
+    : '<span class="badge badge-dim">Отклонена</span>';
+  el.innerHTML = `
+    <div class="item-head">
+      <span class="item-title">${r.isAppeal ? "🔔 Обжалование: " : ""}${esc(r.targetUserName || "Пользователь")}</span>
+      ${statusBadge}
+      <span class="item-date">${fmtDate(r.createdAt)}</span>
+    </div>
+    <div class="item-sub">Жалоба от ${esc(r.reporterName || "—")} · причина: ${esc(REPORT_REASONS[r.reason] || r.reason || "?")}</div>
+    ${r.targetMessagePreview ? `<div class="item-text report-preview">💬 ${esc(r.targetMessagePreview)}</div>` : ""}
+    ${r.customReasonText ? `<div class="item-text">${esc(r.customReasonText)}</div>` : ""}
+    ${
+      !isPending
+        ? `<div class="question-answer">✅ <b>${esc(REPORT_STATUS_LABELS[status] || status)}</b> · ${esc(r.reviewedByName || "")}, ${fmtDate(r.reviewedAt)}
+             ${r.resolution ? " · " + esc(r.resolution) : ""}${r.reviewerComment ? "<br>" + esc(r.reviewerComment) : ""}</div>`
+        : ""
+    }`;
+  if (isPending) {
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    if (r.targetType === "MESSAGE" && r.targetMessageId) {
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn-danger";
+      deleteBtn.textContent = "Удалить сообщение";
+      deleteBtn.addEventListener("click", () => resolveReportAction(docSnap, "deleteMessage"));
+      actions.appendChild(deleteBtn);
+    }
+    if (!r.isAppeal) {
+      const blockBtn = document.createElement("button");
+      blockBtn.type = "button";
+      blockBtn.className = "btn-danger";
+      blockBtn.textContent = "Заблокировать автора";
+      blockBtn.addEventListener("click", () => resolveReportAction(docSnap, "blockUser"));
+      actions.appendChild(blockBtn);
+    }
+    const dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.className = "btn-secondary";
+    dismissBtn.textContent = "Отклонить";
+    dismissBtn.addEventListener("click", () => resolveReportAction(docSnap, "dismiss"));
+    actions.appendChild(dismissBtn);
+    el.appendChild(actions);
+  }
+  return el;
+}
+
+async function resolveReportAction(docSnap, action) {
+  const r = docSnap.data();
+  const chatId = docSnap.ref.parent.parent.id;
+  const targetName = r.targetUserName || "пользователя";
+  const confirmText =
+    action === "deleteMessage"
+      ? `Удалить сообщение «${(r.targetMessagePreview || "").slice(0, 60)}» у ${targetName}? В чате появится «Сообщение удалено администратором».`
+      : action === "blockUser"
+        ? `Заблокировать аккаунт ${targetName}? ${r.isAppeal ? "Обжалование при этом будет отклонено. " : ""}Он не сможет пользоваться приложением.`
+        : `Отклонить жалобу на ${targetName}?`;
+  if (!confirm(confirmText)) return;
+  try {
+    if (action === "deleteMessage") {
+      await softDeleteMessage(chatId, r.targetMessageId);
+      await refreshChatPreviewAfterDelete(chatId, r.targetMessageId);
+      await finalizeReport(docSnap, "RESOLVED", "MESSAGE_DELETED", "Сообщение удалено администратором");
+      logAdminAction("REPORT_RESOLVED_MESSAGE_DELETED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
+      toast("Сообщение удалено, жалоба закрыта");
+    } else if (action === "blockUser") {
+      await setGlobalBlock(r.targetUserId, "Нарушение правил по жалобе: " + (REPORT_REASONS[r.reason] || r.reason));
+      await finalizeReport(docSnap, "RESOLVED", "USER_BANNED", "Аккаунт заблокирован администратором");
+      logAdminAction("REPORT_RESOLVED_USER_BANNED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
+      toast("Аккаунт заблокирован, жалоба закрыта");
+    } else {
+      await finalizeReport(docSnap, "DISMISSED", "DISMISSED", "Жалоба отклонена администратором");
+      logAdminAction("REPORT_DISMISSED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
+      toast("Жалоба отклонена");
+    }
+  } catch (err) {
+    handleErr("Не удалось выполнить действие")(err);
+  }
+}
+
+// Закрытие жалобы — поля 1:1 с ReportRepositoryImpl.finalizeReport.
+async function finalizeReport(docSnap, status, resolution, comment) {
+  await updateDoc(docSnap.ref, {
+    status,
+    resolution,
+    reviewedBy: auth.currentUser.uid,
+    reviewedByName: adminActorName || auth.currentUser.email || "Админ",
+    reviewedAt: Date.now(),
+    reviewerComment: (comment || "").slice(0, 1000),
+  });
+}
+
+// Количество висящих жалоб для бейджа — тот же запрос, что и лента.
+function updateReportsBadge(docs) {
+  const pending = docs.filter((d) => (d.data().status || "PENDING") === "PENDING");
+  const badge = $("reports-count");
+  badge.textContent = pending.length ? "на рассмотрении: " + pending.length : "";
+  badge.classList.toggle("hidden", !pending.length);
+}
+
+function renderReports(snap) {
+  reportsCache = snap.docs;
+  updateReportsBadge(snap.docs);
+  const listEl = $("reports-list");
+  const status = reportsFilter;
+  const docs = status === "ALL"
+    ? snap.docs
+    : snap.docs.filter((d) => (d.data().status || "PENDING") === status);
+  if (!docs.length) {
+    listEl.innerHTML = `<p class="empty-note">${status === "PENDING" ? "Новых жалоб нет — всё чисто! ✅" : "Жалоб с этим статусом нет."}</p>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  docs.forEach((d) => listEl.appendChild(reportItem(d)));
+}
+
+function startReports() {
+  // Переключение фильтра перерисовывает ленту из уже загруженного снапшота
+  // (live-подписка фильтра не меняет — данные те же, отдельный запрос не нужен).
+  $("reports-filters").querySelectorAll(".filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      $("reports-filters").querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      reportsFilter = btn.dataset.filter;
+      renderReports({ docs: reportsCache });
+    });
+  });
+  setLoading($("reports-list"));
+  reportsUnsub = onSnapshot(
+    query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(200)),
+    renderReports,
+    handleErr("Не удалось загрузить жалобы")
+  );
+  $("btn-export-reports").addEventListener("click", () => {
+    if (!reportsCache.length) return toast("Жалоб пока нет — выгружать нечего", false);
+    downloadCsv(
+      "yodo-reports.csv",
+      ["Дата", "Статус", "Причина", "Тип", "Нарушитель", "Жаловался", "Превью сообщения", "Комментарий жалобы", "Решение", "Рецензент"],
+      reportsCache.map((d) => {
+        const r = d.data();
+        return [
+          fmtDate(r.createdAt),
+          REPORT_STATUS_LABELS[r.status] || r.status || "",
+          REPORT_REASONS[r.reason] || r.reason || "",
+          r.isAppeal ? "Обжалование" : r.targetType === "MESSAGE" ? "Сообщение" : "Пользователь",
+          r.targetUserName || "",
+          r.reporterName || "",
+          r.targetMessagePreview || "",
+          r.customReasonText || "",
+          r.reviewerComment || "",
+          r.reviewedByName || "",
+        ];
+      })
+    );
+    toast("CSV жалоб скачан (" + reportsCache.length + ")");
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Секция «Пользователи» — поиск и карточка с блокировкой              */
+/* ------------------------------------------------------------------ */
+
+let usersSearchTimer = null;
+let currentUserCardUid = null;
+let userCardUnsub = null;
+
+function userCardRow(label, value) {
+  return `<div class="user-card-row"><span class="user-card-label">${esc(label)}</span><span>${esc(value ?? "—")}</span></div>`;
+}
+
+// Карточка: профиль users/{uid} + live-статус блокировки globalBlocks/{uid}.
+async function openUserCard(uid) {
+  currentUserCardUid = uid;
+  const bodyEl = $("user-card-body");
+  bodyEl.innerHTML = '<p class="empty-note">Загружаю профиль…</p>';
+  $("user-card").classList.remove("hidden");
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    if (!snap.exists()) {
+      bodyEl.innerHTML = `<p class="empty-note">Профиль users/${esc(uid)} не найден. Блокировать по этому UID всё равно можно в разделе «Блокировки».</p>`;
+      return;
+    }
+    const u = snap.data();
+    $("user-card-name").textContent = u.displayName || u.username || uid;
+    if (userCardUnsub) userCardUnsub();
+    userCardUnsub = onSnapshot(
+      doc(db, "globalBlocks", uid),
+      (blockSnap) => renderUserCard(u, uid, blockSnap.exists() ? blockSnap.data() : null),
+      () => renderUserCard(u, uid, null)
+    );
+  } catch (err) {
+    bodyEl.innerHTML = "";
+    handleErr("Не удалось открыть профиль")(err);
+  }
+}
+
+function renderUserCard(u, uid, block) {
+  const bodyEl = $("user-card-body");
+  const rows = [
+    userCardRow("Имя", u.displayName),
+    userCardRow("Username", u.username ? "@" + u.username : ""),
+    userCardRow("Публичный ID", u.publicId),
+    userCardRow("UID", uid),
+    userCardRow("Email", u.email),
+    userCardRow("Регистрация", u.createdAt ? fmtDate(u.createdAt) : ""),
+  ];
+  let blockHtml = "";
+  if (block) {
+    blockHtml = `
+      <div class="user-block-status blocked">
+        ⛔ Заблокирован${block.blockedAt ? " · " + fmtDate(block.blockedAt) : ""}
+        ${block.reason ? `<div class="item-text">${esc(block.reason)}</div>` : ""}
+      </div>`;
+  } else {
+    blockHtml = '<div class="user-block-status ok">✅ Не заблокирован</div>';
+  }
+  const actions = document.createElement("div");
+  actions.className = "item-actions";
+  if (block) {
+    const unblockBtn = document.createElement("button");
+    unblockBtn.type = "button";
+    unblockBtn.className = "btn-secondary";
+    unblockBtn.textContent = "Разблокировать";
+    unblockBtn.addEventListener("click", () => unblockUser(uid, u.displayName));
+    actions.appendChild(unblockBtn);
+  } else {
+    const blockBtn = document.createElement("button");
+    blockBtn.type = "button";
+    blockBtn.className = "btn-danger";
+    blockBtn.textContent = "Заблокировать аккаунт";
+    blockBtn.addEventListener("click", () => blockUserWithPrompt(uid, u.displayName));
+    actions.appendChild(blockBtn);
+  }
+  bodyEl.innerHTML = rows.join("") + blockHtml;
+  bodyEl.appendChild(actions);
+}
+
+function closeUserCard() {
+  currentUserCardUid = null;
+  if (userCardUnsub) userCardUnsub();
+  userCardUnsub = null;
+  $("user-card").classList.add("hidden");
+}
+
+async function blockUserWithPrompt(uid, name) {
+  const reason = prompt("Причина блокировки (видна " + (name || "пользователю") + "):", "");
+  if (reason === null) return;
+  try {
+    await setGlobalBlock(uid, reason.trim());
+    logAdminAction("USER_GLOBALLY_BLOCKED", reason.trim(), uid, name);
+    toast("Аккаунт заблокирован" + (reason.trim() ? " — пользователь получит push" : ""));
+  } catch (err) {
+    handleErr("Не удалось заблокировать")(err);
+  }
+}
+
+async function unblockUser(uid, name) {
+  if (!confirm("Разблокировать аккаунт " + (name || uid) + "? Доступ восстановится.")) return;
+  try {
+    await deleteDoc(doc(db, "globalBlocks", uid));
+    addDoc(collection(db, "moderationNotifications"), {
+      userId: uid,
+      title: "Блокировка снята",
+      body: "Доступ к аккаунту восстановлен",
+      notified: false,
+      createdAt: Date.now(),
+    }).catch(() => {});
+    logAdminAction("USER_GLOBALLY_UNBLOCKED", "", uid, name);
+    toast("Блокировка снята — пользователь получит push");
+  } catch (err) {
+    handleErr("Не удалось снять блокировку")(err);
+  }
+}
+
+async function runUsersSearch() {
+  const raw = $("users-search-input").value.trim();
+  const term = raw.toLowerCase().replace(/^@/, "");
+  const resultsEl = $("users-search-results");
+  if (term.length < 2) {
+    resultsEl.innerHTML = '<p class="empty-note">Минимум 2 символа</p>';
+    return;
+  }
+  resultsEl.innerHTML = '<p class="empty-note">Поиск…</p>';
+  try {
+    const [byUsername, byName] = await Promise.all([
+      searchUsersByField("usernameLowercase", term),
+      searchUsersByField("displayNameLowercase", term),
+    ]);
+    const byPublicId = term.startsWith("yodo-")
+      ? await getDocs(query(collection(db, "users"), where("publicId", "==", raw.toUpperCase()), limit(10)))
+      : { docs: [] };
+    const seen = new Set();
+    const docs = [];
+    for (const d of byUsername.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
+    for (const d of byName.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
+    for (const d of byPublicId.docs) { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } }
+    if (!docs.length) {
+      resultsEl.innerHTML = '<p class="empty-note">Никого не найдено. Попробуйте другое имя или YODO-ID.</p>';
+      return;
+    }
+    resultsEl.innerHTML = "";
+    docs.forEach((d) => {
+      const u = d.data();
+      const el = document.createElement("div");
+      el.className = "user-result";
+      el.innerHTML = `
+        <div class="user-result-name">${esc(u.displayName || "Без имени")}</div>
+        <div class="user-result-username">@${esc(u.username || "—")} · ${esc(u.publicId || d.id)}</div>`;
+      el.addEventListener("click", () => openUserCard(d.id));
+      resultsEl.appendChild(el);
+    });
+  } catch (err) {
+    handleErr("Поиск пользователей")(err);
+  }
+}
+
+function startUsers() {
+  $("users-search-input").addEventListener("input", () => {
+    clearTimeout(usersSearchTimer);
+    usersSearchTimer = setTimeout(runUsersSearch, 350);
+  });
+  $("btn-close-user-card").addEventListener("click", closeUserCard);
+}
+
+/* ------------------------------------------------------------------ */
+/* Секция «Блокировки» — список globalBlocks и ручной бан по UID       */
+/* ------------------------------------------------------------------ */
+
+let blocksUnsub = null;
+
+function startBlocks() {
+  $("form-block-uid").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const uid = $("block-uid").value.trim();
+    const reason = $("block-reason").value.trim();
+    if (!uid) return toast("Укажите UID пользователя", false);
+    try {
+      await setGlobalBlock(uid, reason);
+      logAdminAction("USER_GLOBALLY_BLOCKED", reason, uid);
+      toast("Аккаунт заблокирован");
+      $("block-uid").value = "";
+      $("block-reason").value = "";
+    } catch (err) {
+      handleErr("Не удалось заблокировать")(err);
+    }
+  });
+  const listEl = $("blocks-list");
+  setLoading(listEl);
+  blocksUnsub = onSnapshot(
+    query(collection(db, "globalBlocks"), orderBy("blockedAt", "desc")),
+    async (snap) => {
+      if (snap.empty) {
+        listEl.innerHTML = '<p class="empty-note">Заблокированных аккаунтов нет.</p>';
+        return;
+      }
+      listEl.innerHTML = "";
+      // Имена подтягиваем по одному (get по uid публичен) — блок-лист маленький.
+      for (const d of snap.docs) {
+        const b = d.data();
+        let name = "";
+        try {
+          const u = await getDoc(doc(db, "users", d.id));
+          name = u.exists() ? u.data().displayName || "" : "";
+        } catch (e) { /* best-effort */ }
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            <span class="item-title">${esc(name || d.id)}</span>
+            <span class="item-date">${fmtDate(b.blockedAt)}</span>
+          </div>
+          <div class="item-sub">UID: ${esc(d.id)}${b.blockedByName ? " · заблокировал: " + esc(b.blockedByName) : ""}</div>
+          ${b.reason ? `<div class="item-text">${esc(b.reason)}</div>` : ""}`;
+        const actions = document.createElement("div");
+        actions.className = "item-actions";
+        const unblockBtn = document.createElement("button");
+        unblockBtn.type = "button";
+        unblockBtn.className = "btn-secondary";
+        unblockBtn.textContent = "Разблокировать";
+        unblockBtn.addEventListener("click", () => unblockUser(d.id, name));
+        actions.appendChild(unblockBtn);
+        el.appendChild(actions);
+        listEl.appendChild(el);
+      }
+    },
+    handleErr("Не удалось загрузить блокировки")
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Секция «Вопросы» — неотвеченные вопросы всех учителей               */
 /* ------------------------------------------------------------------ */
 
@@ -1271,13 +1770,14 @@ async function refreshSummary() {
   const grid = $("summary-grid");
   grid.innerHTML = '<p class="empty-note">Считаю…</p>';
   try {
-    const [news, polls, ideas, reviews, teachers, questions] = await Promise.all([
+    const [news, polls, ideas, reviews, teachers, questions, reports] = await Promise.all([
       getDocs(collection(db, "schoolNews")),
       getDocs(collection(db, "schoolPolls")),
       getDocs(collection(db, "schoolIdeas")),
       getDocs(collection(db, "schoolReviews")),
       getDocs(collection(db, "schoolTeacherProfiles")),
       getDocs(query(collectionGroup(db, "questions"), orderBy("createdAt", "desc"), limit(300))),
+      getDocs(query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(200))),
     ]);
     let starsSum = 0;
     reviews.forEach((d) => (starsSum += d.data().stars || 0));
@@ -1286,10 +1786,14 @@ async function refreshSummary() {
       return !q.answer && q.hidden !== true;
     }).length;
     const linked = teachers.docs.filter((d) => !!d.data().linkedUserId).length;
+    const pendingReports = reports.docs.filter(
+      (d) => (d.data().status || "PENDING") === "PENDING"
+    ).length;
     const stats = [
       { value: news.size, label: "новостей", section: "news" },
       { value: polls.size, label: "опросов", section: "polls" },
       { value: unanswered, label: "вопросов без ответа", section: "inbox" },
+      { value: pendingReports, label: "жалоб на рассмотрении", section: "reports" },
       { value: teachers.size + " (" + linked + " привяз.)", label: "учителей", section: "teachers" },
       { value: ideas.size, label: "идей", section: "ideas" },
       {
@@ -1337,6 +1841,9 @@ function startPanel() {
   startTeachers();
   startIdeas();
   startReviews();
+  startReports();
+  startUsers();
+  startBlocks();
   startAudit();
   initUserSearchModal();
   initFileModal();

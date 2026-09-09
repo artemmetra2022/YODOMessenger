@@ -47,6 +47,9 @@
         <button class="nav-btn" data-section="teachers">👩‍🏫 Учителя</button>
         <button class="nav-btn" data-section="ideas">💡 Идеи</button>
         <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
+        <button class="nav-btn" data-section="reports">🚩 Жалобы</button>
+        <button class="nav-btn" data-section="users">👤 Пользователи</button>
+        <button class="nav-btn" data-section="blocks">⛔ Блокировки</button>
         <button class="nav-btn" data-section="audit">📜 Аудит</button>
       </nav>
       <div class="admin-sidebar-footer">
@@ -207,6 +210,60 @@
             <button type="button" class="btn-secondary" id="btn-export-reviews">⬇ CSV</button>
           </div>
           <div id="reviews-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Жалобы (модерация) -->
+      <section id="section-reports" class="admin-section">
+        <h1>Жалобы <span id="reports-count" class="badge badge-yellow hidden"></span></h1>
+        <div class="card">
+          <div class="card-head">
+            <p class="card-hint">Все жалобы из всех чатов, включая обжалования блокировок. Удаление сообщения и блокировка автора закрывают жалобу; пользователь получает push.</p>
+            <button type="button" class="btn-secondary" id="btn-export-reports">⬇ CSV</button>
+          </div>
+          <div class="filter-row" id="reports-filters">
+            <button type="button" class="filter-btn active" data-filter="PENDING">На рассмотрении</button>
+            <button type="button" class="filter-btn" data-filter="RESOLVED">Решённые</button>
+            <button type="button" class="filter-btn" data-filter="DISMISSED">Отклонённые</button>
+            <button type="button" class="filter-btn" data-filter="ALL">Все</button>
+          </div>
+          <div id="reports-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Пользователи (поиск и карточка) -->
+      <section id="section-users" class="admin-section">
+        <h1>Пользователи</h1>
+        <div class="card">
+          <h2>Поиск аккаунта</h2>
+          <p class="card-hint">По имени, @username или публичному ID (YODO-…-…). Карточка показывает профиль и статус блокировки.</p>
+          <input type="text" id="users-search-input" placeholder="Имя, @username или ID (YODO-…-…)" autocomplete="off">
+          <div id="users-search-results" class="user-search-results"></div>
+        </div>
+        <div class="card hidden" id="user-card">
+          <div class="card-head">
+            <h2 id="user-card-name">Профиль</h2>
+            <button type="button" class="btn-link" id="btn-close-user-card">Закрыть</button>
+          </div>
+          <div id="user-card-body"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Глобальные блокировки -->
+      <section id="section-blocks" class="admin-section">
+        <h1>Блокировки</h1>
+        <div class="card">
+          <h2>Заблокировать по UID</h2>
+          <p class="card-hint">UID можно скопировать в разделе «Пользователи» или в Firebase Console → Authentication. Заблокированный видит причину и может подать обжалование — оно появится в разделе «Жалобы».</p>
+          <form id="form-block-uid" class="form-row">
+            <input type="text" id="block-uid" placeholder="UID пользователя" autocomplete="off">
+            <input type="text" id="block-reason" placeholder="Причина (видна пользователю)" autocomplete="off">
+            <button type="submit" class="btn-primary">Заблокировать</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Заблокированные аккаунты</h2>
+          <div id="blocks-list" class="item-list"></div>
         </div>
       </section>
 
