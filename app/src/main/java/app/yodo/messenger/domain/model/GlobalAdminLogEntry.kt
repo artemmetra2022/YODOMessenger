@@ -13,7 +13,13 @@ enum class GlobalAdminActionType(val label: String) {
     // НОВОЕ (веб-админка: раздел «Жалобы») — решения по жалобам из веб-панели.
     REPORT_RESOLVED_MESSAGE_DELETED("Жалоба решена: сообщение удалено"),
     REPORT_RESOLVED_USER_BANNED("Жалоба решена: автор заблокирован"),
-    REPORT_DISMISSED("Жалоба отклонена")
+    REPORT_DISMISSED("Жалоба отклонена"),
+    // НОВОЕ (веб-админка: новости и опросы) — отложенная публикация,
+    // черновики, закрытие опросов и ручной push.
+    SCHOOL_NEWS_PUBLISHED("Публикация черновика новости"),
+    SCHOOL_NEWS_DRAFT_SAVED("Сохранён черновик новости"),
+    SCHOOL_POLL_CLOSED("Закрытие/открытие опроса"),
+    SCHOOL_PUSH_RESENT("Ручная отправка push")
 }
 
 /**

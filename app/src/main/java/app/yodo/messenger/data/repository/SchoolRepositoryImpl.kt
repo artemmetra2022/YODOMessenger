@@ -146,6 +146,11 @@ class SchoolRepositoryImpl @Inject constructor(
         if (uid in voters.keys) {
             throw IllegalStateException("Вы уже проголосовали в этом опросе")
         }
+        // НОВОЕ (закрытие опросов): в закрытый опрос голосовать нельзя
+        // (повторная защита поверх rules).
+        if (snap.getBoolean("closed") == true) {
+            throw IllegalStateException("Опрос завершён — голосование закрыто")
+        }
         ref.update(
             mapOf(
                 "votes.$optionIndex" to FieldValue.increment(1),
@@ -508,11 +513,14 @@ private data class SchoolNewsFirestore(
     val text: String = "",
     val eventDate: String = "",
     val pubDate: Long = 0L,
-    val pinned: Boolean = false
+    val pinned: Boolean = false,
+    // НОВОЕ (отложенная публикация): поле отсутствует у старых новостей —
+    // по умолчанию считаем опубликованной.
+    val published: Boolean = true
 ) {
     fun toDomain(id: String) = SchoolNews(
         id = id, sender = sender, text = text, eventDate = eventDate,
-        pubDate = pubDate, pinned = pinned
+        pubDate = pubDate, pinned = pinned, published = published
     )
 }
 
@@ -521,11 +529,13 @@ private data class SchoolPollFirestore(
     val options: List<String> = emptyList(),
     val votes: Map<String, Long> = emptyMap(),
     val voters: Map<String, Long> = emptyMap(),
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    // НОВОЕ (закрытие опросов): поле отсутствует у старых опросов — открыт.
+    val closed: Boolean = false
 ) {
     fun toDomain(id: String) = SchoolPoll(
         id = id, question = question, options = options, votes = votes,
-        voters = voters, createdAt = createdAt
+        voters = voters, createdAt = createdAt, closed = closed
     )
 }
 

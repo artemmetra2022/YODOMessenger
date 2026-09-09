@@ -114,6 +114,18 @@ private fun PollCard(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
+            // НОВОЕ (закрытие опросов): бейдж у завершённого опроса.
+            if (poll.closed) {
+                Text(
+                    "Завершён",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
         }
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -121,7 +133,9 @@ private fun PollCard(
             val votes = poll.votes[index.toString()] ?: 0L
             val percent = ((votes * 100) / total).toInt()
             val isMyChoice = myVote == index
-            val canVote = myVote == null
+            // НОВОЕ (закрытие опросов): в завершённом опросе кнопок голосования
+            // нет — сразу показываются результаты, как после своего голоса.
+            val canVote = myVote == null && !poll.closed
 
             if (canVote) {
                 // До голосования: вариант — кнопка.

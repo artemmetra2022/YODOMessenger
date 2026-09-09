@@ -366,6 +366,46 @@ async function sendLessonFileNotifications(db, messaging) {
   console.log(`Файлы уроков: успешно отправлено ${sentCount}, ошибок ${errorCount}`);
 }
 
+// НОВОЕ (отложенная публикация новостей): админ-панель создаёт новость с
+// published == false и publishAt (мс) — публикация в указанное время без
+// Cloud Functions. Воркер на каждом прогоне (каждые ~5 минут) находит
+// неопубликованные новости с наступившим publishAt и переключает
+// published -> true; push подписчикам уходит сразу после этого обычным
+// шагом sendSchoolBroadcastNotifications ниже (notified у них ещё false).
+// Новости без поля published (созданные до этой функции) считаются
+// опубликованными — фильтр where("published","==",false) их не находит.
+async function publishScheduledSchoolNews(db) {
+  console.log("Проверяю отложенные новости...");
+
+  const pendingSnapshot = await db
+    .collection("schoolNews")
+    .where("published", "==", false)
+    .limit(200)
+    .get();
+
+  if (pendingSnapshot.empty) {
+    console.log("Отложенных новостей нет.");
+    return;
+  }
+
+  const now = Date.now();
+  const batch = db.batch();
+  let published = 0;
+  for (const doc of pendingSnapshot.docs) {
+    const news = doc.data();
+    // publishAt отсутствует = черновик без даты — публикуется только вручную
+    // из админ-панели (кнопка «Опубликовать сейчас»), воркер его не трогает.
+    if (news.publishAt && news.publishAt <= now) {
+      batch.update(doc.ref, { published: true });
+      published++;
+    }
+  }
+  if (published > 0) {
+    await batch.commit();
+  }
+  console.log(`Отложенные новости: опубликовано ${published}`);
+}
+
 // НОВОЕ (push о новостях и опросах школы): рассылка всем подписчикам.
 // Клиент создаёт новость/опрос с notified=false (SchoolRepositoryImpl.addNews/
 // addPoll — право есть только у админов). Подписчики — пользователи с
@@ -419,6 +459,11 @@ async function sendSchoolBroadcastNotifications(db, messaging) {
     for (const doc of newsSnapshot.docs) {
       try {
         const news = doc.data();
+        // НОВОЕ (отложенная публикация): ещё не опубликованные новости
+        // (черновики/запланированные) не рассылаем и notified не трогаем —
+        // push уйдёт в том же прогоне, когда publishScheduledSchoolNews
+        // их опубликует.
+        if (news.published === false) continue;
         await broadcast(
           "📰 Новая новость школы",
           (news.text || "").substring(0, 200)
@@ -475,6 +520,7 @@ async function main() {
   await sendModerationNotifications(db, messaging);
   await sendTeacherQuestionNotifications(db, messaging);
   await sendLessonFileNotifications(db, messaging);
+  await publishScheduledSchoolNews(db);
   await sendSchoolBroadcastNotifications(db, messaging);
 }
 

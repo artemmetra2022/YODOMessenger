@@ -13,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -33,7 +34,11 @@ class SchoolViewModel @Inject constructor(
     val myDisplayName: String
         get() = firebaseAuth.currentUser?.email?.substringBefore("@") ?: "Пользователь"
 
+    // НОВОЕ (отложенная публикация): ученики видят только опубликованные
+    // новости — черновики и запланированные (published == false) скрыты.
+    // Админский экран (SchoolAdminViewModel) читает всё без фильтра.
     val news: StateFlow<List<SchoolNews>> = schoolRepository.observeNews()
+        .map { list -> list.filter { it.published } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val polls: StateFlow<List<SchoolPoll>> = schoolRepository.observePolls()

@@ -139,8 +139,12 @@ const AUDIT_LABELS = {
   SCHOOL_NEWS_EDITED: "Правка новости",
   SCHOOL_NEWS_PINNED: "Закрепление новости",
   SCHOOL_NEWS_DELETED: "Удаление новости",
+  SCHOOL_NEWS_PUBLISHED: "Публикация черновика новости",
+  SCHOOL_NEWS_DRAFT_SAVED: "Сохранён черновик новости",
   SCHOOL_POLL_ADDED: "Новый опрос",
   SCHOOL_POLL_DELETED: "Удаление опроса",
+  SCHOOL_POLL_CLOSED: "Закрытие/открытие опроса",
+  SCHOOL_PUSH_RESENT: "Ручная отправка push",
   SCHOOL_TEACHER_CREATED: "Создан профиль учителя",
   SCHOOL_TEACHER_LINKED: "Привязка аккаунта учителя",
   SCHOOL_TEACHER_UNLINKED: "Отвязка аккаунта учителя",
@@ -385,14 +389,19 @@ function startSettings() {
 
 function newsItem(docSnap) {
   const n = docSnap.data();
+  const isDraft = n.published === false;
   const el = document.createElement("div");
   el.className = "item";
   el.innerHTML = `
     <div class="item-head">
       ${n.pinned ? '<span class="badge badge-blue">📌 Закреплена</span>' : ""}
-      ${n.notified === false
-        ? '<span class="badge badge-yellow">push: в очереди</span>'
-        : '<span class="badge badge-green">push: отправлен</span>'}
+      ${isDraft
+        ? n.publishAt
+          ? '<span class="badge badge-blue">🕐 Запланирована: ' + esc(fmtDate(n.publishAt)) + '</span>'
+          : '<span class="badge badge-dim">✏️ Черновик</span>'
+        : n.notified === false
+          ? '<span class="badge badge-yellow">push: в очереди</span>'
+          : '<span class="badge badge-green">push: отправлен</span>'}
       <span class="item-title">${esc(n.sender || "")}</span>
       <span class="item-date">${fmtDate(n.pubDate)}</span>
     </div>
@@ -401,6 +410,8 @@ function newsItem(docSnap) {
     <div class="item-actions">
       <button class="btn-secondary" data-act="pin">${n.pinned ? "Открепить" : "Закрепить"}</button>
       <button class="btn-secondary" data-act="edit">Изменить текст</button>
+      ${isDraft ? '<button class="btn-secondary" data-act="publish">Опубликовать сейчас</button>' : ""}
+      ${!isDraft && n.notified !== false ? '<button class="btn-secondary" data-act="push">Отправить push</button>' : ""}
       <button class="btn-danger" data-act="delete">Удалить</button>
     </div>`;
   el.querySelector('[data-act="pin"]').addEventListener("click", () =>
@@ -417,6 +428,32 @@ function newsItem(docSnap) {
       })
       .catch(handleErr("Не удалось обновить новость"));
   });
+  // НОВОЕ (отложенная публикация): черновик/запланированная новость публикуется
+  // вручную — push уйдёт автоматически в ближайшем прогоне воркера.
+  const publishBtn = el.querySelector('[data-act="publish"]');
+  if (publishBtn) {
+    publishBtn.addEventListener("click", () => {
+      updateDoc(doc(db, "schoolNews", docSnap.id), { published: true })
+        .then(() => {
+          toast("Новость опубликована — push уйдёт подписчикам автоматически");
+          logAdminAction("SCHOOL_NEWS_PUBLISHED", (n.sender || "") + ": " + (n.text || "").slice(0, 100));
+        })
+        .catch(handleErr("Не удалось опубликовать новость"));
+    });
+  }
+  // НОВОЕ (ручной push): сбрасываем notified — воркер разошлёт в течение ~5 минут.
+  const pushBtn = el.querySelector('[data-act="push"]');
+  if (pushBtn) {
+    pushBtn.addEventListener("click", () => {
+      if (!confirm("Отправить push об этой новости всем подписчикам ещё раз?")) return;
+      updateDoc(doc(db, "schoolNews", docSnap.id), { notified: false })
+        .then(() => {
+          toast("Push поставлен в очередь — воркер отправит его в течение ~5 минут");
+          logAdminAction("SCHOOL_PUSH_RESENT", "Новость: " + (n.text || "").slice(0, 100));
+        })
+        .catch(handleErr("Не удалось отправить push"));
+    });
+  }
   el.querySelector('[data-act="delete"]').addEventListener("click", () => {
     if (!confirm("Удалить эту новость?")) return;
     deleteDoc(doc(db, "schoolNews", docSnap.id))
@@ -455,12 +492,32 @@ async function setNewsPinned(newsId, pinned) {
 }
 
 function startNews() {
+  // НОВОЕ (отложенная публикация): поле времени показывается только для
+  // режима «по времени».
+  $("news-publish-mode").addEventListener("change", () => {
+    $("news-publish-at").classList.toggle(
+      "hidden",
+      $("news-publish-mode").value !== "scheduled"
+    );
+  });
+
   $("form-add-news").addEventListener("submit", async (e) => {
     e.preventDefault();
     const sender = $("news-sender").value.trim();
     const text = $("news-text").value.trim();
     const eventDate = $("news-event-date").value.trim();
     if (!sender || !text) return;
+    const mode = $("news-publish-mode").value;
+    const publishAtRaw = $("news-publish-at").value;
+    const publishAt = mode === "scheduled" && publishAtRaw
+      ? new Date(publishAtRaw).getTime()
+      : null;
+    if (mode === "scheduled" && !publishAt) {
+      return toast("Укажите дату и время публикации", false);
+    }
+    if (publishAt && publishAt <= Date.now()) {
+      return toast("Время публикации уже прошло — выберите будущее время или «сразу»", false);
+    }
     try {
       await addDoc(collection(db, "schoolNews"), {
         sender,
@@ -468,14 +525,29 @@ function startNews() {
         eventDate,
         pubDate: Date.now(),
         pinned: false,
-        notified: false, // очередь push-воркера
+        // НОВОЕ (отложенная публикация): false = черновик/запланированная —
+        // ученики её не видят, push не уходит; воркер опубликует в publishAt
+        // или админ кнопкой «Опубликовать сейчас».
+        published: mode !== "draft" && mode !== "scheduled",
+        publishAt: publishAt || null,
+        notified: false, // очередь push-воркера (сработает после публикации)
       });
       $("news-text").value = "";
       $("news-event-date").value = "";
-      toast("Новость опубликована — push уйдёт подписчикам автоматически");
-      logAdminAction("SCHOOL_NEWS_ADDED", sender + ": " + text.slice(0, 100));
+      toast(
+        mode === "now"
+          ? "Новость опубликована — push уйдёт подписчикам автоматически"
+          : mode === "scheduled"
+            ? "Новость запланирована — опубликуется автоматически " + fmtDate(publishAt)
+            : "Черновик сохранён — ученики его не видят"
+      );
+      logAdminAction(
+        mode === "draft" ? "SCHOOL_NEWS_DRAFT_SAVED" : "SCHOOL_NEWS_ADDED",
+        sender + ": " + text.slice(0, 100) +
+          (publishAt ? " (запланировано на " + fmtDate(publishAt) + ")" : "")
+      );
     } catch (err) {
-      handleErr("Не удалось опубликовать новость")(err);
+      handleErr("Не удалось сохранить новость")(err);
     }
   });
 
@@ -516,6 +588,7 @@ function pollItem(docSnap) {
   el.innerHTML = `
     <div class="item-head">
       <span class="item-title">${esc(p.question || "")}</span>
+      ${p.closed ? '<span class="badge badge-dim">🔒 Завершён</span>' : ""}
       ${p.notified === false
         ? '<span class="badge badge-yellow">push: в очереди</span>'
         : '<span class="badge badge-green">push: отправлен</span>'}
@@ -535,8 +608,35 @@ function pollItem(docSnap) {
       })
       .join("")}
     <div class="item-actions">
+      ${!p.closed ? '<button class="btn-secondary" data-act="close">Завершить</button>' : '<button class="btn-secondary" data-act="reopen">Открыть снова</button>'}
+      ${p.notified !== false ? '<button class="btn-secondary" data-act="push">Отправить push</button>' : ""}
       <button class="btn-danger" data-act="delete">Удалить опрос</button>
     </div>`;
+  // НОВОЕ (закрытие опросов): закрытый опрос виден с результатами, но
+  // голосование запрещено (rules + повторная проверка в vote()).
+  el.querySelector('[data-act="close"], [data-act="reopen"]').addEventListener("click", () => {
+    const closing = !p.closed;
+    if (!confirm(closing ? "Завершить опрос? Голосование закроется, результаты останутся видимыми." : "Открыть опрос снова?")) return;
+    updateDoc(doc(db, "schoolPolls", docSnap.id), { closed: closing })
+      .then(() => {
+        toast(closing ? "Опрос завершён — голосование закрыто" : "Опрос снова открыт");
+        logAdminAction("SCHOOL_POLL_CLOSED", (closing ? "завершён: " : "открыт: ") + (p.question || ""));
+      })
+      .catch(handleErr("Не удалось изменить статус опроса"));
+  });
+  // НОВОЕ (ручной push): сбрасываем notified — воркер разошлёт в течение ~5 минут.
+  const pushBtn = el.querySelector('[data-act="push"]');
+  if (pushBtn) {
+    pushBtn.addEventListener("click", () => {
+      if (!confirm("Отправить push об этом опросе всем подписчикам ещё раз?")) return;
+      updateDoc(doc(db, "schoolPolls", docSnap.id), { notified: false })
+        .then(() => {
+          toast("Push поставлен в очередь — воркер отправит его в течение ~5 минут");
+          logAdminAction("SCHOOL_PUSH_RESENT", "Опрос: " + (p.question || "").slice(0, 100));
+        })
+        .catch(handleErr("Не удалось отправить push"));
+    });
+  }
   el.querySelector('[data-act="delete"]').addEventListener("click", () => {
     if (!confirm("Удалить опрос вместе с результатами?")) return;
     deleteDoc(doc(db, "schoolPolls", docSnap.id))
@@ -559,6 +659,9 @@ function startPolls() {
       .filter(Boolean);
     if (!question) return;
     if (options.length < 2) return toast("Нужно минимум два варианта ответа", false);
+    // НОВОЕ (тихое создание): без push при создании — notified=true, чтобы
+    // воркер не рассылал; push отправится позже кнопкой «Отправить push».
+    const silent = $("poll-silent").checked;
     try {
       const votes = {};
       options.forEach((_, i) => (votes[String(i)] = 0));
@@ -568,12 +671,15 @@ function startPolls() {
         votes,
         voters: {},
         createdAt: Date.now(),
-        notified: false, // очередь push-воркера
+        notified: !silent, // false = очередь push-воркера
       });
       $("poll-question").value = "";
       $("poll-options").value = "";
-      toast("Опрос создан — push уйдёт подписчикам автоматически");
-      logAdminAction("SCHOOL_POLL_ADDED", question);
+      $("poll-silent").checked = false;
+      toast(silent
+        ? "Опрос создан без push — разошлите кнопкой «Отправить push»"
+        : "Опрос создан — push уйдёт подписчикам автоматически");
+      logAdminAction("SCHOOL_POLL_ADDED", question + (silent ? " (без push)" : ""));
     } catch (err) {
       handleErr("Не удалось создать опрос")(err);
     }

@@ -120,7 +120,13 @@
             <input type="text" id="news-sender" placeholder="Отправитель (например, Администрация)" required>
             <textarea id="news-text" rows="4" placeholder="Текст новости" required></textarea>
             <input type="text" id="news-event-date" placeholder="Дата события (необязательно, например 12.09)">
-            <button type="submit" class="btn-primary">Опубликовать</button>
+            <select id="news-publish-mode">
+              <option value="now" selected>Опубликовать сразу</option>
+              <option value="scheduled">Опубликовать по времени</option>
+              <option value="draft">Сохранить черновик</option>
+            </select>
+            <input type="datetime-local" id="news-publish-at" class="hidden">
+            <button type="submit" class="btn-primary">Сохранить</button>
           </form>
         </div>
 
@@ -140,12 +146,16 @@
           <form id="form-add-poll" class="form-col">
             <input type="text" id="poll-question" placeholder="Вопрос" required>
             <textarea id="poll-options" rows="4" placeholder="Варианты ответа — по одному в строке (минимум два)" required></textarea>
+            <label class="toggle-row">
+              <input type="checkbox" id="poll-silent">
+              <span>Без push при создании (отправите кнопкой «Отправить push»)</span>
+            </label>
             <button type="submit" class="btn-primary">Создать опрос</button>
           </form>
         </div>
 
         <div class="card">
-          <h2>Активные опросы</h2>
+          <h2>Все опросы</h2>
           <div id="polls-list" class="item-list"></div>
         </div>
       </section>

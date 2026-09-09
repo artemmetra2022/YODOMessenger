@@ -13,7 +13,11 @@ data class SchoolNews(
     val text: String = "",
     val eventDate: String = "",
     val pubDate: Long = 0L,
-    val pinned: Boolean = false
+    val pinned: Boolean = false,
+    // НОВОЕ (отложенная публикация/черновики): false = черновик или
+    // запланированная новость — в приложении не показывается. Отсутствие
+    // поля у старых новостей трактуется как опубликованная.
+    val published: Boolean = true
 )
 
 /** Опрос (коллекция schoolPolls). votes: индекс варианта -> число голосов. */
@@ -23,7 +27,10 @@ data class SchoolPoll(
     val options: List<String> = emptyList(),
     val votes: Map<String, Long> = emptyMap(),
     val voters: Map<String, Long> = emptyMap(),
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    // НОВОЕ (закрытие опросов): закрытый опрос виден с результатами,
+    // но голосовать в нём нельзя.
+    val closed: Boolean = false
 ) {
     val totalVotes: Long get() = votes.values.sum()
     fun myVote(uid: String?): Int? = uid?.let { voters[it]?.toInt() }
