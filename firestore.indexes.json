@@ -103,13 +103,6 @@
         { "fieldPath": "pinned", "order": "DESCENDING" },
         { "fieldPath": "pubDate", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "questions",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
     }
   ],
   "fieldOverrides": [
@@ -129,6 +122,20 @@
     },
     {
       "collectionGroup": "reports",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "questions",
       "fieldPath": "createdAt",
       "indexes": [
         {
