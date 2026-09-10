@@ -103,6 +103,13 @@
         { "fieldPath": "pinned", "order": "DESCENDING" },
         { "fieldPath": "pubDate", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "questions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
