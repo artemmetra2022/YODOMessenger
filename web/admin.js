@@ -1876,73 +1876,117 @@ async function refreshSummary() {
   const grid = $("summary-grid");
   grid.innerHTML = '<p class="empty-note">Считаю…</p>';
   try {
-    const [news, polls, ideas, reviews, teachers, questions, reports, users, blocks] = await Promise.all([
-      getDocs(collection(db, "schoolNews")),
-      getDocs(collection(db, "schoolPolls")),
-      getDocs(collection(db, "schoolIdeas")),
-      getDocs(collection(db, "schoolReviews")),
-      getDocs(collection(db, "schoolTeacherProfiles")),
-      getDocs(query(collectionGroup(db, "questions"), orderBy("createdAt", "desc"), limit(300))),
-      getDocs(query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(200))),
-      getDocs(collection(db, "users")),
-      getDocs(collection(db, "globalBlocks")),
+    // ИСПРАВЛЕНО: раньше одно недоступное чтение (например, список users или
+    // globalBlocks, если правила Firestore не задеплоены) роняло Promise.all и
+    // всю сводку целиком. Теперь каждый источник читается независимо: те, что
+    // доступны, отображаются; недоступные пропускаются и логируются в консоль
+    // с указанием кода ошибки — это же даёт диагностику при настройке правил.
+    const results = await Promise.allSettled([
+      getDocs(collection(db, "schoolNews")),                                        // 0
+      getDocs(collection(db, "schoolPolls")),                                       // 1
+      getDocs(collection(db, "schoolIdeas")),                                       // 2
+      getDocs(collection(db, "schoolReviews")),                                     // 3
+      getDocs(collection(db, "schoolTeacherProfiles")),                             // 4
+      getDocs(query(collectionGroup(db, "questions"), orderBy("createdAt", "desc"), limit(300))), // 5
+      getDocs(query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(200))),   // 6
+      getDocs(collection(db, "users")),                                             // 7
+      getDocs(collection(db, "globalBlocks")),                                      // 8
     ]);
+    const names = ["Новости", "Опросы", "Идеи", "Отзывы", "Учителя", "Вопросы", "Жалобы", "Пользователи", "Блокировки"];
+    const src = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") src[i] = r.value;
+      else {
+        console.warn("Сводка: источник недоступен:", names[i], r.reason?.code || r.reason?.message || r.reason);
+      }
+    });
+    const avail = (i) => !!src[i];
+
     const now = Date.now();
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-    let starsSum = 0;
-    reviews.forEach((d) => (starsSum += d.data().stars || 0));
-    const unanswered = questions.docs.filter((d) => {
-      const q = d.data();
-      return !q.answer && q.hidden !== true;
-    }).length;
-    const answeredQuestions = questions.docs.filter((d) => !!d.data().answer);
-    const avgAnswerMs = answeredQuestions.length
-      ? answeredQuestions.reduce(
-          (sum, d) => sum + Math.max(0, (d.data().answeredAt || 0) - (d.data().createdAt || 0)),
-          0
-        ) / answeredQuestions.length
-      : 0;
-    const linked = teachers.docs.filter((d) => !!d.data().linkedUserId).length;
-    const pendingReports = reports.docs.filter(
-      (d) => (d.data().status || "PENDING") === "PENDING"
-    ).length;
-    const newUsers = users.docs.filter((d) => (d.data().createdAt || 0) >= weekAgo).length;
-    const activeUsers = users.docs.filter((d) => (d.data().lastSeen || 0) >= weekAgo).length;
-    const onlineUsers = users.docs.filter((d) => {
-      const u = d.data();
-      return u.isOnline === true && u.hideOnlineStatus !== true && now - (u.lastSeen || 0) <= 60_000;
-    }).length;
-    const publishedNewsWaitingPush = news.docs.filter(
-      (d) => d.data().published !== false && d.data().notified === false
-    ).length;
-    const pollsWaitingPush = polls.docs.filter((d) => d.data().notified === false).length;
-    const openPolls = polls.docs.filter((d) => d.data().closed !== true).length;
-    const stats = [
-      { value: users.size, label: "пользователей", section: "users" },
-      { value: activeUsers, label: "активных за 7 дней", section: "users" },
-      { value: newUsers, label: "новых за 7 дней", section: "users" },
-      { value: onlineUsers, label: "сейчас онлайн", section: "users" },
-      { value: blocks.size, label: "глобальных блокировок", section: "blocks" },
-      { value: news.size, label: "новостей", section: "news" },
-      { value: publishedNewsWaitingPush + pollsWaitingPush, label: "push в очереди", section: "news" },
-      { value: polls.size + " (" + openPolls + " открыто)", label: "опросов", section: "polls" },
-      { value: unanswered, label: "вопросов без ответа", section: "inbox" },
-      {
-        value: avgAnswerMs > 0 ? fmtDuration(avgAnswerMs) : "—",
-        label: "среднее время ответа",
-        section: "inbox",
-      },
-      { value: pendingReports, label: "жалоб на рассмотрении", section: "reports" },
-      { value: teachers.size + " (" + linked + " привяз.)", label: "учителей", section: "teachers" },
-      { value: ideas.size, label: "идей", section: "ideas" },
-      {
+    const stats = [];
+
+    if (avail(7)) {
+      const users = src[7];
+      const newUsers = users.docs.filter((d) => (d.data().createdAt || 0) >= weekAgo).length;
+      const activeUsers = users.docs.filter((d) => (d.data().lastSeen || 0) >= weekAgo).length;
+      const onlineUsers = users.docs.filter((d) => {
+        const u = d.data();
+        return u.isOnline === true && u.hideOnlineStatus !== true && now - (u.lastSeen || 0) <= 60_000;
+      }).length;
+      stats.push(
+        { value: users.size, label: "пользователей", section: "users" },
+        { value: activeUsers, label: "активных за 7 дней", section: "users" },
+        { value: newUsers, label: "новых за 7 дней", section: "users" },
+        { value: onlineUsers, label: "сейчас онлайн", section: "users" },
+      );
+    }
+    if (avail(8)) stats.push({ value: src[8].size, label: "глобальных блокировок", section: "blocks" });
+    if (avail(0)) stats.push({ value: src[0].size, label: "новостей", section: "news" });
+    if (avail(0) || avail(1)) {
+      const newsWaiting = avail(0)
+        ? src[0].docs.filter((d) => d.data().published !== false && d.data().notified === false).length
+        : 0;
+      const pollsWaiting = avail(1)
+        ? src[1].docs.filter((d) => d.data().notified === false).length
+        : 0;
+      stats.push({ value: newsWaiting + pollsWaiting, label: "push в очереди", section: "news" });
+    }
+    if (avail(1)) {
+      const openPolls = src[1].docs.filter((d) => d.data().closed !== true).length;
+      stats.push({ value: src[1].size + " (" + openPolls + " открыто)", label: "опросов", section: "polls" });
+    }
+    if (avail(5)) {
+      const questions = src[5];
+      const unanswered = questions.docs.filter((d) => {
+        const q = d.data();
+        return !q.answer && q.hidden !== true;
+      }).length;
+      const answeredQuestions = questions.docs.filter((d) => !!d.data().answer);
+      const avgAnswerMs = answeredQuestions.length
+        ? answeredQuestions.reduce(
+            (sum, d) => sum + Math.max(0, (d.data().answeredAt || 0) - (d.data().createdAt || 0)),
+            0
+          ) / answeredQuestions.length
+        : 0;
+      stats.push(
+        { value: unanswered, label: "вопросов без ответа", section: "inbox" },
+        {
+          value: avgAnswerMs > 0 ? fmtDuration(avgAnswerMs) : "—",
+          label: "среднее время ответа",
+          section: "inbox",
+        },
+      );
+    }
+    if (avail(6)) {
+      const pendingReports = src[6].docs.filter(
+        (d) => (d.data().status || "PENDING") === "PENDING"
+      ).length;
+      stats.push({ value: pendingReports, label: "жалоб на рассмотрении", section: "reports" });
+    }
+    if (avail(4)) {
+      const linked = src[4].docs.filter((d) => !!d.data().linkedUserId).length;
+      stats.push({ value: src[4].size + " (" + linked + " привяз.)", label: "учителей", section: "teachers" });
+    }
+    if (avail(2)) stats.push({ value: src[2].size, label: "идей", section: "ideas" });
+    if (avail(3)) {
+      const reviews = src[3];
+      let starsSum = 0;
+      reviews.forEach((d) => (starsSum += d.data().stars || 0));
+      stats.push({
         value: reviews.size
           ? (starsSum / reviews.size).toFixed(1) + " / 5 (" + reviews.size + ")"
           : "—",
         label: "средняя оценка",
         section: "reviews",
-      },
-    ];
+      });
+    }
+
+    if (!stats.length) {
+      grid.innerHTML =
+        '<p class="empty-note">Не удалось получить данные. Подробности — в консоли браузера (F12).</p>';
+      return;
+    }
     grid.innerHTML = "";
     for (const s of stats) {
       const el = document.createElement("div");

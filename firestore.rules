@@ -14,6 +14,18 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // ИСПРАВЛЕНО (Questions CG): разделы «Вопросы учеников» (Inbox) и «Обзор»
+    // веб-админки читают вопросы ВСЕХ учителей через collection-group запрос
+    // collectionGroup(db, "questions") — точно как reports выше. Вложенное
+    // правило `schoolTeacherProfiles/{teacherName}/questions/{questionId}` не
+    // разрешает collection-group запрос, поэтому без этого блока чтение
+    // отклонялось даже админу (permission-denied). Разрешение симметрично
+    // reports: сквозной доступ только двум админам; обычные постраничные
+    // чтения внутри одного учителя остаются за вложенным правилом (isSignedIn).
+    match /{path=**}/questions/{questionId} {
+      allow read: if isOfficialChannelAdmin();
+    }
+
     // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
     // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
     // сразу после полноэкранного просмотра — иначе фото так и останется читаемым на
