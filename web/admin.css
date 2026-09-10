@@ -273,6 +273,22 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .summary-stat .stat-label { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
 .summary-stat a { color: var(--accent); text-decoration: none; cursor: pointer; }
 
+/* ===== Предпросмотр новости ===== */
+
+.news-preview {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px dashed var(--bg-input);
+  border-radius: var(--radius);
+}
+.news-preview::before {
+  content: "Предпросмотр у ученика";
+  display: block;
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
 /* ===== Жалобы: фильтры и превью ===== */
 
 .filter-row {

@@ -114,6 +114,24 @@ function setLoading(listEl) {
   listEl.innerHTML = '<p class="empty-note">Загрузка…</p>';
 }
 
+/** ms → значение для <input type="datetime-local"> (локальное время). */
+function toDatetimeLocal(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+    "T" + pad(d.getHours()) + ":" + pad(d.getMinutes())
+  );
+}
+
+/** Значение <input type="datetime-local"> → ms (0 = не задано). */
+function fromDatetimeLocal(value) {
+  if (!value) return 0;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
 function handleErr(prefix) {
   return (err) => {
     console.error(prefix, err);
@@ -155,6 +173,7 @@ const AUDIT_LABELS = {
   SCHOOL_SCHEDULE_STATUS_SET: "Пометка актуальности расписания",
   SCHOOL_HOLIDAY_DATE_SET: "Дата каникул",
   SCHOOL_SECTION_VISIBILITY: "Видимость раздела «Школа»",
+  SYSTEM_BANNER_SET: "Баннер для пользователей",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -293,6 +312,15 @@ function startSettings() {
 
     // Дата каникул от админа (пустая строка — используется зашитая из сборки).
     $("holiday-date").value = snap.get("schoolHolidayDate") || "";
+
+    // Баннер для пользователей (веб-версия мессенджера).
+    $("banner-enabled").checked = snap.get("bannerEnabled") === true;
+    $("banner-title").value = snap.get("bannerTitle") || "";
+    $("banner-text").value = snap.get("bannerText") || "";
+    $("banner-link-text").value = snap.get("bannerLinkText") || "";
+    $("banner-link-url").value = snap.get("bannerLinkUrl") || "";
+    $("banner-start-at").value = toDatetimeLocal(snap.get("bannerStartAt"));
+    $("banner-end-at").value = toDatetimeLocal(snap.get("bannerEndAt"));
   }, handleErr("Не удалось загрузить настройки"));
 
   $("toggle-school-hidden").addEventListener("change", async (e) => {
@@ -379,6 +407,53 @@ function startSettings() {
       );
     } catch (err) {
       handleErr("Не удалось сохранить дату каникул")(err);
+    }
+  });
+
+  // Баннер для пользователей (веб-версия мессенджера). Пустые даты = всегда.
+  $("form-banner").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const enabled = $("banner-enabled").checked;
+    const title = $("banner-title").value.trim();
+    const text = $("banner-text").value.trim();
+    const linkText = $("banner-link-text").value.trim();
+    const linkUrl = $("banner-link-url").value.trim();
+    if (enabled && !title) {
+      toast("Заголовок обязателен, когда баннер включён", false);
+      return;
+    }
+    if (linkText && !linkUrl) {
+      toast("Укажите ссылку для кнопки", false);
+      return;
+    }
+    const startAt = fromDatetimeLocal($("banner-start-at").value);
+    const endAt = fromDatetimeLocal($("banner-end-at").value);
+    if (startAt && endAt && endAt <= startAt) {
+      toast("Дата окончания должна быть позже начала", false);
+      return;
+    }
+    try {
+      await setDoc(
+        settingsRef,
+        {
+          bannerEnabled: enabled,
+          bannerTitle: title,
+          bannerText: text,
+          bannerLinkText: linkText,
+          bannerLinkUrl: linkUrl,
+          bannerStartAt: startAt,
+          bannerEndAt: endAt,
+          bannerUpdatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+      toast(enabled ? "Баннер включён и показан пользователям" : "Баннер выключен");
+      logAdminAction(
+        "SYSTEM_BANNER_SET",
+        (enabled ? "включён: " : "выключен: ") + (title || "")
+      );
+    } catch (err) {
+      handleErr("Не удалось сохранить баннер")(err);
     }
   });
 }
@@ -499,6 +574,34 @@ function startNews() {
       "hidden",
       $("news-publish-mode").value !== "scheduled"
     );
+  });
+
+  // НОВОЕ (предпросмотр): кнопка показывает/скрывает живой предпросмотр,
+  // который обновляется по мере ввода — как новость будет выглядеть у учеников.
+  const previewEl = $("news-preview");
+  function renderNewsPreview() {
+    const sender = $("news-sender").value.trim();
+    const text = $("news-text").value.trim();
+    const eventDate = $("news-event-date").value.trim();
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `
+      <div class="item-head">
+        <span class="item-title">${esc(sender || "Отправитель")}</span>
+        <span class="item-date">${esc(eventDate ? "📅 Событие: " + eventDate : "")}</span>
+      </div>
+      <div class="item-text">${esc(text || "Текст новости…")}</div>`;
+    previewEl.innerHTML = "";
+    previewEl.appendChild(el);
+  }
+  $("btn-news-preview").addEventListener("click", () => {
+    previewEl.classList.toggle("hidden");
+    if (!previewEl.classList.contains("hidden")) renderNewsPreview();
+  });
+  ["news-sender", "news-text", "news-event-date"].forEach((id) => {
+    $(id).addEventListener("input", () => {
+      if (!previewEl.classList.contains("hidden")) renderNewsPreview();
+    });
   });
 
   $("form-add-news").addEventListener("submit", async (e) => {

@@ -107,6 +107,30 @@
             <span>Требовать подтверждение email при входе (для всех новых входов)</span>
           </label>
         </div>
+
+        <!-- НОВОЕ (баннер): объявление вверху веб-версии мессенджера
+             (техработы, важное объявление). Хранится в config/appSettings. -->
+        <div class="card">
+          <h2>Баннер для пользователей</h2>
+          <p class="card-hint">Показывается вверху веб-версии мессенджера. Пустые даты — показывать всегда, пока включено.</p>
+          <form id="form-banner" class="form-col">
+            <label class="toggle-row">
+              <input type="checkbox" id="banner-enabled">
+              <span>Показывать баннер</span>
+            </label>
+            <input type="text" id="banner-title" placeholder="Заголовок (например, Технические работы)" autocomplete="off">
+            <textarea id="banner-text" rows="2" placeholder="Текст объявления (необязательно)"></textarea>
+            <div class="form-row">
+              <input type="text" id="banner-link-text" placeholder="Текст кнопки (необязательно, например Подробнее)" autocomplete="off">
+              <input type="url" id="banner-link-url" placeholder="Ссылка кнопки (https://…)" autocomplete="off">
+            </div>
+            <div class="form-row">
+              <input type="datetime-local" id="banner-start-at">
+              <input type="datetime-local" id="banner-end-at">
+            </div>
+            <button type="submit" class="btn-primary">Сохранить баннер</button>
+          </form>
+        </div>
       </section>
 
       <!-- СЕКЦИЯ: Новости -->
@@ -126,8 +150,12 @@
               <option value="draft">Сохранить черновик</option>
             </select>
             <input type="datetime-local" id="news-publish-at" class="hidden">
-            <button type="submit" class="btn-primary">Сохранить</button>
+            <div class="form-row">
+              <button type="submit" class="btn-primary">Сохранить</button>
+              <button type="button" class="btn-secondary" id="btn-news-preview">👁 Предпросмотр</button>
+            </div>
           </form>
+          <div id="news-preview" class="news-preview hidden"></div>
         </div>
 
         <div class="card">
