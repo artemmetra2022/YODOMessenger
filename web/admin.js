@@ -561,6 +561,7 @@ function startNews() {
       limit(50)
     ),
     (snap) => {
+      newsCache = snap.docs.map((d) => d.data());
       if (snap.empty) {
         listEl.innerHTML = '<p class="empty-note">Новостей пока нет.</p>';
         return;
@@ -690,6 +691,7 @@ function startPolls() {
   onSnapshot(
     query(collection(db, "schoolPolls"), orderBy("createdAt", "desc"), limit(50)),
     (snap) => {
+      pollsCache = snap.docs.map((d) => d.data());
       if (snap.empty) {
         listEl.innerHTML = '<p class="empty-note">Опросов пока нет.</p>';
         return;
@@ -1186,6 +1188,10 @@ function startTeachers() {
 
 let ideasCache = [];
 let reviewsCache = [];
+// НОВОЕ (экспорт CSV): снимки последних загруженных новостей и опросов —
+// разделы уже держат подписку, поэтому выгрузка не делает лишних запросов.
+let newsCache = [];
+let pollsCache = [];
 
 function csvEscape(value) {
   return '"' + String(value ?? "").replace(/"/g, '""') + '"';
@@ -1232,6 +1238,85 @@ function initCsvExport() {
       ])
     );
     toast("CSV отзывов скачан (" + reviewsCache.length + ")");
+  });
+
+  // НОВОЕ (экспорт CSV): новости — из уже загруженного списка (newsCache).
+  $("btn-export-news").addEventListener("click", () => {
+    if (!newsCache.length) return toast("Новостей пока нет — выгружать нечего", false);
+    downloadCsv(
+      "yodo-school-news.csv",
+      ["Отправитель", "Текст", "Дата события", "Статус", "Дата публикации", "Push"],
+      newsCache.map((n) => [
+        n.sender || "",
+        n.text || "",
+        n.eventDate || "",
+        n.published === false
+          ? n.publishAt
+            ? "запланирована на " + fmtDate(n.publishAt)
+            : "черновик"
+          : "опубликована",
+        fmtDate(n.pubDate),
+        n.notified === false ? "в очереди" : "отправлен",
+      ])
+    );
+    toast("CSV новостей скачан (" + newsCache.length + ")");
+  });
+
+  // НОВОЕ (экспорт CSV): опросы с результатами голосования (pollsCache).
+  $("btn-export-polls").addEventListener("click", () => {
+    if (!pollsCache.length) return toast("Опросов пока нет — выгружать нечего", false);
+    downloadCsv(
+      "yodo-school-polls.csv",
+      ["Вопрос", "Создан", "Статус", "Голосовавших", "Всего голосов", "Результаты"],
+      pollsCache.map((p) => {
+        const options = p.options || [];
+        const votes = p.votes || {};
+        const totalVotes = options.reduce((sum, _, i) => sum + (votes[String(i)] || 0), 0);
+        return [
+          p.question || "",
+          fmtDate(p.createdAt),
+          p.closed ? "завершён" : "открыт",
+          Object.keys(p.voters || {}).length,
+          totalVotes,
+          options.map((opt, i) => opt + ": " + (votes[String(i)] || 0)).join(" | "),
+        ];
+      })
+    );
+    toast("CSV опросов скачан (" + pollsCache.length + ")");
+  });
+
+  // НОВОЕ (экспорт CSV): пользователи читаются по кнопке (полный список, как
+  // в сводке) — раздел «Пользователи» держит только поиск, а не весь список.
+  $("btn-export-users").addEventListener("click", async () => {
+    const btn = $("btn-export-users");
+    btn.disabled = true;
+    try {
+      const snap = await getDocs(collection(db, "users"));
+      if (snap.empty) return toast("Пользователей нет — выгружать нечего", false);
+      const rows = snap.docs.map((d) => {
+        const u = d.data();
+        return [
+          u.displayName || "",
+          u.username ? "@" + u.username : "",
+          u.email || "",
+          u.publicId || "",
+          d.id,
+          fmtDate(u.createdAt),
+          fmtDate(u.lastSeen),
+          u.isOnline === true && u.hideOnlineStatus !== true ? "да" : "",
+        ];
+      });
+      downloadCsv(
+        "yodo-users.csv",
+        ["Имя", "Username", "Email", "Публичный ID", "UID", "Регистрация", "Последняя активность", "Онлайн"],
+        rows
+      );
+      toast("CSV пользователей скачан (" + rows.length + ")");
+    } catch (err) {
+      handleErr("Не удалось выгрузить пользователей")(err);
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 
