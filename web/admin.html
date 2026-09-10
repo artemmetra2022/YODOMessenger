@@ -163,7 +163,13 @@
             <h2>Опубликованные</h2>
             <button type="button" class="btn-secondary" id="btn-export-news">⬇ CSV</button>
           </div>
+          <div class="filter-row">
+            <button type="button" class="filter-btn news-filter-btn active" data-filter="all">Все</button>
+            <button type="button" class="filter-btn news-filter-btn" data-filter="published">Опубликованные</button>
+            <button type="button" class="filter-btn news-filter-btn" data-filter="drafts">Черновики и запланированные</button>
+          </div>
           <div id="news-list" class="item-list"></div>
+          <button type="button" class="btn-secondary hidden" id="btn-news-more">Показать ещё</button>
         </div>
       </section>
 
@@ -190,7 +196,13 @@
             <h2>Все опросы</h2>
             <button type="button" class="btn-secondary" id="btn-export-polls">⬇ CSV</button>
           </div>
+          <div class="filter-row">
+            <button type="button" class="filter-btn polls-filter-btn active" data-filter="all">Все</button>
+            <button type="button" class="filter-btn polls-filter-btn" data-filter="open">Открытые</button>
+            <button type="button" class="filter-btn polls-filter-btn" data-filter="closed">Завершённые</button>
+          </div>
           <div id="polls-list" class="item-list"></div>
+          <button type="button" class="btn-secondary hidden" id="btn-polls-more">Показать ещё</button>
         </div>
       </section>
 
@@ -272,6 +284,7 @@
             <button type="button" class="filter-btn" data-filter="ALL">Все</button>
           </div>
           <div id="reports-list" class="item-list"></div>
+          <button type="button" class="btn-secondary hidden" id="btn-reports-more">Показать ещё</button>
         </div>
       </section>
 
@@ -289,6 +302,15 @@
             <p class="card-hint">Выгрузка всех аккаунтов (имя, контакты, регистрация, активность) в CSV для Excel.</p>
             <button type="button" class="btn-secondary" id="btn-export-users">⬇ CSV</button>
           </div>
+        </div>
+        <div class="card">
+          <h2>Все пользователи</h2>
+          <div class="filter-row">
+            <button type="button" class="filter-btn users-filter-btn active" data-filter="all">Все</button>
+            <button type="button" class="filter-btn users-filter-btn" data-filter="blocked">Заблокированные</button>
+          </div>
+          <div id="users-list" class="item-list"></div>
+          <button type="button" class="btn-secondary hidden" id="btn-users-more">Показать ещё</button>
         </div>
         <div class="card hidden" id="user-card">
           <div class="card-head">

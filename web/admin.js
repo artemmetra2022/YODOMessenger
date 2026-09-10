@@ -43,6 +43,7 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
   onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -655,25 +656,56 @@ function startNews() {
   });
 
   const listEl = $("news-list");
-  setLoading(listEl);
-  onSnapshot(
-    query(
-      collection(db, "schoolNews"),
-      orderBy("pinned", "desc"),
-      orderBy("pubDate", "desc"),
-      limit(50)
-    ),
-    (snap) => {
-      newsCache = snap.docs.map((d) => d.data());
-      if (snap.empty) {
-        listEl.innerHTML = '<p class="empty-note">Новостей пока нет.</p>';
-        return;
-      }
-      listEl.innerHTML = "";
-      snap.forEach((d) => listEl.appendChild(newsItem(d)));
-    },
-    handleErr("Не удалось загрузить новости")
-  );
+  const moreBtn = $("btn-news-more");
+  let newsUnsub = null;
+  let newsFilter = "all"; // all | published | drafts
+  let newsLimit = 50;
+
+  function loadNews() {
+    if (newsUnsub) newsUnsub();
+    setLoading(listEl);
+    moreBtn.classList.add("hidden");
+    newsUnsub = onSnapshot(
+      query(
+        collection(db, "schoolNews"),
+        orderBy("pinned", "desc"),
+        orderBy("pubDate", "desc"),
+        limit(newsLimit)
+      ),
+      (snap) => {
+        newsCache = snap.docs.map((d) => d.data());
+        let docs = snap.docs;
+        // Фильтр на клиенте: не нужен составной индекс на published.
+        if (newsFilter === "published") docs = docs.filter((d) => d.data().published !== false);
+        if (newsFilter === "drafts") docs = docs.filter((d) => d.data().published === false);
+        if (!docs.length) {
+          listEl.innerHTML = '<p class="empty-note">Новостей пока нет.</p>';
+        } else {
+          listEl.innerHTML = "";
+          docs.forEach((d) => listEl.appendChild(newsItem(d)));
+        }
+        moreBtn.classList.toggle("hidden", snap.size < newsLimit);
+      },
+      handleErr("Не удалось загрузить новости")
+    );
+  }
+
+  document.querySelectorAll(".news-filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".news-filter-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      newsFilter = btn.dataset.filter;
+      newsLimit = 50; // смена фильтра сбрасывает пагинацию
+      loadNews();
+    });
+  });
+
+  moreBtn.addEventListener("click", () => {
+    newsLimit += 50;
+    loadNews();
+  });
+
+  loadNews();
 }
 
 /* ------------------------------------------------------------------ */
@@ -790,20 +822,50 @@ function startPolls() {
   });
 
   const listEl = $("polls-list");
-  setLoading(listEl);
-  onSnapshot(
-    query(collection(db, "schoolPolls"), orderBy("createdAt", "desc"), limit(50)),
-    (snap) => {
-      pollsCache = snap.docs.map((d) => d.data());
-      if (snap.empty) {
-        listEl.innerHTML = '<p class="empty-note">Опросов пока нет.</p>';
-        return;
-      }
-      listEl.innerHTML = "";
-      snap.forEach((d) => listEl.appendChild(pollItem(d)));
-    },
-    handleErr("Не удалось загрузить опросы")
-  );
+  const moreBtn = $("btn-polls-more");
+  let pollsUnsub = null;
+  let pollsFilter = "all"; // all | open | closed
+  let pollsLimit = 50;
+
+  function loadPolls() {
+    if (pollsUnsub) pollsUnsub();
+    setLoading(listEl);
+    moreBtn.classList.add("hidden");
+    pollsUnsub = onSnapshot(
+      query(collection(db, "schoolPolls"), orderBy("createdAt", "desc"), limit(pollsLimit)),
+      (snap) => {
+        pollsCache = snap.docs.map((d) => d.data());
+        let docs = snap.docs;
+        if (pollsFilter === "open") docs = docs.filter((d) => d.data().closed !== true);
+        if (pollsFilter === "closed") docs = docs.filter((d) => d.data().closed === true);
+        if (!docs.length) {
+          listEl.innerHTML = '<p class="empty-note">Опросов пока нет.</p>';
+        } else {
+          listEl.innerHTML = "";
+          docs.forEach((d) => listEl.appendChild(pollItem(d)));
+        }
+        moreBtn.classList.toggle("hidden", snap.size < pollsLimit);
+      },
+      handleErr("Не удалось загрузить опросы")
+    );
+  }
+
+  document.querySelectorAll(".polls-filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".polls-filter-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      pollsFilter = btn.dataset.filter;
+      pollsLimit = 50; // смена фильтра сбрасывает пагинацию
+      loadPolls();
+    });
+  });
+
+  moreBtn.addEventListener("click", () => {
+    pollsLimit += 50;
+    loadPolls();
+  });
+
+  loadPolls();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1512,6 +1574,7 @@ const REPORT_STATUS_LABELS = {
 };
 
 let reportsCache = []; // снапшот последнего запроса для CSV
+let reportsLimit = 200; // НОВОЕ (пагинация): размер окна ленты жалоб
 let reportsFilter = "PENDING";
 let reportsUnsub = null;
 
@@ -1703,6 +1766,8 @@ function updateReportsBadge(docs) {
 function renderReports(snap) {
   reportsCache = snap.docs;
   updateReportsBadge(snap.docs);
+  // НОВОЕ (пагинация): «Показать ещё», пока запрос вернул полное окно.
+  $("btn-reports-more").classList.toggle("hidden", snap.size < reportsLimit);
   const listEl = $("reports-list");
   const status = reportsFilter;
   const docs = status === "ALL"
@@ -1729,10 +1794,21 @@ function startReports() {
   });
   setLoading($("reports-list"));
   reportsUnsub = onSnapshot(
-    query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(200)),
+    query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(reportsLimit)),
     renderReports,
     handleErr("Не удалось загрузить жалобы")
   );
+  // НОВОЕ (пагинация): увеличиваем окно и переподписываемся.
+  $("btn-reports-more").addEventListener("click", () => {
+    reportsLimit += 200;
+    if (reportsUnsub) reportsUnsub();
+    setLoading($("reports-list"));
+    reportsUnsub = onSnapshot(
+      query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(reportsLimit)),
+      renderReports,
+      handleErr("Не удалось загрузить жалобы")
+    );
+  });
   $("btn-export-reports").addEventListener("click", () => {
     if (!reportsCache.length) return toast("Жалоб пока нет — выгружать нечего", false);
     downloadCsv(
@@ -1916,12 +1992,96 @@ async function runUsersSearch() {
   }
 }
 
+// НОВОЕ (список всех пользователей): страницы по 50 через startAfter,
+// фильтр «Заблокированные» — по набору uid из globalBlocks.
+let usersListState = {
+  lastDoc: null,
+  filter: "all", // all | blocked
+  blockedUids: new Set(),
+  hasMore: true,
+  loading: false,
+};
+
+async function loadBlockedUids() {
+  try {
+    const snap = await getDocs(collection(db, "globalBlocks"));
+    usersListState.blockedUids = new Set(snap.docs.map((d) => d.id));
+  } catch (e) { /* фильтр «Заблокированные» просто покажет всех */ }
+}
+
+function userListRow(d) {
+  const u = d.data();
+  const blocked = usersListState.blockedUids.has(d.id);
+  const el = document.createElement("div");
+  el.className = "item";
+  el.innerHTML = `
+    <div class="item-head">
+      <span class="item-title">${esc(u.displayName || "Без имени")}${blocked ? ' <span class="badge badge-dim">⛔ заблокирован</span>' : ""}</span>
+      <span class="item-date">${fmtDate(u.createdAt)}</span>
+    </div>
+    <div class="item-sub">${esc(u.username ? "@" + u.username : "")}${u.email ? " · " + esc(u.email) : ""}</div>
+    <div class="item-sub">UID: ${esc(d.id)}${u.lastSeen ? " · активен: " + fmtDate(u.lastSeen) : ""}</div>
+    <div class="item-actions">
+      <button class="btn-secondary">Открыть карточку</button>
+    </div>`;
+  el.querySelector("button").addEventListener("click", () => openUserCard(d.id));
+  return el;
+}
+
+async function loadUsersPage(reset) {
+  if (usersListState.loading) return;
+  const listEl = $("users-list");
+  const moreBtn = $("btn-users-more");
+  if (reset) {
+    usersListState.lastDoc = null;
+    usersListState.hasMore = true;
+    listEl.innerHTML = "";
+  }
+  if (!usersListState.hasMore) return;
+  usersListState.loading = true;
+  moreBtn.disabled = true;
+  try {
+    let q = query(collection(db, "users"), orderBy("createdAt", "desc"), limit(50));
+    if (usersListState.lastDoc) q = query(q, startAfter(usersListState.lastDoc));
+    const snap = await getDocs(q);
+    const docs = snap.docs;
+    usersListState.lastDoc = docs.length ? docs[docs.length - 1] : null;
+    usersListState.hasMore = docs.length === 50;
+    const visible = usersListState.filter === "blocked"
+      ? docs.filter((d) => usersListState.blockedUids.has(d.id))
+      : docs;
+    if (reset && !visible.length) {
+      listEl.innerHTML = '<p class="empty-note">Пользователей пока нет.</p>';
+    }
+    visible.forEach((d) => listEl.appendChild(userListRow(d)));
+    moreBtn.classList.toggle("hidden", !usersListState.hasMore);
+  } catch (err) {
+    handleErr("Не удалось загрузить пользователей")(err);
+  } finally {
+    usersListState.loading = false;
+    moreBtn.disabled = false;
+  }
+}
+
 function startUsers() {
   $("users-search-input").addEventListener("input", () => {
     clearTimeout(usersSearchTimer);
     usersSearchTimer = setTimeout(runUsersSearch, 350);
   });
   $("btn-close-user-card").addEventListener("click", closeUserCard);
+
+  // НОВОЕ (список всех + пагинация): страницами по 50, фильтр «Все /
+  // Заблокированные» (uid из globalBlocks читаются один раз).
+  document.querySelectorAll(".users-filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".users-filter-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      usersListState.filter = btn.dataset.filter;
+      loadUsersPage(true);
+    });
+  });
+  $("btn-users-more").addEventListener("click", () => loadUsersPage(false));
+  loadBlockedUids().then(() => loadUsersPage(true));
 }
 
 /* ------------------------------------------------------------------ */
