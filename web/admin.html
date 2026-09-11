@@ -43,6 +43,8 @@
         <button class="nav-btn active" data-section="settings">⚙️ Обзор</button>
         <button class="nav-btn" data-section="news">📰 Новости</button>
         <button class="nav-btn" data-section="polls">📊 Опросы</button>
+        <button class="nav-btn" data-section="channel">📣 Канал</button>
+        <button class="nav-btn" data-section="push">🔔 Push-центр</button>
         <button class="nav-btn" data-section="inbox">📥 Вопросы</button>
         <button class="nav-btn" data-section="teachers">👩‍🏫 Учителя</button>
         <button class="nav-btn" data-section="ideas">💡 Идеи</button>
@@ -204,6 +206,57 @@
           </div>
           <div id="polls-list" class="item-list"></div>
           <button type="button" class="btn-secondary hidden" id="btn-polls-more">Показать ещё</button>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Официальный канал -->
+      <section id="section-channel" class="admin-section">
+        <h1>Официальный канал</h1>
+
+        <div class="card">
+          <h2>Новый пост</h2>
+          <p class="card-hint">Пост публикуется в официальный канал YodoMessenger и виден всем пользователям. Подписчикам push отправит воркер (в течение ~5 минут).</p>
+          <form id="form-channel-post" class="form-col">
+            <textarea id="channel-post-text" rows="4" placeholder="Текст поста" required></textarea>
+            <label class="toggle-row">
+              <input type="checkbox" id="channel-post-silent">
+              <span>Тихая публикация (без push подписчикам)</span>
+            </label>
+            <button type="submit" class="btn-primary">Опубликовать</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Последние посты</h2>
+          <p class="card-hint" id="channel-subscribers"></p>
+          <div id="channel-posts-list" class="item-list"></div>
+        </div>
+      </section>
+
+      <!-- СЕКЦИЯ: Push-центр -->
+      <section id="section-push" class="admin-section">
+        <h1>Push-центр</h1>
+
+        <div class="card">
+          <h2>Новая рассылка</h2>
+          <p class="card-hint">Уведомление отправит push-воркер в течение ~5 минут. В уведомлении показываются заголовок и текст (текст обрезается до 200 символов).</p>
+          <form id="form-push-broadcast" class="form-col">
+            <input type="text" id="push-broadcast-title" placeholder="Заголовок (например, Важное объявление)" maxlength="80" required>
+            <textarea id="push-broadcast-body" rows="3" placeholder="Текст уведомления" maxlength="300" required></textarea>
+            <select id="push-broadcast-audience">
+              <option value="school" selected>Подписчики школьных пушей</option>
+              <option value="all">Все пользователи</option>
+              <option value="uid">Один пользователь (по UID)</option>
+            </select>
+            <input type="text" id="push-broadcast-uid" placeholder="UID получателя" autocomplete="off" class="hidden">
+            <button type="submit" class="btn-primary">Поставить в очередь</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>История рассылок</h2>
+          <p class="card-hint">Последние 50 рассылок. «В очереди» — воркер ещё не обработал.</p>
+          <div id="push-broadcasts-list" class="item-list"></div>
         </div>
       </section>
 

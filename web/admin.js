@@ -68,6 +68,8 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru"];
+// Официальный канал — id 1:1 с ChatRepository.OFFICIAL_CHANNEL_ID и app.js.
+const OFFICIAL_CHANNEL_ID = "yodo_official_channel";
 
 /* ------------------------------------------------------------------ */
 /* Утилиты                                                             */
@@ -180,6 +182,9 @@ const AUDIT_LABELS = {
   SUPPORT_RESTRICTION_SET: "Ограничение доступа к поддержке",
   SUPPORT_RESTRICTION_REMOVED: "Снятие ограничения доступа к поддержке",
   SUPPORT_MESSAGE_SENT: "Ответ пользователю от поддержки",
+  CHANNEL_POST_ADDED: "Пост в официальном канале",
+  CHANNEL_POST_DELETED: "Удаление поста в официальном канале",
+  ADMIN_BROADCAST_QUEUED: "Рассылка из Push-центра",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -2884,14 +2889,241 @@ function startSummary() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Старт панели                                                        */
+/* Секция «Канал» — посты в официальный канал                          */
 /* ------------------------------------------------------------------ */
+
+// Гарантирует существование документа официального канала (формат 1:1 с
+// ensureOfficialChannelExists в app.js): без него updateDoc превью упадёт.
+async function ensureOfficialChannelDoc() {
+  const ref = doc(db, "chats", OFFICIAL_CHANNEL_ID);
+  const snap = await getDoc(ref);
+  if (snap.exists()) return snap;
+  const now = Date.now();
+  const uid = auth.currentUser.uid;
+  await setDoc(ref, {
+    participantIds: [uid],
+    type: "CHANNEL",
+    title: "YodoMessenger",
+    titleLowercase: "yodomessenger",
+    createdAt: now,
+    isVerified: true,
+    lastMessage: "",
+    lastMessageTimestamp: now,
+    lastMessageSenderId: uid,
+    lastMessageStatus: "SENT",
+    unreadCounts: { [uid]: 0 },
+    isOnline: false,
+    createdBy: uid,
+  });
+  return await getDoc(ref);
+}
+
+function startChannel() {
+  const listEl = $("channel-posts-list");
+  const subEl = $("channel-subscribers");
+
+  onSnapshot(
+    doc(db, "chats", OFFICIAL_CHANNEL_ID),
+    (snap) => {
+      if (!snap.exists()) {
+        subEl.textContent = "Канал ещё не создан — он появится после первой публикации.";
+        return;
+      }
+      const count = (snap.get("participantIds") || []).length;
+      subEl.textContent = "Подписчиков: " + count;
+    },
+    handleErr("Не удалось загрузить канал")
+  );
+
+  // Свежие посты сверху — запрос по одному полю, составной индекс не нужен.
+  setLoading(listEl);
+  onSnapshot(
+    query(
+      collection(db, "chats", OFFICIAL_CHANNEL_ID, "messages"),
+      orderBy("timestamp", "desc"),
+      limit(30)
+    ),
+    (snap) => {
+      if (snap.empty) {
+        listEl.innerHTML = '<p class="empty-note">Постов пока нет.</p>';
+        return;
+      }
+      listEl.innerHTML = "";
+      snap.forEach((d) => {
+        const m = d.data();
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            ${m.notified === false
+              ? '<span class="badge badge-yellow">push: в очереди</span>'
+              : '<span class="badge badge-green">push: отправлен</span>'}
+            <span class="item-date">${fmtDate(m.timestamp)}</span>
+          </div>
+          <div class="item-text">${esc(m.text || "")}</div>
+          <div class="item-sub">👁 ${Number(m.viewCount || 0)} · 💬 ${Number(m.commentsCount || 0)}</div>
+          <div class="item-actions">
+            <button class="btn-danger" data-act="delete">Удалить</button>
+          </div>`;
+        el.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+          if (!confirm("Удалить этот пост из официального канала?")) return;
+          try {
+            await deleteDoc(doc(db, "chats", OFFICIAL_CHANNEL_ID, "messages", d.id));
+            await refreshChatPreviewAfterDelete(OFFICIAL_CHANNEL_ID, d.id);
+            logAdminAction("CHANNEL_POST_DELETED", (m.text || "").slice(0, 100));
+            toast("Пост удалён");
+          } catch (err) {
+            handleErr("Не удалось удалить пост")(err);
+          }
+        });
+        listEl.appendChild(el);
+      });
+    },
+    handleErr("Не удалось загрузить посты")
+  );
+
+  $("form-channel-post").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("channel-post-text").value.trim();
+    if (!text) return;
+    const silent = $("channel-post-silent").checked;
+    try {
+      const chatSnap = await ensureOfficialChannelDoc();
+      const uid = auth.currentUser.uid;
+      const participants = (chatSnap.get("participantIds") || []).filter((x) => x !== uid);
+      const now = Date.now();
+      const msgRef = doc(collection(db, "chats", OFFICIAL_CHANNEL_ID, "messages"));
+      // Сообщение и превью чата — одним батчем, как sendRawMessage в Android.
+      const batch = writeBatch(db);
+      batch.set(msgRef, {
+        senderId: uid,
+        text,
+        timestamp: now,
+        status: "SENT",
+        notified: silent, // тихая публикация — push не уходит
+        ...(silent ? { silent: true } : {}),
+      });
+      const chatUpdate = {
+        lastMessage: text.slice(0, 120),
+        lastMessageTimestamp: now,
+        lastMessageSenderId: uid,
+        lastMessageStatus: "SENT",
+        lastMessageId: msgRef.id,
+      };
+      participants.forEach((otherUid) => {
+        chatUpdate["unreadCounts." + otherUid] = increment(1);
+      });
+      batch.update(doc(db, "chats", OFFICIAL_CHANNEL_ID), chatUpdate);
+      await batch.commit();
+      $("channel-post-text").value = "";
+      $("channel-post-silent").checked = false;
+      toast(silent ? "Пост опубликован без push" : "Пост опубликован — push уйдёт подписчикам");
+      logAdminAction("CHANNEL_POST_ADDED", text.slice(0, 100));
+    } catch (err) {
+      handleErr("Не удалось опубликовать пост")(err);
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Секция «Push-центр» — произвольные рассылки                          */
+/* ------------------------------------------------------------------ */
+
+function startPush() {
+  const audienceSel = $("push-broadcast-audience");
+  const uidInput = $("push-broadcast-uid");
+  audienceSel.addEventListener("change", () => {
+    uidInput.classList.toggle("hidden", audienceSel.value !== "uid");
+  });
+
+  const listEl = $("push-broadcasts-list");
+  setLoading(listEl);
+  onSnapshot(
+    query(collection(db, "pushBroadcasts"), orderBy("createdAt", "desc"), limit(50)),
+    (snap) => {
+      if (snap.empty) {
+        listEl.innerHTML = '<p class="empty-note">Рассылок пока нет.</p>';
+        return;
+      }
+      listEl.innerHTML = "";
+      snap.forEach((d) => {
+        const b = d.data();
+        const audienceLabel =
+          b.audience === "all" ? "Все пользователи"
+            : b.audience === "uid" ? "Один пользователь"
+              : "Подписчики школы";
+        const stats = b.notified !== false && b.sentCount != null
+          ? " · доставлено: " + b.sentCount + (b.errorCount ? ", ошибок: " + b.errorCount : "")
+          : "";
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            ${b.notified === false
+              ? '<span class="badge badge-yellow">в очереди</span>'
+              : '<span class="badge badge-green">отправлено</span>'}
+            <span class="item-title">${esc(b.title || "")}</span>
+            <span class="item-date">${fmtDate(b.createdAt)}</span>
+          </div>
+          <div class="item-text">${esc(b.body || "")}</div>
+          <div class="item-sub">${audienceLabel}${b.userId ? " · " + esc(b.userId) : ""}${stats}</div>
+          ${b.notified === false ? '<div class="item-actions"><button class="btn-danger" data-act="cancel">Отменить</button></div>' : ""}`;
+        const cancelBtn = el.querySelector('[data-act="cancel"]');
+        if (cancelBtn) {
+          cancelBtn.addEventListener("click", () => {
+            if (!confirm("Отменить эту рассылку? Она ещё не отправлена.")) return;
+            deleteDoc(doc(db, "pushBroadcasts", d.id))
+              .then(() => toast("Рассылка отменена"))
+              .catch(handleErr("Не удалось отменить рассылку"));
+          });
+        }
+        listEl.appendChild(el);
+      });
+    },
+    handleErr("Не удалось загрузить рассылки")
+  );
+
+  $("form-push-broadcast").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = $("push-broadcast-title").value.trim();
+    const body = $("push-broadcast-body").value.trim();
+    const audience = audienceSel.value;
+    const userId = uidInput.value.trim();
+    if (!title || !body) return toast("Заполните заголовок и текст", false);
+    if (audience === "uid" && !userId) return toast("Укажите UID получателя", false);
+    if (audience === "all" && !confirm("Отправить уведомление ВСЕМ пользователям с приложением?")) return;
+    try {
+      await addDoc(collection(db, "pushBroadcasts"), {
+        title,
+        body,
+        audience,
+        userId: audience === "uid" ? userId : null,
+        createdBy: auth.currentUser.uid,
+        createdByName: adminActorName || auth.currentUser.email || "Админ",
+        createdAt: Date.now(),
+        notified: false,
+      });
+      $("push-broadcast-title").value = "";
+      $("push-broadcast-body").value = "";
+      uidInput.value = "";
+      toast("Рассылка в очереди — воркер отправит её в течение ~5 минут");
+      logAdminAction(
+        "ADMIN_BROADCAST_QUEUED",
+        title + " → " + (audience === "all" ? "все" : audience === "uid" ? userId : "подписчики школы")
+      );
+    } catch (err) {
+      handleErr("Не удалось поставить рассылку в очередь")(err);
+    }
+  });
+}
 
 function startPanel() {
   startSummary();
   startSettings();
   startNews();
   startPolls();
+  startChannel();
+  startPush();
   startInbox();
   startTeachers();
   startIdeas();

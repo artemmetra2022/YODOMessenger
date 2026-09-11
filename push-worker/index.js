@@ -511,6 +511,102 @@ async function sendSchoolBroadcastNotifications(db, messaging) {
   }
 }
 
+// НОВОЕ (Push-центр веб-админки): произвольные рассылки из админ-панели.
+// Панель кладёт в корневую коллекцию pushBroadcasts документ с готовыми
+// title/body и audience, а воркер на каждом прогоне вычитывает очередь
+// (notified == false), рассылает и помечает notified: true. Аудитории:
+//  - 'all'    — все пользователи с FCM-токеном;
+//  - 'school' — подписчики школьных пушей (users.schoolPushEnabled == true),
+//               тот же признак, что и у рассылок новостей/опросов;
+//  - 'uid'    — один конкретный получатель (userId).
+// payload data-only с type: "school" — клиент уже умеет показывать такие
+// уведомления (см. YodoFirebaseMessagingService), новых типов не требуется,
+// поэтому старые сборки приложения тоже получают рассылку.
+async function sendAdminBroadcasts(db, messaging) {
+  console.log("Ищу ручные рассылки из админ-панели...");
+
+  const pendingSnapshot = await db
+    .collection("pushBroadcasts")
+    .where("notified", "==", false)
+    .limit(200)
+    .get();
+
+  if (pendingSnapshot.empty) {
+    console.log("Ручных рассылок нет.");
+    return;
+  }
+
+  console.log(`Найдено рассылок: ${pendingSnapshot.size}`);
+
+  const schoolTokensSnapshot = await db
+    .collection("users")
+    .where("schoolPushEnabled", "==", true)
+    .get();
+  const schoolTokens = schoolTokensSnapshot.docs
+    .map((doc) => doc.data().fcmToken)
+    .filter(Boolean);
+
+  // Выборка всех токенов ленивая — только если есть рассылка с audience 'all'.
+  let allTokens = null;
+  async function getAllTokens() {
+    if (allTokens) return allTokens;
+    const usersSnapshot = await db.collection("users").get();
+    allTokens = usersSnapshot.docs.map((doc) => doc.data().fcmToken).filter(Boolean);
+    return allTokens;
+  }
+
+  const batch = db.batch();
+
+  for (const broadcastDoc of pendingSnapshot.docs) {
+    try {
+      const b = broadcastDoc.data();
+      const audience = b.audience || "school";
+      let tokens = [];
+
+      if (audience === "uid") {
+        if (b.userId) {
+          const userDoc = await db.collection("users").doc(b.userId).get();
+          const token = userDoc.exists ? userDoc.data().fcmToken : null;
+          if (token) tokens = [token];
+        }
+      } else if (audience === "all") {
+        tokens = await getAllTokens();
+      } else {
+        tokens = schoolTokens;
+      }
+
+      const title = b.title || "Yodo Messenger";
+      const body = b.body || "";
+      let sent = 0;
+      let failed = 0;
+      // FCM ограничивает sendEachForMulticast 500 токенами — бьём на чанки.
+      for (let i = 0; i < tokens.length; i += 500) {
+        const response = await messaging.sendEachForMulticast({
+          tokens: tokens.slice(i, i + 500),
+          data: { type: "school", title, body },
+          android: { priority: "high" },
+        });
+        sent += response.successCount;
+        failed += response.failureCount;
+      }
+
+      batch.update(broadcastDoc.ref, {
+        notified: true,
+        sentCount: sent,
+        errorCount: failed,
+        sentAt: Date.now(),
+      });
+      console.log(`Рассылка ${broadcastDoc.id}: доставлено ${sent}, ошибок ${failed}`);
+    } catch (err) {
+      console.error(`Ошибка рассылки ${broadcastDoc.id}:`, err.message);
+      // Помечаем обработанной даже при ошибке — чтобы не зависало в очереди.
+      batch.update(broadcastDoc.ref, { notified: true });
+    }
+  }
+
+  await batch.commit();
+}
+
 async function main() {
   initFirebase();
   const db = getFirestore();
@@ -522,6 +618,7 @@ async function main() {
   await sendLessonFileNotifications(db, messaging);
   await publishScheduledSchoolNews(db);
   await sendSchoolBroadcastNotifications(db, messaging);
+  await sendAdminBroadcasts(db, messaging);
 }
 
 main()
