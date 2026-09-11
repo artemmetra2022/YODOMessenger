@@ -1860,14 +1860,60 @@ let supportThreadChatId = null;
 let supportFilter = "all";
 const supportChatsCache = new Map();
 const supportRestrictionsCache = new Map();
+// chatId -> { ts, adminReplied }: отвечал ли админ в этом обращении (для «Повторного ответа»).
+const supportReplyInfoCache = new Map();
 
 function isActiveSupportRestriction(r) {
   return !r.expiresAt || r.expiresAt > Date.now();
 }
 
+/**
+ * Чат-«пустышка»: кроме авто-приветствия пользователь ничего не написал.
+ * Такие обращения не показываем — они засоряют раздел.
+ */
+function supportIsEmpty(c) {
+  return !c.lastMessageSenderId || c.lastMessageSenderId === "support_system";
+}
+
 /** Обращение «ждёт ответа», если последним писал сам пользователь. */
 function supportWaiting(c) {
   return !!c.supportUserId && c.lastMessageSenderId === c.supportUserId;
+}
+
+/** Повторный ответ: админ уже отвечал, а пользователь написал снова. */
+function supportIsRepeat(c) {
+  return supportWaiting(c) && supportReplyInfoCache.get(c.id)?.adminReplied === true;
+}
+
+// Определяем «отвечал ли админ» по истории сообщений (учитывает ответы из
+// приложения и веб-мессенджера, не только из этой панели). Результат кэшируем
+// до следующего изменения обращения.
+async function refreshSupportReplyInfo(c) {
+  try {
+    const snap = await getDocs(
+      query(collection(db, "chats", c.id, "messages"), orderBy("timestamp", "desc"), limit(50))
+    );
+    const adminReplied = snap.docs.some((d) => {
+      const s = d.data().senderId;
+      return !!s && s !== c.supportUserId && s !== "support_system";
+    });
+    supportReplyInfoCache.set(c.id, { ts: c.lastMessageTimestamp || 0, adminReplied });
+  } catch (e) {
+    supportReplyInfoCache.set(c.id, { ts: c.lastMessageTimestamp || 0, adminReplied: false });
+  }
+}
+
+async function classifySupportReplies() {
+  const jobs = [];
+  supportChatsCache.forEach((c) => {
+    if (!supportWaiting(c)) return;
+    const cached = supportReplyInfoCache.get(c.id);
+    if (cached && cached.ts === (c.lastMessageTimestamp || 0)) return;
+    jobs.push(refreshSupportReplyInfo(c));
+  });
+  if (!jobs.length) return;
+  await Promise.allSettled(jobs);
+  renderSupportConversations();
 }
 
 function fmtSupportDuration(expiresAt) {
@@ -1925,11 +1971,12 @@ async function unrestrictSupportUser(uid, name) {
 function supportConversationRow(c) {
   const r = supportRestrictionsCache.get(c.supportUserId);
   const restricted = r && isActiveSupportRestriction(r);
+  const repeat = supportIsRepeat(c);
   const el = document.createElement("div");
   el.className = "item";
   el.innerHTML = `
     <div class="item-head">
-      <span class="item-title">${esc(c.supportUserName || "Пользователь")}${supportWaiting(c) ? ' <span class="badge badge-yellow">ждёт ответа</span>' : ""}${restricted ? ' <span class="badge badge-dim">ограничен</span>' : ""}</span>
+      <span class="item-title">${esc(c.supportUserName || "Пользователь")}${supportWaiting(c) ? ' <span class="badge badge-yellow">ждёт ответа</span>' : ""}${repeat ? ' <span class="badge badge-blue">повторный</span>' : ""}${restricted ? ' <span class="badge badge-dim">ограничен</span>' : ""}</span>
       <span class="item-date">${fmtDate(c.lastMessageTimestamp)}</span>
     </div>
     <div class="item-sub">${esc(c.supportUserEmail || "без email")}</div>
@@ -1957,25 +2004,35 @@ function supportConversationRow(c) {
 }
 
 function renderSupportConversations() {
-  const all = Array.from(supportChatsCache.values()).sort(
-    (a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0)
-  );
+  const all = Array.from(supportChatsCache.values())
+    .filter((c) => !supportIsEmpty(c))
+    .sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0));
   const waiting = all.filter(supportWaiting);
+  const repeats = all.filter(supportIsRepeat);
+  const firstTouch = waiting.filter((c) => !supportIsRepeat(c));
   const activeRestrictions = Array.from(supportRestrictionsCache.values())
     .filter(isActiveSupportRestriction).length;
 
   $("support-stats").textContent =
     "Всего обращений: " + all.length + " · ждут ответа: " + waiting.length +
+    " · повторный ответ: " + repeats.length +
     " · ограничений: " + activeRestrictions;
   $("support-waiting-badge").textContent = waiting.length ? "ждут ответа: " + waiting.length : "";
   $("support-waiting-badge").classList.toggle("hidden", !waiting.length);
 
+  let shown = all;
+  let emptyText = "Обращений в поддержку пока нет.";
+  if (supportFilter === "waiting") {
+    shown = firstTouch;
+    emptyText = "Обращений, ожидающих первого ответа, нет.";
+  } else if (supportFilter === "repeat") {
+    shown = repeats;
+    emptyText = "Повторных обращений нет.";
+  }
+
   const listEl = $("support-list");
-  const shown = supportFilter === "waiting" ? waiting : all;
   if (!shown.length) {
-    listEl.innerHTML = `<p class="empty-note">${
-      supportFilter === "waiting" ? "Обращений, ожидающих ответа, нет." : "Обращений в поддержку пока нет."
-    }</p>`;
+    listEl.innerHTML = `<p class="empty-note">${emptyText}</p>`;
     return;
   }
   listEl.innerHTML = "";
@@ -2187,6 +2244,7 @@ function startSupport() {
       });
       renderSupportConversations();
       updateSupportThreadButtons();
+      classifySupportReplies();
     },
     handleErr("Не удалось загрузить обращения в поддержку")
   );
