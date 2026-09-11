@@ -142,8 +142,97 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .form-col input, .form-col textarea { width: 100%; }
 .form-row { display: flex; flex-direction: column; gap: 10px; }
 
-.toggle-row { display: flex; align-items: center; gap: 10px; font-size: 15px; cursor: pointer; }
-.radio-row { display: flex; align-items: center; gap: 8px; font-size: 15px; cursor: pointer; }
+/* Переключатели и радиокнопки — свои, вместо системных «галочек».
+   .toggle-row: подпись слева, переключатель справа. */
+.toggle-row {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: #3a4655;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+.toggle-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.18s ease;
+}
+.toggle-row input[type="checkbox"]:checked { background: var(--accent); }
+.toggle-row input[type="checkbox"]:checked::after { transform: translateX(20px); }
+.toggle-row input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 163, 255, 0.35);
+}
+.toggle-row input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+  user-select: none;
+}
+.radio-row input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid #3a4655;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.radio-row input[type="radio"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  transform: scale(0);
+  transition: transform 0.16s ease;
+}
+.radio-row input[type="radio"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.radio-row input[type="radio"]:checked::after { transform: scale(1); }
+.radio-row input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 163, 255, 0.35);
+}
 
 /* ===== Списки записей ===== */
 
