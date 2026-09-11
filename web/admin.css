@@ -427,6 +427,19 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .support-msg-meta { color: var(--text-dim); font-size: 12px; margin-bottom: 3px; }
 .support-msg-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
 
+/* ===== Канал: превью прикреплённых фото ===== */
+.channel-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.channel-thumb { position: relative; }
+.channel-thumb img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; display: block; }
+.channel-thumb button {
+  position: absolute; top: -8px; right: -8px;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: none; cursor: pointer;
+  background: #e5484d; color: #fff; font-size: 14px; line-height: 1;
+}
+.channel-post-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.channel-post-images img { max-width: 120px; max-height: 120px; border-radius: 8px; display: block; }
+
 /* ===== Мобильная версия ===== */
 
 @media (max-width: 720px) {

@@ -183,6 +183,8 @@ const AUDIT_LABELS = {
   SUPPORT_RESTRICTION_REMOVED: "Снятие ограничения доступа к поддержке",
   SUPPORT_MESSAGE_SENT: "Ответ пользователю от поддержки",
   CHANNEL_POST_ADDED: "Пост в официальном канале",
+  CHANNEL_POST_EDITED: "Правка поста в официальном канале",
+  CHANNEL_POST_PINNED: "Закрепление/открепление поста",
   CHANNEL_POST_DELETED: "Удаление поста в официальном канале",
   ADMIN_BROADCAST_QUEUED: "Рассылка из Push-центра",
 };
@@ -2918,6 +2920,78 @@ async function ensureOfficialChannelDoc() {
   return await getDoc(ref);
 }
 
+/* Темы постов канала — формат ⟦news:Тема⟧тело, 1:1 с NewsTopic.kt. */
+const NEWS_TOPICS = ["Новые функции", "Исправления", "Анонсы", "Важное", "Обновление"];
+const NEWS_TOPIC_PREFIX = "\u27E6news:";
+const NEWS_TOPIC_SUFFIX = "\u27E7";
+
+function encodeNewsTopic(topic, body) {
+  return topic ? NEWS_TOPIC_PREFIX + topic + NEWS_TOPIC_SUFFIX + body : body;
+}
+
+function decodeNewsTopic(text) {
+  if (text && text.startsWith(NEWS_TOPIC_PREFIX)) {
+    const end = text.indexOf(NEWS_TOPIC_SUFFIX, NEWS_TOPIC_PREFIX.length);
+    if (end > NEWS_TOPIC_PREFIX.length) {
+      return {
+        topic: text.slice(NEWS_TOPIC_PREFIX.length, end),
+        body: text.slice(end + NEWS_TOPIC_SUFFIX.length),
+      };
+    }
+  }
+  return { topic: "", body: text || "" };
+}
+
+/** Превью для списка чатов — как previewText в MessageRepositoryImpl. */
+function channelPreviewText(text, photoCount) {
+  if (text) return text.slice(0, 120);
+  if (photoCount > 1) return "📷 Фото (" + photoCount + ")";
+  if (photoCount === 1) return "📷 Фото";
+  return "";
+}
+
+/* Фото постов хранятся base64 прямо в документе сообщения (imageBase64 /
+   imagesBase64), как в приложении. Документ Firestore < 1 МБ, поэтому сжимаем
+   в canvas адаптивно под общий бюджет и не даём превысить лимит. */
+const CHANNEL_MAX_PHOTOS = 10;
+const CHANNEL_PHOTO_BUDGET = 850000;
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("не картинка")); };
+    img.src = url;
+  });
+}
+
+function canvasJpegBase64(img, maxDim, quality) {
+  const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * ratio));
+  const h = Math.max(1, Math.round(img.height * ratio));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  return dataUrl.slice(dataUrl.indexOf(",") + 1);
+}
+
+// Подбор качества/размера как в ImageUtils.compressAdaptive: шаг качества -8,
+// затем уменьшение разрешения, пока base64 не влезет в maxBase64.
+function compressChannelImage(img, maxBase64) {
+  let dim = 1600;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    for (let q = 90; q >= 40; q -= 8) {
+      const b64 = canvasJpegBase64(img, dim, q / 100);
+      if (b64.length <= maxBase64) return b64;
+    }
+    dim = Math.round(dim * 0.75);
+  }
+  return canvasJpegBase64(img, 640, 0.4);
+}
+
 function startChannel() {
   const listEl = $("channel-posts-list");
   const subEl = $("channel-subscribers");
@@ -2951,26 +3025,66 @@ function startChannel() {
       listEl.innerHTML = "";
       snap.forEach((d) => {
         const m = d.data();
+        const dec = decodeNewsTopic(m.text || "");
+        const imgs = (m.imagesBase64 && m.imagesBase64.length)
+          ? m.imagesBase64
+          : (m.imageBase64 ? [m.imageBase64] : []);
         const el = document.createElement("div");
         el.className = "item";
         el.innerHTML = `
           <div class="item-head">
+            ${m.isPinned ? '<span class="badge badge-blue">📌 Закреплён</span>' : ""}
+            ${dec.topic ? '<span class="badge badge-blue">' + esc(dec.topic) + '</span>' : ""}
             ${m.notified === false
               ? '<span class="badge badge-yellow">push: в очереди</span>'
               : '<span class="badge badge-green">push: отправлен</span>'}
             <span class="item-date">${fmtDate(m.timestamp)}</span>
           </div>
-          <div class="item-text">${esc(m.text || "")}</div>
+          ${dec.body ? '<div class="item-text">' + esc(dec.body) + '</div>' : ""}
+          ${imgs.length
+            ? '<div class="channel-post-images">' + imgs.map((b, i) =>
+                '<img src="data:image/jpeg;base64,' + b + '" alt="Фото ' + (i + 1) + '">').join("") + '</div>'
+            : ""}
           <div class="item-sub">👁 ${Number(m.viewCount || 0)} · 💬 ${Number(m.commentsCount || 0)}</div>
           <div class="item-actions">
+            <button class="btn-secondary" data-act="edit">Изменить</button>
+            <button class="btn-secondary" data-act="pin">${m.isPinned ? "Открепить" : "Закрепить"}</button>
             <button class="btn-danger" data-act="delete">Удалить</button>
           </div>`;
+        el.querySelector('[data-act="edit"]').addEventListener("click", async () => {
+          const body = prompt("Текст поста:", dec.body);
+          if (body === null) return;
+          const topic = prompt(
+            "Тема поста (пусто — без темы). Доступно: " + NEWS_TOPICS.join(", "),
+            dec.topic
+          );
+          if (topic === null) return;
+          const cleanTopic = topic.replace(NEWS_TOPIC_SUFFIX, "").trim();
+          try {
+            await updateDoc(doc(db, "chats", OFFICIAL_CHANNEL_ID, "messages", d.id), {
+              text: encodeNewsTopic(cleanTopic, body.trim()),
+            });
+            await refreshChatPreviewAfterDelete(OFFICIAL_CHANNEL_ID, d.id);
+            logAdminAction("CHANNEL_POST_EDITED", (body.trim() || "Фото").slice(0, 100));
+            toast("Пост обновлён");
+          } catch (err) {
+            handleErr("Не удалось изменить пост")(err);
+          }
+        });
+        el.querySelector('[data-act="pin"]').addEventListener("click", () => {
+          updateDoc(doc(db, "chats", OFFICIAL_CHANNEL_ID, "messages", d.id), { isPinned: !m.isPinned })
+            .then(() => {
+              toast(m.isPinned ? "Пост откреплён" : "Пост закреплён");
+              logAdminAction("CHANNEL_POST_PINNED", (dec.body || "").slice(0, 100));
+            })
+            .catch(handleErr("Не удалось закрепить пост"));
+        });
         el.querySelector('[data-act="delete"]').addEventListener("click", async () => {
           if (!confirm("Удалить этот пост из официального канала?")) return;
           try {
             await deleteDoc(doc(db, "chats", OFFICIAL_CHANNEL_ID, "messages", d.id));
             await refreshChatPreviewAfterDelete(OFFICIAL_CHANNEL_ID, d.id);
-            logAdminAction("CHANNEL_POST_DELETED", (m.text || "").slice(0, 100));
+            logAdminAction("CHANNEL_POST_DELETED", (dec.body || "").slice(0, 100));
             toast("Пост удалён");
           } catch (err) {
             handleErr("Не удалось удалить пост")(err);
@@ -2982,29 +3096,124 @@ function startChannel() {
     handleErr("Не удалось загрузить посты")
   );
 
+  // ── Фото и предпросмотр (в стиле приложения: плитка темы + тело + фото)
+  let channelPhotoFiles = [];
+  const channelPreviewEl = $("channel-preview");
+
+  function renderChannelThumbs() {
+    const thumbs = $("channel-post-thumbs");
+    thumbs.innerHTML = "";
+    channelPhotoFiles.forEach((file, i) => {
+      const wrap = document.createElement("div");
+      wrap.className = "channel-thumb";
+      const img = document.createElement("img");
+      const url = URL.createObjectURL(file);
+      img.src = url;
+      img.onload = () => URL.revokeObjectURL(url);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "×";
+      btn.title = "Убрать фото";
+      btn.addEventListener("click", () => {
+        channelPhotoFiles.splice(i, 1);
+        renderChannelThumbs();
+        renderChannelPreview();
+      });
+      wrap.appendChild(img);
+      wrap.appendChild(btn);
+      thumbs.appendChild(wrap);
+    });
+  }
+
+  function renderChannelPreview() {
+    const topic = $("channel-post-topic").value;
+    const body = $("channel-post-text").value.trim();
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `
+      ${topic ? '<div class="item-head"><span class="badge badge-blue">' + esc(topic) + '</span></div>' : ""}
+      <div class="item-text">${esc(body || "Текст поста…")}</div>
+      ${channelPhotoFiles.length
+        ? '<div class="item-sub">📷 Фото: ' + channelPhotoFiles.length + '</div>' : ""}`;
+    channelPreviewEl.innerHTML = "";
+    channelPreviewEl.appendChild(el);
+  }
+
+  $("channel-post-photos").addEventListener("change", (e) => {
+    const files = Array.from(e.target.files || []);
+    const room = Math.max(0, CHANNEL_MAX_PHOTOS - channelPhotoFiles.length);
+    channelPhotoFiles = channelPhotoFiles.concat(files.slice(0, room));
+    if (files.length > room) toast("Можно прикрепить не больше " + CHANNEL_MAX_PHOTOS + " фото", false);
+    e.target.value = "";
+    renderChannelThumbs();
+    if (!channelPreviewEl.classList.contains("hidden")) renderChannelPreview();
+  });
+
+  $("btn-channel-preview").addEventListener("click", () => {
+    channelPreviewEl.classList.toggle("hidden");
+    if (!channelPreviewEl.classList.contains("hidden")) renderChannelPreview();
+  });
+  ["channel-post-text", "channel-post-topic"].forEach((id) => {
+    const refresh = () => {
+      if (!channelPreviewEl.classList.contains("hidden")) renderChannelPreview();
+    };
+    $(id).addEventListener("input", refresh);
+    $(id).addEventListener("change", refresh);
+  });
+
+  // Сжимает прикреплённые фото под общий бюджет документа (< 1 МБ).
+  async function compressChannelPhotos() {
+    if (channelPhotoFiles.length === 0) return [];
+    const perImage = Math.floor(CHANNEL_PHOTO_BUDGET / channelPhotoFiles.length);
+    const out = [];
+    for (const file of channelPhotoFiles) {
+      try {
+        const img = await loadImageFromFile(file);
+        out.push(compressChannelImage(img, perImage));
+      } catch (e) {
+        console.warn("Фото пропущено:", file.name, e);
+      }
+    }
+    if (out.length === 0) throw new Error("не удалось обработать фото");
+    return out;
+  }
+
   $("form-channel-post").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const text = $("channel-post-text").value.trim();
-    if (!text) return;
+    const rawText = $("channel-post-text").value.trim();
+    const topic = $("channel-post-topic").value;
+    if (!rawText && channelPhotoFiles.length === 0) {
+      return toast("Добавьте текст или фото", false);
+    }
     const silent = $("channel-post-silent").checked;
     try {
+      const photos = await compressChannelPhotos();
       const chatSnap = await ensureOfficialChannelDoc();
       const uid = auth.currentUser.uid;
       const participants = (chatSnap.get("participantIds") || []).filter((x) => x !== uid);
       const now = Date.now();
       const msgRef = doc(collection(db, "chats", OFFICIAL_CHANNEL_ID, "messages"));
-      // Сообщение и превью чата — одним батчем, как sendRawMessage в Android.
-      const batch = writeBatch(db);
-      batch.set(msgRef, {
+      // Тема кодируется префиксом как в NewsTopic.encode; без текста тема не нужна.
+      const text = encodeNewsTopic(rawText ? topic : "", rawText);
+      const data = {
         senderId: uid,
         text,
         timestamp: now,
         status: "SENT",
         notified: silent, // тихая публикация — push не уходит
         ...(silent ? { silent: true } : {}),
-      });
+      };
+      if (photos.length === 1) {
+        data.imageBase64 = photos[0];
+      } else if (photos.length > 1) {
+        data.imagesBase64 = photos;
+        data.imageBase64 = photos[0]; // совместимость со старыми клиентами
+      }
+      // Сообщение и превью чата — одним батчем, как sendRawMessage в Android.
+      const batch = writeBatch(db);
+      batch.set(msgRef, data);
       const chatUpdate = {
-        lastMessage: text.slice(0, 120),
+        lastMessage: channelPreviewText(text, photos.length),
         lastMessageTimestamp: now,
         lastMessageSenderId: uid,
         lastMessageStatus: "SENT",
@@ -3016,9 +3225,13 @@ function startChannel() {
       batch.update(doc(db, "chats", OFFICIAL_CHANNEL_ID), chatUpdate);
       await batch.commit();
       $("channel-post-text").value = "";
+      $("channel-post-topic").value = "";
       $("channel-post-silent").checked = false;
+      channelPhotoFiles = [];
+      renderChannelThumbs();
+      channelPreviewEl.classList.add("hidden");
       toast(silent ? "Пост опубликован без push" : "Пост опубликован — push уйдёт подписчикам");
-      logAdminAction("CHANNEL_POST_ADDED", text.slice(0, 100));
+      logAdminAction("CHANNEL_POST_ADDED", (rawText || "Фото").slice(0, 100));
     } catch (err) {
       handleErr("Не удалось опубликовать пост")(err);
     }

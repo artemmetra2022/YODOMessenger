@@ -215,15 +215,29 @@
 
         <div class="card">
           <h2>Новый пост</h2>
-          <p class="card-hint">Пост публикуется в официальный канал YodoMessenger и виден всем пользователям. Подписчикам push отправит воркер (в течение ~5 минут).</p>
+          <p class="card-hint">Пост публикуется в официальный канал YodoMessenger и виден всем пользователям. Подписчикам push отправит воркер (в течение ~5 минут). Тема показывается отдельной плиткой — как в приложении.</p>
           <form id="form-channel-post" class="form-col">
-            <textarea id="channel-post-text" rows="4" placeholder="Текст поста" required></textarea>
+            <select id="channel-post-topic">
+              <option value="">— без темы —</option>
+              <option value="Новые функции">Новые функции</option>
+              <option value="Исправления">Исправления</option>
+              <option value="Анонсы">Анонсы</option>
+              <option value="Важное">Важное</option>
+              <option value="Обновление">Обновление</option>
+            </select>
+            <textarea id="channel-post-text" rows="4" placeholder="Текст поста (можно оставить пустым, если прикреплено фото)"></textarea>
+            <input type="file" id="channel-post-photos" accept="image/*" multiple>
+            <div id="channel-post-thumbs" class="channel-thumbs"></div>
+            <div class="form-row">
+              <button type="submit" class="btn-primary">Опубликовать</button>
+              <button type="button" class="btn-secondary" id="btn-channel-preview">👁 Предпросмотр</button>
+            </div>
             <label class="toggle-row">
               <input type="checkbox" id="channel-post-silent">
               <span>Тихая публикация (без push подписчикам)</span>
             </label>
-            <button type="submit" class="btn-primary">Опубликовать</button>
           </form>
+          <div id="channel-preview" class="news-preview hidden"></div>
         </div>
 
         <div class="card">
