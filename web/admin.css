@@ -39,8 +39,25 @@ input, textarea, select {
   font-size: 14px;
   outline: none;
 }
-input:focus, textarea:focus { border-color: var(--accent); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 textarea { resize: vertical; }
+
+/* Выпадающие списки — своя стрелка и подсветка вместо системной. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 42px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%237d8b99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+select:hover { background-color: #2a3644; }
+select:focus { background-color: #2a3644; }
+select option { background: var(--bg-panel-2); color: var(--text); }
+
 input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--accent); }
 
 /* ===== Логин / доступ запрещён ===== */
