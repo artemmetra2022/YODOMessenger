@@ -84,10 +84,24 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
   height: 100vh;
 }
 
-.admin-brand { font-size: 22px; font-weight: 800; letter-spacing: 2px; padding: 0 12px 18px; }
+.admin-brand { font-size: 22px; font-weight: 800; letter-spacing: 2px; padding: 0 12px 18px; flex-shrink: 0; }
 .admin-brand span { color: var(--accent); font-size: 14px; letter-spacing: 0; }
 
-.admin-nav { display: flex; flex-direction: column; gap: 4px; }
+/* Список разделов прокручивается, если не влезает по высоте: «шапка» и
+   футер остаются на месте, скроллится только сам список. Полоса прокрутки
+   скрыта (прокрутка колесом/тачем/свайпом работает). */
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* старый Edge/IE */
+}
+.admin-nav::-webkit-scrollbar { display: none; } /* Chrome/Safari/Edge */
 
 .nav-btn {
   background: none;
@@ -423,7 +437,12 @@ h1 { font-size: 24px; margin-bottom: 20px; }
     position: static;
     padding: 12px;
   }
-  .admin-nav { flex-direction: row; overflow-x: auto; }
+  .admin-nav {
+    flex: initial;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
   .nav-btn { white-space: nowrap; }
   .admin-sidebar-footer { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; border-top: none; padding-top: 4px; }
   .admin-content { padding: 16px 14px 40px; }
