@@ -533,7 +533,40 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .support-msg-meta { color: var(--text-dim); font-size: 12px; margin-bottom: 3px; }
 .support-msg-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
 
-/* ===== Канал: превью прикреплённых фото ===== */
+/* ===== Канал: выбор и превью прикреплённых фото ===== */
+#channel-post-photos {
+  padding: 10px 12px;
+  color: var(--text-dim);
+  background: var(--bg-panel-2);
+  border: 1px dashed #3a4655;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+#channel-post-photos:hover {
+  border-color: var(--accent);
+  background-color: #2a3644;
+  color: var(--text);
+}
+#channel-post-photos::file-selector-button,
+#channel-post-photos::-webkit-file-upload-button {
+  border: none;
+  margin-right: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+#channel-post-photos::file-selector-button:hover,
+#channel-post-photos::-webkit-file-upload-button:hover {
+  background: var(--accent-dark);
+}
+
 .channel-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
 .channel-thumb { position: relative; }
 .channel-thumb img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; display: block; }
