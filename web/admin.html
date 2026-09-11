@@ -226,8 +226,11 @@
               <option value="Обновление">Обновление</option>
             </select>
             <textarea id="channel-post-text" rows="4" placeholder="Текст поста (можно оставить пустым, если прикреплено фото)"></textarea>
-            <input type="file" id="channel-post-photos" accept="image/*" multiple>
-            <div id="channel-post-thumbs" class="channel-thumbs"></div>
+            <div id="channel-dropzone" class="channel-dropzone">
+              <input type="file" id="channel-post-photos" accept="image/*" multiple>
+              <span class="channel-drop-hint">или перетащите фото в эту область</span>
+              <div id="channel-post-thumbs" class="channel-thumbs"></div>
+            </div>
             <div class="form-row">
               <button type="submit" class="btn-primary">Опубликовать</button>
               <button type="button" class="btn-secondary" id="btn-channel-preview">👁 Предпросмотр</button>

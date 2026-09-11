@@ -3139,14 +3139,43 @@ function startChannel() {
     channelPreviewEl.appendChild(el);
   }
 
-  $("channel-post-photos").addEventListener("change", (e) => {
-    const files = Array.from(e.target.files || []);
+  // Добавление фото — из выбора файлов или drag-and-drop.
+  function addChannelPhotos(files) {
+    if (!files || files.length === 0) return;
+    const images = files.filter((f) => f.type && f.type.startsWith("image/"));
+    if (images.length === 0) {
+      toast("Можно прикрепить только изображения", false);
+      return;
+    }
     const room = Math.max(0, CHANNEL_MAX_PHOTOS - channelPhotoFiles.length);
-    channelPhotoFiles = channelPhotoFiles.concat(files.slice(0, room));
-    if (files.length > room) toast("Можно прикрепить не больше " + CHANNEL_MAX_PHOTOS + " фото", false);
-    e.target.value = "";
+    channelPhotoFiles = channelPhotoFiles.concat(images.slice(0, room));
+    if (images.length > room) toast("Можно прикрепить не больше " + CHANNEL_MAX_PHOTOS + " фото", false);
     renderChannelThumbs();
     if (!channelPreviewEl.classList.contains("hidden")) renderChannelPreview();
+  }
+
+  $("channel-post-photos").addEventListener("change", (e) => {
+    addChannelPhotos(Array.from(e.target.files || []));
+    e.target.value = "";
+  });
+
+  // Drag-and-drop: перетаскивание фото в зону выбора.
+  const dropzone = $("channel-dropzone");
+  ["dragenter", "dragover"].forEach((ev) => {
+    dropzone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+  });
+  dropzone.addEventListener("dragleave", (e) => {
+    // dragleave срабатывает и при переходе на дочерний элемент — не мигаем.
+    if (dropzone.contains(e.relatedTarget)) return;
+    dropzone.classList.remove("dragover");
+  });
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    addChannelPhotos(Array.from(e.dataTransfer.files || []));
   });
 
   $("btn-channel-preview").addEventListener("click", () => {
@@ -3226,6 +3255,7 @@ function startChannel() {
       await batch.commit();
       $("channel-post-text").value = "";
       $("channel-post-topic").value = "";
+      refreshNiceSelect($("channel-post-topic"));
       $("channel-post-silent").checked = false;
       channelPhotoFiles = [];
       renderChannelThumbs();
@@ -3330,6 +3360,94 @@ function startPush() {
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* Красивые выпадающие списки (вместо системного «прямоугольника»)      */
+/* ------------------------------------------------------------------ */
+
+// Оборачивает нативный <select> в кастомный закруглённый контрол: select
+// скрыт, но остаётся источником значения (select.value/selectedIndex), а
+// выбор варианта обновляет его и диспатчит change — поэтому все прежние
+// обработчики (переключение полей, чтение значения при отправке) работают.
+function enhanceSelect(select) {
+  if (!select || select.dataset.niceSelect === "1") return;
+  select.dataset.niceSelect = "1";
+
+  const wrap = document.createElement("div");
+  wrap.className = "nice-select";
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "nice-select-trigger";
+  const label = document.createElement("span");
+  label.className = "nice-select-label";
+  trigger.appendChild(label);
+
+  const panel = document.createElement("div");
+  panel.className = "nice-select-panel hidden";
+  wrap.appendChild(trigger);
+  wrap.appendChild(panel);
+
+  const syncLabel = () => {
+    const opt = select.options[select.selectedIndex];
+    label.textContent = opt ? opt.textContent : "";
+  };
+  const onDocDown = (e) => { if (!wrap.contains(e.target)) close(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+
+  function close() {
+    panel.classList.add("hidden");
+    trigger.classList.remove("open");
+    document.removeEventListener("mousedown", onDocDown, true);
+    document.removeEventListener("keydown", onKey);
+  }
+
+  function open() {
+    closeAllNiceSelects(wrap);
+    panel.innerHTML = "";
+    Array.from(select.options).forEach((opt, idx) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "nice-select-option" + (idx === select.selectedIndex ? " active" : "");
+      item.textContent = opt.textContent;
+      item.addEventListener("click", () => {
+        if (select.selectedIndex !== idx) {
+          select.selectedIndex = idx;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        syncLabel();
+        close();
+      });
+      panel.appendChild(item);
+    });
+    panel.classList.remove("hidden");
+    trigger.classList.add("open");
+    document.addEventListener("mousedown", onDocDown, true);
+    document.addEventListener("keydown", onKey);
+  }
+
+  trigger.addEventListener("click", () => {
+    panel.classList.contains("hidden") ? open() : close();
+  });
+
+  wrap._sync = syncLabel;
+  wrap._close = close;
+  syncLabel();
+}
+
+function closeAllNiceSelects(except) {
+  document.querySelectorAll(".nice-select").forEach((w) => {
+    if (w !== except && typeof w._close === "function") w._close();
+  });
+}
+
+/** Обновляет подпись после программной смены select.value (например, сброса). */
+function refreshNiceSelect(select) {
+  const wrap = select && select.closest(".nice-select");
+  if (wrap && typeof wrap._sync === "function") wrap._sync();
+}
+
 function startPanel() {
   startSummary();
   startSettings();
@@ -3349,4 +3467,9 @@ function startPanel() {
   initUserSearchModal();
   initFileModal();
   initCsvExport();
+
+  // Кастомные выпадающие списки. #support-reply-template не трогаем — его
+  // опции заполняются динамически (шаблоны ответов поддержки).
+  ["news-publish-mode", "channel-post-topic", "push-broadcast-audience", "support-restrict-duration"]
+    .forEach((id) => enhanceSelect($(id)));
 }

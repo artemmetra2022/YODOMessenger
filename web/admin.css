@@ -42,21 +42,90 @@ input, textarea, select {
 input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 textarea { resize: vertical; }
 
-/* Выпадающие списки — своя стрелка и подсветка вместо системной. */
+/* Выпадающие списки — своя стрелка и подсветка вместо системной.
+   (Оставшиеся нативные select; основные заменены на .nice-select ниже.) */
 select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 42px;
+  border-radius: 999px;
   cursor: pointer;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%237d8b99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 14px center;
+  background-position: right 16px center;
   background-size: 12px 8px;
   transition: background-color 0.16s ease, border-color 0.16s ease;
 }
 select:hover { background-color: #2a3644; }
 select:focus { background-color: #2a3644; }
 select option { background: var(--bg-panel-2); color: var(--text); }
+
+/* Кастомные выпадающие списки — закруглённые, со скруглённым списком
+   внутри, вместо системного «прямоугольника». */
+.nice-select { position: relative; }
+.nice-select select { display: none; }
+.nice-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+.nice-select-trigger::after {
+  content: "";
+  flex-shrink: 0;
+  width: 12px;
+  height: 8px;
+  background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%237d8b99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  transition: transform 0.18s ease;
+}
+.nice-select-trigger:hover { background-color: #2a3644; }
+.nice-select-trigger:focus-visible { outline: none; border-color: var(--accent); }
+.nice-select-trigger.open { border-color: var(--accent); background-color: #2a3644; }
+.nice-select-trigger.open::after { transform: rotate(180deg); }
+.nice-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nice-select-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding: 6px;
+  border: 1px solid #2a3644;
+  border-radius: 18px;
+  background: var(--bg-panel-2);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.5);
+  max-height: 264px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.nice-select-panel::-webkit-scrollbar { display: none; }
+.nice-select-option {
+  width: 100%;
+  display: block;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+.nice-select-option:hover { background: rgba(74, 163, 255, 0.16); }
+.nice-select-option.active { background: var(--accent); color: #fff; font-weight: 600; }
 
 input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--accent); }
 
@@ -533,27 +602,32 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .support-msg-meta { color: var(--text-dim); font-size: 12px; margin-bottom: 3px; }
 .support-msg-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
 
-/* ===== Канал: выбор и превью прикреплённых фото ===== */
-#channel-post-photos {
-  padding: 10px 12px;
-  color: var(--text-dim);
-  background: var(--bg-panel-2);
+/* ===== Канал: dropzone и превью фото ===== */
+.channel-dropzone {
+  padding: 12px;
   border: 1px dashed #3a4655;
   border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
 }
-#channel-post-photos:hover {
+.channel-dropzone.dragover {
   border-color: var(--accent);
-  background-color: #2a3644;
-  color: var(--text);
+  background: rgba(74, 163, 255, 0.08);
 }
+#channel-post-photos {
+  padding: 0;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  max-width: 100%;
+}
+#channel-post-photos:hover { color: var(--text); }
 #channel-post-photos::file-selector-button,
 #channel-post-photos::-webkit-file-upload-button {
   border: none;
   margin-right: 12px;
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: 999px;
   background: var(--accent);
   color: #fff;
   font-size: 14px;
@@ -566,8 +640,10 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 #channel-post-photos::-webkit-file-upload-button:hover {
   background: var(--accent-dark);
 }
+.channel-drop-hint { display: block; margin-top: 8px; color: var(--text-dim); font-size: 13px; }
 
-.channel-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.channel-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.channel-thumbs:empty { display: none; }
 .channel-thumb { position: relative; }
 .channel-thumb img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; display: block; }
 .channel-thumb button {
