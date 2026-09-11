@@ -39,6 +39,8 @@ import {
   collection,
   collectionGroup,
   deleteField,
+  writeBatch,
+  increment,
   query,
   where,
   orderBy,
@@ -175,6 +177,9 @@ const AUDIT_LABELS = {
   SCHOOL_HOLIDAY_DATE_SET: "Дата каникул",
   SCHOOL_SECTION_VISIBILITY: "Видимость раздела «Школа»",
   SYSTEM_BANNER_SET: "Баннер для пользователей",
+  SUPPORT_RESTRICTION_SET: "Ограничение доступа к поддержке",
+  SUPPORT_RESTRICTION_REMOVED: "Снятие ограничения доступа к поддержке",
+  SUPPORT_MESSAGE_SENT: "Ответ пользователю от поддержки",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -1835,6 +1840,467 @@ function startReports() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Секция «Поддержка» — обращения и мягкие ограничения                 */
+/* ------------------------------------------------------------------ */
+
+// Схема ограничения 1:1 с ChatRepositoryImpl.setSupportRestriction (Android).
+// expiresAt == null => бессрочно; проверяется и в firestore.rules, и в приложении.
+const SUPPORT_TEMPLATES_KEY = "yodo.admin.supportTemplates";
+const DEFAULT_SUPPORT_TEMPLATES = [
+  "Здравствуйте! Опишите, пожалуйста, проблему подробнее.",
+  "Спасибо за обращение! Мы разбираемся и вернёмся с ответом.",
+  "Попробуйте, пожалуйста, перезайти в приложение — проблема должна уйти.",
+  "Приложите, пожалуйста, скриншот — так мы разберёмся быстрее.",
+];
+
+let supportChatsUnsub = null;
+let supportRestrictionsUnsub = null;
+let supportThreadUnsub = null;
+let supportThreadChatId = null;
+let supportFilter = "all";
+const supportChatsCache = new Map();
+const supportRestrictionsCache = new Map();
+
+function isActiveSupportRestriction(r) {
+  return !r.expiresAt || r.expiresAt > Date.now();
+}
+
+/** Обращение «ждёт ответа», если последним писал сам пользователь. */
+function supportWaiting(c) {
+  return !!c.supportUserId && c.lastMessageSenderId === c.supportUserId;
+}
+
+function fmtSupportDuration(expiresAt) {
+  if (!expiresAt) return "бессрочно";
+  const left = expiresAt - Date.now();
+  if (left <= 0) return "истекло";
+  if (left < 3600000) return "осталось " + Math.max(1, Math.round(left / 60000)) + " мин";
+  if (left < 86400000) return "осталось " + Math.round(left / 3600000) + " ч";
+  return "осталось " + Math.round(left / 86400000) + " дн (до " + fmtDate(expiresAt) + ")";
+}
+
+function supportRestrictionName(r) {
+  const c = supportChatsCache.get(r.userId);
+  return c?.supportUserName || "";
+}
+
+async function setSupportRestriction(uid, reason, durationMillis) {
+  if (!auth.currentUser) return;
+  const now = Date.now();
+  await setDoc(doc(db, "supportRestrictions", uid), {
+    reason: (reason || "").slice(0, 500),
+    restrictedBy: auth.currentUser.uid,
+    restrictedByName: adminActorName || auth.currentUser.email || "Админ",
+    restrictedAt: now,
+    expiresAt: durationMillis ? now + durationMillis : null,
+  });
+}
+
+async function removeSupportRestriction(uid) {
+  await deleteDoc(doc(db, "supportRestrictions", uid));
+}
+
+// Кнопка у обращения: не ограничивает сразу, а подставляет UID в форму, где
+// админ выбирает причину и срок.
+function restrictSupportUser(uid, name) {
+  $("support-restrict-uid").value = uid;
+  $("support-restrict-reason").value = "";
+  $("support-restrict-duration").value = "604800000";
+  $("support-restrict-reason").focus();
+  $("form-support-restrict").scrollIntoView({ behavior: "smooth", block: "center" });
+  toast("Заполните причину и срок" + (name ? " для " + name : ""));
+}
+
+async function unrestrictSupportUser(uid, name) {
+  if (!confirm("Снять ограничение доступа к поддержке" + (name ? " с " + name : "") + "?")) return;
+  try {
+    await removeSupportRestriction(uid);
+    logAdminAction("SUPPORT_RESTRICTION_REMOVED", "", uid, name || null);
+    toast("Ограничение снято");
+  } catch (err) {
+    handleErr("Не удалось снять ограничение")(err);
+  }
+}
+
+function supportConversationRow(c) {
+  const r = supportRestrictionsCache.get(c.supportUserId);
+  const restricted = r && isActiveSupportRestriction(r);
+  const el = document.createElement("div");
+  el.className = "item";
+  el.innerHTML = `
+    <div class="item-head">
+      <span class="item-title">${esc(c.supportUserName || "Пользователь")}${supportWaiting(c) ? ' <span class="badge badge-yellow">ждёт ответа</span>' : ""}${restricted ? ' <span class="badge badge-dim">ограничен</span>' : ""}</span>
+      <span class="item-date">${fmtDate(c.lastMessageTimestamp)}</span>
+    </div>
+    <div class="item-sub">${esc(c.supportUserEmail || "без email")}</div>
+    <div class="item-text">${esc(c.lastMessage || "")}</div>`;
+  const actions = document.createElement("div");
+  actions.className = "item-actions";
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = "btn-primary";
+  openBtn.textContent = "Открыть";
+  openBtn.addEventListener("click", () => openSupportThread(c.id));
+  actions.appendChild(openBtn);
+  const restrBtn = document.createElement("button");
+  restrBtn.type = "button";
+  restrBtn.className = "btn-secondary";
+  restrBtn.textContent = restricted ? "Снять ограничение" : "Ограничить";
+  restrBtn.addEventListener("click", () =>
+    restricted
+      ? unrestrictSupportUser(c.supportUserId, c.supportUserName)
+      : restrictSupportUser(c.supportUserId, c.supportUserName)
+  );
+  actions.appendChild(restrBtn);
+  el.appendChild(actions);
+  return el;
+}
+
+function renderSupportConversations() {
+  const all = Array.from(supportChatsCache.values()).sort(
+    (a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0)
+  );
+  const waiting = all.filter(supportWaiting);
+  const activeRestrictions = Array.from(supportRestrictionsCache.values())
+    .filter(isActiveSupportRestriction).length;
+
+  $("support-stats").textContent =
+    "Всего обращений: " + all.length + " · ждут ответа: " + waiting.length +
+    " · ограничений: " + activeRestrictions;
+  $("support-waiting-badge").textContent = waiting.length ? "ждут ответа: " + waiting.length : "";
+  $("support-waiting-badge").classList.toggle("hidden", !waiting.length);
+
+  const listEl = $("support-list");
+  const shown = supportFilter === "waiting" ? waiting : all;
+  if (!shown.length) {
+    listEl.innerHTML = `<p class="empty-note">${
+      supportFilter === "waiting" ? "Обращений, ожидающих ответа, нет." : "Обращений в поддержку пока нет."
+    }</p>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  shown.forEach((c) => listEl.appendChild(supportConversationRow(c)));
+}
+
+function renderSupportRestrictions() {
+  const listEl = $("support-restrictions-list");
+  const rows = Array.from(supportRestrictionsCache.values())
+    .filter(isActiveSupportRestriction)
+    .sort((a, b) => (b.restrictedAt || 0) - (a.restrictedAt || 0));
+  if (!rows.length) {
+    listEl.innerHTML = '<p class="empty-note">Действующих ограничений нет.</p>';
+    return;
+  }
+  listEl.innerHTML = "";
+  rows.forEach((r) => {
+    const name = supportRestrictionName(r);
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `
+      <div class="item-head">
+        <span class="item-title">${esc(name || r.userId)}</span>
+        <span class="item-date">${fmtDate(r.restrictedAt)}</span>
+      </div>
+      <div class="item-sub">UID: ${esc(r.userId)} · ${esc(fmtSupportDuration(r.expiresAt))}${r.restrictedByName ? " · ограничил: " + esc(r.restrictedByName) : ""}</div>
+      ${r.reason ? `<div class="item-text">${esc(r.reason)}</div>` : ""}`;
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-secondary";
+    btn.textContent = "Снять ограничение";
+    btn.addEventListener("click", () => unrestrictSupportUser(r.userId, name));
+    actions.appendChild(btn);
+    el.appendChild(actions);
+    listEl.appendChild(el);
+  });
+}
+
+/* --- Переписка --- */
+
+function supportMessageEl(m, conv) {
+  const mine = m.senderId === auth.currentUser?.uid;
+  let text;
+  if (m.isDeleted) text = "Сообщение удалено";
+  else if (m.text) text = m.text;
+  else if (m.imageBase64 || m.imagesBase64) text = "[фото]";
+  else if (m.voiceBase64) text = "[голосовое сообщение]";
+  else if (m.fileBase64) text = "[файл] " + (m.fileName || "");
+  else if (m.locationLat != null) text = "[геолокация]";
+  else text = "[сообщение]";
+
+  const who =
+    m.senderId === "support_system"
+      ? "Поддержка YODO"
+      : mine
+        ? "Вы (админ)"
+        : conv?.supportUserName || "Пользователь";
+
+  const el = document.createElement("div");
+  el.className = "support-msg" + (mine ? " mine" : "");
+  el.innerHTML = `<div class="support-msg-meta">${esc(who)} · ${fmtDate(m.timestamp)}</div>
+    <div class="support-msg-text">${esc(text)}</div>`;
+  return el;
+}
+
+function updateSupportThreadButtons() {
+  const conv = supportThreadChatId ? supportChatsCache.get(supportThreadChatId) : null;
+  const r = conv?.supportUserId ? supportRestrictionsCache.get(conv.supportUserId) : null;
+  const restricted = r && isActiveSupportRestriction(r);
+  $("btn-support-restrict-thread").classList.toggle("hidden", !!restricted);
+  $("btn-support-unrestrict-thread").classList.toggle("hidden", !restricted);
+}
+
+function openSupportThread(chatId) {
+  const conv = supportChatsCache.get(chatId);
+  if (supportThreadUnsub) supportThreadUnsub();
+  supportThreadChatId = chatId;
+  $("support-thread-title").textContent = "Переписка · " + (conv?.supportUserName || chatId);
+  $("support-thread-sub").textContent =
+    (conv?.supportUserEmail || "") + (conv?.supportUserId ? " · UID: " + conv.supportUserId : "");
+  updateSupportThreadButtons();
+  $("support-thread-overlay").classList.remove("hidden");
+
+  const box = $("support-thread-messages");
+  box.innerHTML = '<p class="empty-note">Загрузка…</p>';
+  supportThreadUnsub = onSnapshot(
+    query(collection(db, "chats", chatId, "messages"), orderBy("timestamp", "desc"), limit(100)),
+    (snap) => {
+      if (snap.empty) {
+        box.innerHTML = '<p class="empty-note">Сообщений нет.</p>';
+        return;
+      }
+      box.innerHTML = "";
+      snap.docs.slice().reverse().forEach((d) => box.appendChild(supportMessageEl(d.data(), conv)));
+      box.scrollTop = box.scrollHeight;
+    },
+    handleErr("Не удалось загрузить переписку")
+  );
+}
+
+function closeSupportThread() {
+  if (supportThreadUnsub) supportThreadUnsub();
+  supportThreadUnsub = null;
+  supportThreadChatId = null;
+  $("support-thread-overlay").classList.add("hidden");
+}
+
+/* --- Шаблоны ответов (локально в браузере) --- */
+
+function loadSupportTemplates() {
+  try {
+    const raw = localStorage.getItem(SUPPORT_TEMPLATES_KEY);
+    if (!raw) return DEFAULT_SUPPORT_TEMPLATES.slice();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((t) => typeof t === "string") : DEFAULT_SUPPORT_TEMPLATES.slice();
+  } catch (e) {
+    return DEFAULT_SUPPORT_TEMPLATES.slice();
+  }
+}
+
+function saveSupportTemplates(arr) {
+  try { localStorage.setItem(SUPPORT_TEMPLATES_KEY, JSON.stringify(arr)); } catch (e) { /* приватный режим */ }
+}
+
+function insertSupportTemplate(text) {
+  const ta = $("support-reply-text");
+  if ($("support-thread-overlay").classList.contains("hidden")) {
+    navigator.clipboard?.writeText(text).catch(() => {});
+    toast("Переписка не открыта — шаблон скопирован в буфер");
+    return;
+  }
+  ta.value = ta.value.trim() ? ta.value.replace(/\s*$/, "") + "\n" + text : text;
+  ta.focus();
+}
+
+function syncSupportTemplateSelect() {
+  const sel = $("support-reply-template");
+  sel.innerHTML = '<option value="">— шаблон ответа —</option>';
+  loadSupportTemplates().forEach((t, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = t.length > 60 ? t.slice(0, 60) + "…" : t;
+    sel.appendChild(opt);
+  });
+}
+
+function renderSupportTemplates() {
+  const templates = loadSupportTemplates();
+  const listEl = $("support-templates-list");
+  if (!templates.length) {
+    listEl.innerHTML = '<p class="empty-note">Шаблонов пока нет.</p>';
+  } else {
+    listEl.innerHTML = "";
+    templates.forEach((t, i) => {
+      const el = document.createElement("div");
+      el.className = "item";
+      el.innerHTML = `<div class="item-text">${esc(t)}</div>`;
+      const actions = document.createElement("div");
+      actions.className = "item-actions";
+      const insertBtn = document.createElement("button");
+      insertBtn.type = "button";
+      insertBtn.className = "btn-secondary";
+      insertBtn.textContent = "Вставить";
+      insertBtn.addEventListener("click", () => insertSupportTemplate(t));
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-link";
+      delBtn.textContent = "Удалить";
+      delBtn.addEventListener("click", () => {
+        const next = loadSupportTemplates();
+        next.splice(i, 1);
+        saveSupportTemplates(next);
+        renderSupportTemplates();
+      });
+      actions.appendChild(insertBtn);
+      actions.appendChild(delBtn);
+      el.appendChild(actions);
+      listEl.appendChild(el);
+    });
+  }
+  syncSupportTemplateSelect();
+}
+
+function startSupport() {
+  document.querySelectorAll(".support-filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".support-filter-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      supportFilter = btn.dataset.filter;
+      renderSupportConversations();
+    });
+  });
+
+  // Обращения: как в app.js — без orderBy в запросе, сортировка на клиенте
+  // (не требует составного индекса). Правила разрешают админам list по type=SUPPORT.
+  const listEl = $("support-list");
+  setLoading(listEl);
+  if (supportChatsUnsub) supportChatsUnsub();
+  supportChatsUnsub = onSnapshot(
+    query(collection(db, "chats"), where("type", "==", "SUPPORT")),
+    (snap) => {
+      supportChatsCache.clear();
+      snap.forEach((d) => {
+        const data = d.data();
+        data.id = d.id;
+        supportChatsCache.set(d.id, data);
+      });
+      renderSupportConversations();
+      updateSupportThreadButtons();
+    },
+    handleErr("Не удалось загрузить обращения в поддержку")
+  );
+
+  const restrEl = $("support-restrictions-list");
+  setLoading(restrEl);
+  if (supportRestrictionsUnsub) supportRestrictionsUnsub();
+  supportRestrictionsUnsub = onSnapshot(
+    query(collection(db, "supportRestrictions")),
+    (snap) => {
+      supportRestrictionsCache.clear();
+      snap.forEach((d) => supportRestrictionsCache.set(d.id, { ...d.data(), userId: d.id }));
+      renderSupportRestrictions();
+      renderSupportConversations();
+      updateSupportThreadButtons();
+    },
+    handleErr("Не удалось загрузить ограничения")
+  );
+
+  $("form-support-restrict").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const uid = $("support-restrict-uid").value.trim();
+    const reason = $("support-restrict-reason").value.trim();
+    if (!uid) return toast("Укажите UID пользователя", false);
+    const durationMillis = Number($("support-restrict-duration").value) || null;
+    try {
+      await setSupportRestriction(uid, reason, durationMillis);
+      logAdminAction("SUPPORT_RESTRICTION_SET", reason, uid);
+      toast("Доступ к поддержке ограничен" + (durationMillis ? " на срок" : " бессрочно"));
+      $("support-restrict-uid").value = "";
+      $("support-restrict-reason").value = "";
+    } catch (err) {
+      handleErr("Не удалось ограничить доступ к поддержке")(err);
+    }
+  });
+
+  $("form-support-reply").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const chatId = supportThreadChatId;
+    if (!chatId || !auth.currentUser) return;
+    const conv = supportChatsCache.get(chatId);
+    const text = $("support-reply-text").value.trim();
+    if (!text) return toast("Введите текст ответа", false);
+    try {
+      const now = Date.now();
+      const batch = writeBatch(db);
+      batch.set(doc(collection(db, "chats", chatId, "messages")), {
+        senderId: auth.currentUser.uid,
+        text,
+        timestamp: now,
+        status: "SENT",
+        notified: false,
+      });
+      const chatUpdate = {
+        lastMessage: text,
+        lastMessageTimestamp: now,
+        lastMessageSenderId: auth.currentUser.uid,
+        lastMessageStatus: "SENT",
+      };
+      if (conv?.supportUserId && conv.supportUserId !== auth.currentUser.uid) {
+        chatUpdate["unreadCounts." + conv.supportUserId] = increment(1);
+      }
+      batch.update(doc(db, "chats", chatId), chatUpdate);
+      await batch.commit();
+      $("support-reply-text").value = "";
+      $("support-reply-template").value = "";
+      logAdminAction("SUPPORT_MESSAGE_SENT", text.slice(0, 120), conv?.supportUserId || null, conv?.supportUserName || null);
+      toast("Ответ отправлен — пользователь получит push");
+    } catch (err) {
+      handleErr("Не удалось отправить ответ")(err);
+    }
+  });
+
+  $("form-support-template").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("support-template-text").value.trim();
+    if (!text) return;
+    const arr = loadSupportTemplates();
+    arr.push(text);
+    saveSupportTemplates(arr);
+    $("support-template-text").value = "";
+    renderSupportTemplates();
+    toast("Шаблон добавлен");
+  });
+
+  $("support-reply-template").addEventListener("change", (e) => {
+    if (e.target.value === "") return;
+    const t = loadSupportTemplates()[Number(e.target.value)];
+    if (t) insertSupportTemplate(t);
+    e.target.value = "";
+  });
+
+  $("btn-support-restrict-thread").addEventListener("click", () => {
+    const conv = supportChatsCache.get(supportThreadChatId);
+    if (conv?.supportUserId) restrictSupportUser(conv.supportUserId, conv.supportUserName);
+  });
+  $("btn-support-unrestrict-thread").addEventListener("click", () => {
+    const conv = supportChatsCache.get(supportThreadChatId);
+    if (conv?.supportUserId) unrestrictSupportUser(conv.supportUserId, conv.supportUserName);
+  });
+  $("btn-close-support-thread").addEventListener("click", closeSupportThread);
+  $("support-thread-overlay").addEventListener("click", (e) => {
+    if (e.target === $("support-thread-overlay")) closeSupportThread();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("support-thread-overlay").classList.contains("hidden")) {
+      closeSupportThread();
+    }
+  });
+
+  renderSupportTemplates();
+}
+
+/* ------------------------------------------------------------------ */
 /* Секция «Пользователи» — поиск и карточка с блокировкой              */
 /* ------------------------------------------------------------------ */
 
@@ -2373,6 +2839,7 @@ function startPanel() {
   startIdeas();
   startReviews();
   startReports();
+  startSupport();
   startUsers();
   startBlocks();
   startAudit();

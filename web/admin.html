@@ -48,6 +48,7 @@
         <button class="nav-btn" data-section="ideas">💡 Идеи</button>
         <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
         <button class="nav-btn" data-section="reports">🚩 Жалобы</button>
+        <button class="nav-btn" data-section="support">🛎️ Поддержка</button>
         <button class="nav-btn" data-section="users">👤 Пользователи</button>
         <button class="nav-btn" data-section="blocks">⛔ Блокировки</button>
         <button class="nav-btn" data-section="audit">📜 Аудит</button>
@@ -288,6 +289,53 @@
         </div>
       </section>
 
+      <!-- СЕКЦИЯ: Поддержка (обращения и мягкие ограничения) -->
+      <section id="section-support" class="admin-section">
+        <h1>Поддержка <span id="support-waiting-badge" class="badge badge-yellow hidden"></span></h1>
+
+        <div class="card">
+          <h2>Обращения в поддержку</h2>
+          <p class="card-hint" id="support-stats"></p>
+          <div class="filter-row">
+            <button type="button" class="filter-btn support-filter-btn active" data-filter="all">Все</button>
+            <button type="button" class="filter-btn support-filter-btn" data-filter="waiting">Ждут ответа</button>
+          </div>
+          <div id="support-list" class="item-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Ограничить доступ к поддержке</h2>
+          <p class="card-hint">Мягкая мера: пользователь остаётся в приложении, но не может писать в свой чат поддержки. Проверяется и на сервере (firestore.rules), и в приложении.</p>
+          <form id="form-support-restrict" class="form-col">
+            <input type="text" id="support-restrict-uid" placeholder="UID пользователя" autocomplete="off" required>
+            <input type="text" id="support-restrict-reason" placeholder="Причина (видна пользователю)" autocomplete="off">
+            <select id="support-restrict-duration">
+              <option value="3600000">1 час</option>
+              <option value="86400000">24 часа</option>
+              <option value="604800000" selected>7 дней</option>
+              <option value="2592000000">30 дней</option>
+              <option value="0">Бессрочно</option>
+            </select>
+            <button type="submit" class="btn-primary">Ограничить</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Действующие ограничения</h2>
+          <div id="support-restrictions-list" class="item-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Шаблоны ответов</h2>
+          <p class="card-hint">Хранятся локально в этом браузере. «Вставить» подставляет текст в поле ответа открытой переписки.</p>
+          <form id="form-support-template" class="form-row">
+            <input type="text" id="support-template-text" placeholder="Текст шаблона" autocomplete="off" required>
+            <button type="submit" class="btn-primary">Добавить</button>
+          </form>
+          <div id="support-templates-list" class="item-list"></div>
+        </div>
+      </section>
+
       <!-- СЕКЦИЯ: Пользователи (поиск и карточка) -->
       <section id="section-users" class="admin-section">
         <h1>Пользователи</h1>
@@ -381,6 +429,29 @@
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="btn-close-file-modal">Закрыть</button>
       </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: переписка с обращением в поддержку -->
+  <div id="support-thread-overlay" class="modal-overlay hidden">
+    <div class="modal-card modal-card-wide">
+      <div class="card-head">
+        <h2 id="support-thread-title">Переписка</h2>
+        <button type="button" class="btn-link" id="btn-close-support-thread">Закрыть</button>
+      </div>
+      <p class="card-hint" id="support-thread-sub"></p>
+      <div id="support-thread-messages" class="support-thread-messages"></div>
+      <form id="form-support-reply" class="form-col">
+        <select id="support-reply-template">
+          <option value="">— шаблон ответа —</option>
+        </select>
+        <textarea id="support-reply-text" rows="3" placeholder="Ответ пользователю…"></textarea>
+        <div class="form-row">
+          <button type="submit" class="btn-primary">Отправить</button>
+          <button type="button" class="btn-secondary" id="btn-support-restrict-thread">Ограничить доступ</button>
+          <button type="button" class="btn-secondary hidden" id="btn-support-unrestrict-thread">Снять ограничение</button>
+        </div>
+      </form>
     </div>
   </div>
 

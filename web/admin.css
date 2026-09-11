@@ -388,6 +388,31 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .user-result-name { font-weight: 600; font-size: 14px; }
 .user-result-username { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
 
+/* ===== Переписка поддержки ===== */
+
+.modal-card-wide { width: min(640px, 96vw); }
+
+.support-thread-messages {
+  margin-top: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px;
+}
+
+.support-msg {
+  background: var(--bg-panel-2);
+  border-radius: 10px;
+  padding: 8px 12px;
+  max-width: 85%;
+  align-self: flex-start;
+}
+.support-msg.mine { align-self: flex-end; background: rgba(74, 163, 255, 0.15); }
+.support-msg-meta { color: var(--text-dim); font-size: 12px; margin-bottom: 3px; }
+.support-msg-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+
 /* ===== Мобильная версия ===== */
 
 @media (max-width: 720px) {
