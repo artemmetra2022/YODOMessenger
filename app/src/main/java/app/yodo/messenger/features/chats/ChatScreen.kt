@@ -183,6 +183,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
+import app.yodo.messenger.domain.model.FaqSection
 import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.MessageStatus
 import app.yodo.messenger.domain.model.SupportFaqData
@@ -234,6 +235,7 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val supportFaqSections by viewModel.supportFaqSections.collectAsState()
     val sendOnEnter by viewModel.sendOnEnter.collectAsState()
     val autoDownloadImages by viewModel.autoDownloadImages.collectAsState()
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
@@ -949,6 +951,7 @@ fun ChatScreen(
                 if (isSupportChat && uiState.supportFaqScreen != null) {
                     SupportFaqPanel(
                         screen = uiState.supportFaqScreen!!,
+                        sections = supportFaqSections,
                         colorTheme = colorTheme,
                         onSelectSection = { viewModel.openFaqSection(it) },
                         onSelectQuestion = { sectionId, questionId ->
@@ -3238,6 +3241,7 @@ private fun MessageInputBar(
 @Composable
 private fun SupportFaqPanel(
     screen: SupportFaqScreen,
+    sections: List<FaqSection>,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onSelectSection: (String) -> Unit,
     onSelectQuestion: (String, String) -> Unit,
@@ -3280,9 +3284,9 @@ private fun SupportFaqPanel(
                     text = when (screen) {
                         is SupportFaqScreen.SectionList -> "Чем помочь?"
                         is SupportFaqScreen.QuestionList ->
-                            SupportFaqData.findSection(screen.sectionId)?.title ?: "Вопросы"
+                            sections.firstOrNull { it.id == screen.sectionId }?.title ?: "Вопросы"
                         is SupportFaqScreen.Answer ->
-                            SupportFaqData.findSection(screen.sectionId)?.title ?: "Ответ"
+                            sections.firstOrNull { it.id == screen.sectionId }?.title ?: "Ответ"
                     },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
@@ -3301,7 +3305,7 @@ private fun SupportFaqPanel(
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(vertical = 6.dp)
                     ) {
-                        items(SupportFaqData.sections, key = { it.id }) { section ->
+                        items(sections, key = { it.id }) { section ->
                             FaqRow(
                                 emoji = section.emoji,
                                 title = section.title,
@@ -3322,7 +3326,7 @@ private fun SupportFaqPanel(
                     if (screen.sectionId == SupportFaqData.OTHER_SECTION_ID) {
                         OtherQuestionBlock(colorTheme = colorTheme, onContactOperator = onContactOperator)
                     } else {
-                        val section = SupportFaqData.findSection(screen.sectionId)
+                        val section = sections.firstOrNull { it.id == screen.sectionId }
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 6.dp)
@@ -3340,7 +3344,8 @@ private fun SupportFaqPanel(
                     }
                 }
                 is SupportFaqScreen.Answer -> {
-                    val question = SupportFaqData.findQuestion(screen.sectionId, screen.questionId)
+                    val question = sections.firstOrNull { it.id == screen.sectionId }
+                        ?.questions?.firstOrNull { it.id == screen.questionId }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()

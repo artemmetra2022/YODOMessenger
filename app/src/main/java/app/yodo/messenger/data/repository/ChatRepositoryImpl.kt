@@ -11,6 +11,8 @@ import app.yodo.messenger.domain.model.ChannelProfile
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
 import app.yodo.messenger.domain.model.CustomRole
+import app.yodo.messenger.domain.model.FaqQuestion
+import app.yodo.messenger.domain.model.FaqSection
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.Permission
 import app.yodo.messenger.domain.model.SupportRestriction
@@ -1510,6 +1512,25 @@ class ChatRepositoryImpl @Inject constructor(
         awaitClose { reg.remove() }
     }
 
+    // === НОВОЕ (редактор FAQ в веб-админке): список config/supportFaq ===
+    override fun observeSupportFaq(): Flow<List<FaqSection>?> = callbackFlow {
+        // Читают все (rules: allow read: if true), пишет только веб-админка.
+        val reg = firestore.document("config/supportFaq")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    // Пропускаем сбойный тик: снаружи останется предыдущее значение,
+                    // а при первом чтении — встроенный SupportFaqData.sections.
+                    return@addSnapshotListener
+                }
+                val sections = snapshot
+                    ?.takeIf { it.exists() }
+                    ?.toObject(SupportFaqFirestore::class.java)
+                    ?.toDomain()
+                trySend(sections)
+            }
+        awaitClose { reg.remove() }
+    }
+
     override suspend fun getSupportRestriction(uid: String): SupportRestriction? {
         return try {
             val doc = supportRestrictionsRef().document(uid).get().await()
@@ -2259,4 +2280,44 @@ class ChatRepositoryImpl @Inject constructor(
             ChannelUpdateResult.Error(e.toUserMessage("Не удалось исключить участника"))
         }
     }
+}
+
+// ─────────────────────── POJO для toObject (FAQ-бот поддержки, config/supportFaq)
+
+/**
+ * POJO-обёртки документа config/supportFaq — его пишет веб-админка (раздел «FAQ-бот»).
+ * Пустой список или разделы без вопросов не публикуем: toDomain() вернёт null, и в
+ * приложении покажется встроенный SupportFaqData.sections. Схема — как в faq-data.js
+ * веб-версии: {sections: [{id, title, emoji, questions: [{id, question, answer}]}]}.
+ */
+private data class SupportFaqFirestore(
+    val sections: List<SupportFaqSectionFirestore> = emptyList()
+) {
+    fun toDomain(): List<FaqSection>? {
+        if (sections.isEmpty()) return null
+        val mapped = sections.map { it.toDomain() }.filter { it.questions.isNotEmpty() }
+        return mapped.ifEmpty { null }
+    }
+}
+
+private data class SupportFaqSectionFirestore(
+    val id: String = "",
+    val title: String = "",
+    val emoji: String = "",
+    val questions: List<SupportFaqQuestionFirestore> = emptyList()
+) {
+    fun toDomain() = FaqSection(
+        id = id,
+        title = title,
+        emoji = emoji,
+        questions = questions.map { it.toDomain() }
+    )
+}
+
+private data class SupportFaqQuestionFirestore(
+    val id: String = "",
+    val question: String = "",
+    val answer: String = ""
+) {
+    fun toDomain() = FaqQuestion(id = id, question = question, answer = answer)
 }

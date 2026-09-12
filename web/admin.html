@@ -51,6 +51,7 @@
         <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
         <button class="nav-btn" data-section="reports">🚩 Жалобы</button>
         <button class="nav-btn" data-section="support">🛎️ Поддержка</button>
+        <button class="nav-btn" data-section="faq">❓ FAQ-бот</button>
         <button class="nav-btn" data-section="users">👤 Пользователи</button>
         <button class="nav-btn" data-section="blocks">⛔ Блокировки</button>
         <button class="nav-btn" data-section="audit">📜 Аудит</button>
@@ -407,6 +408,25 @@
         </div>
       </section>
 
+      <!-- СЕКЦИЯ: FAQ-бот поддержки (редактор разделов и вопросов) -->
+      <section id="section-faq" class="admin-section">
+        <h1>FAQ-бот поддержки</h1>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Разделы и вопросы</h2>
+            <button type="button" class="btn-link" id="btn-faq-reset">↺ Сбросить к встроенному</button>
+          </div>
+          <p class="card-hint">То, что видит пользователь в чате поддержки: раздел → вопрос → ответ. Раздел «Не нашли нужный вопрос?» и кнопка связи с оператором остаются всегда. Пустые разделы и вопросы не сохраняются.</p>
+          <div id="faq-editor" class="faq-editor"></div>
+          <div class="faq-editor-actions">
+            <button type="button" class="btn-secondary" id="btn-faq-add-section">+ Добавить раздел</button>
+            <button type="button" class="btn-primary" id="btn-faq-save">Сохранить FAQ</button>
+          </div>
+          <p class="card-hint" id="faq-updated-at"></p>
+        </div>
+      </section>
+
       <!-- СЕКЦИЯ: Пользователи (поиск и карточка) -->
       <section id="section-users" class="admin-section">
         <h1>Пользователи</h1>
@@ -528,6 +548,7 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <script src="faq-data.js"></script>
   <script type="module" src="admin.js"></script>
 </body>
 </html>

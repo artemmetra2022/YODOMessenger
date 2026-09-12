@@ -182,6 +182,8 @@ const AUDIT_LABELS = {
   SUPPORT_RESTRICTION_SET: "Ограничение доступа к поддержке",
   SUPPORT_RESTRICTION_REMOVED: "Снятие ограничения доступа к поддержке",
   SUPPORT_MESSAGE_SENT: "Ответ пользователю от поддержки",
+  SUPPORT_FAQ_SAVED: "Правка FAQ-бота поддержки",
+  SUPPORT_FAQ_RESET: "Сброс FAQ к встроенному списку",
   CHANNEL_POST_ADDED: "Пост в официальном канале",
   CHANNEL_POST_EDITED: "Правка поста в официальном канале",
   CHANNEL_POST_PINNED: "Закрепление/открепление поста",
@@ -2366,6 +2368,287 @@ function startSupport() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Секция «FAQ-бот поддержки» — редактор разделов и вопросов            */
+/* ------------------------------------------------------------------ */
+
+/* Документ с отредактированным списком (config/supportFaq). Читают его
+   веб-версия (faq-data.js, публичный REST) и Android-приложение; при
+   отсутствии документа/пустом списке показывается встроенный набор. */
+const FAQ_DOC_PATH = "config/supportFaq";
+
+let faqModel = null;
+
+/** Глубокая копия встроенного набора (faq-data.js) — фолбэк и «сброс». */
+function builtinFaq() {
+  const src = window.SUPPORT_FAQ_DEFAULTS || { otherSectionId: "other", sections: [] };
+  return JSON.parse(JSON.stringify(src));
+}
+
+function newFaqId(prefix) {
+  return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function moveInArray(arr, index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= arr.length) return false;
+  const [item] = arr.splice(index, 1);
+  arr.splice(target, 0, item);
+  return true;
+}
+
+function faqIconButton(text, title, onClick, disabled, danger) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "faq-icon-btn" + (danger ? " danger" : "");
+  btn.textContent = text;
+  btn.title = title;
+  btn.disabled = !!disabled;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+function faqField(labelText, value, placeholder, multiline) {
+  const wrap = document.createElement("label");
+  wrap.className = "faq-field";
+  const label = document.createElement("span");
+  label.className = "faq-field-label";
+  label.textContent = labelText;
+  wrap.appendChild(label);
+  const input = document.createElement(multiline ? "textarea" : "input");
+  if (multiline) input.rows = 3;
+  else input.type = "text";
+  input.value = value || "";
+  input.placeholder = placeholder || "";
+  wrap.appendChild(input);
+  return { wrap, input };
+}
+
+function renderFaqEditor() {
+  const editor = $("faq-editor");
+  editor.innerHTML = "";
+  const sections = faqModel.sections || [];
+
+  if (!sections.length) {
+    editor.innerHTML = '<p class="empty-note">Разделов пока нет — добавьте первый.</p>';
+    return;
+  }
+
+  sections.forEach((section, sIndex) => {
+    const card = document.createElement("div");
+    card.className = "faq-section-card";
+
+    const head = document.createElement("div");
+    head.className = "faq-section-head";
+
+    const emoji = document.createElement("input");
+    emoji.type = "text";
+    emoji.className = "faq-emoji-input";
+    emoji.value = section.emoji || "";
+    emoji.maxLength = 8;
+    emoji.placeholder = "🙂";
+    emoji.title = "Эмодзи раздела";
+    emoji.addEventListener("input", () => { section.emoji = emoji.value.trim(); });
+    head.appendChild(emoji);
+
+    const title = document.createElement("input");
+    title.type = "text";
+    title.className = "faq-title-input";
+    title.value = section.title || "";
+    title.placeholder = "Название раздела";
+    title.addEventListener("input", () => { section.title = title.value; });
+    head.appendChild(title);
+
+    head.appendChild(faqIconButton("↑", "Выше", () => {
+      if (moveInArray(faqModel.sections, sIndex, -1)) renderFaqEditor();
+    }, sIndex === 0));
+    head.appendChild(faqIconButton("↓", "Ниже", () => {
+      if (moveInArray(faqModel.sections, sIndex, 1)) renderFaqEditor();
+    }, sIndex === sections.length - 1));
+    head.appendChild(faqIconButton("🗑", "Удалить раздел", () => {
+      const name = section.title || "без названия";
+      if (!confirm("Удалить раздел «" + name + "» вместе с вопросами?")) return;
+      faqModel.sections.splice(sIndex, 1);
+      renderFaqEditor();
+    }, false, true));
+    card.appendChild(head);
+
+    const questionsWrap = document.createElement("div");
+    questionsWrap.className = "faq-questions";
+
+    const questions = section.questions || [];
+    questions.forEach((question, qIndex) => {
+      const qCard = document.createElement("div");
+      qCard.className = "faq-question-card";
+
+      const qHead = document.createElement("div");
+      qHead.className = "faq-question-head";
+      const qLabel = document.createElement("span");
+      qLabel.className = "faq-question-label";
+      qLabel.textContent = "Вопрос " + (qIndex + 1);
+      qHead.appendChild(qLabel);
+      qHead.appendChild(faqIconButton("↑", "Выше", () => {
+        if (moveInArray(section.questions, qIndex, -1)) renderFaqEditor();
+      }, qIndex === 0));
+      qHead.appendChild(faqIconButton("↓", "Ниже", () => {
+        if (moveInArray(section.questions, qIndex, 1)) renderFaqEditor();
+      }, qIndex === questions.length - 1));
+      qHead.appendChild(faqIconButton("🗑", "Удалить вопрос", () => {
+        section.questions.splice(qIndex, 1);
+        renderFaqEditor();
+      }, false, true));
+      qCard.appendChild(qHead);
+
+      const qField = faqField("Вопрос", question.question, "Текст вопроса");
+      qField.input.addEventListener("input", () => { question.question = qField.input.value; });
+      qCard.appendChild(qField.wrap);
+
+      const aField = faqField("Ответ", question.answer, "Текст ответа", true);
+      aField.input.addEventListener("input", () => { question.answer = aField.input.value; });
+      qCard.appendChild(aField.wrap);
+
+      questionsWrap.appendChild(qCard);
+    });
+
+    const addQuestion = document.createElement("button");
+    addQuestion.type = "button";
+    addQuestion.className = "btn-secondary";
+    addQuestion.textContent = "+ Добавить вопрос";
+    addQuestion.addEventListener("click", () => {
+      if (!section.questions) section.questions = [];
+      section.questions.push({ id: newFaqId("q"), question: "", answer: "" });
+      renderFaqEditor();
+    });
+    questionsWrap.appendChild(addQuestion);
+
+    card.appendChild(questionsWrap);
+    editor.appendChild(card);
+  });
+}
+
+/** Оставляем только заполненные разделы/вопросы (остальное не публикуем). */
+function sanitizeFaq(model) {
+  const sections = [];
+  (model.sections || []).forEach((section) => {
+    const title = (section.title || "").trim();
+    if (!title) return;
+    const questions = (section.questions || [])
+      .map((q) => ({
+        id: q.id || newFaqId("q"),
+        question: (q.question || "").trim(),
+        answer: (q.answer || "").trim(),
+      }))
+      .filter((q) => q.question);
+    if (!questions.length) return;
+    sections.push({
+      id: section.id || newFaqId("s"),
+      title,
+      emoji: (section.emoji || "").trim(),
+      questions,
+    });
+  });
+  return { otherSectionId: model.otherSectionId || "other", sections };
+}
+
+async function refreshFaqMeta() {
+  const el = $("faq-updated-at");
+  try {
+    const snap = await getDoc(doc(db, FAQ_DOC_PATH));
+    if (snap.exists() && snap.get("updatedAt")) {
+      const who = snap.get("updatedBy") ? " · " + snap.get("updatedBy") : "";
+      el.textContent = "Изменено: " + fmtDate(snap.get("updatedAt")) + who;
+    } else {
+      el.textContent = "Изменений нет — показывается встроенный список.";
+    }
+  } catch (e) {
+    el.textContent = "";
+  }
+}
+
+async function saveFaq() {
+  const payload = sanitizeFaq(faqModel);
+  if (!payload.sections.length) {
+    toast("Нужен хотя бы один раздел с заполненным вопросом", false);
+    return;
+  }
+  const btn = $("btn-faq-save");
+  btn.disabled = true;
+  try {
+    await setDoc(doc(db, FAQ_DOC_PATH), {
+      otherSectionId: payload.otherSectionId,
+      sections: payload.sections,
+      updatedAt: Date.now(),
+      updatedBy: auth.currentUser?.email || "",
+    }, { merge: true });
+    logAdminAction("SUPPORT_FAQ_SAVED", payload.sections.length + " разд. в FAQ-боте");
+    faqModel = payload;
+    renderFaqEditor();
+    await refreshFaqMeta();
+    toast("FAQ сохранён");
+  } catch (err) {
+    handleErr("Не удалось сохранить FAQ")(err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function startFaq() {
+  $("btn-faq-add-section").addEventListener("click", () => {
+    if (!faqModel) return;
+    faqModel.sections.push({ id: newFaqId("s"), title: "", emoji: "📌", questions: [] });
+    renderFaqEditor();
+  });
+
+  $("btn-faq-save").addEventListener("click", saveFaq);
+
+  $("btn-faq-reset").addEventListener("click", async () => {
+    if (!confirm("Убрать изменения из админки и вернуть встроенный список FAQ?")) return;
+    try {
+      await deleteDoc(doc(db, FAQ_DOC_PATH));
+    } catch (err) {
+      return handleErr("Не удалось сбросить FAQ")(err);
+    }
+    faqModel = builtinFaq();
+    renderFaqEditor();
+    await refreshFaqMeta();
+    logAdminAction("SUPPORT_FAQ_RESET", "");
+    toast("FAQ сброшен к встроенному");
+  });
+
+  $("faq-editor").innerHTML = '<p class="empty-note">Загрузка…</p>';
+  loadFaqModel().then((model) => {
+    faqModel = model;
+    renderFaqEditor();
+    refreshFaqMeta();
+  });
+}
+
+/** Текущий список из Firestore; при отсутствии/ошибке — встроенный набор. */
+async function loadFaqModel() {
+  try {
+    const snap = await getDoc(doc(db, FAQ_DOC_PATH));
+    const data = snap.exists() ? snap.data() : null;
+    if (data && Array.isArray(data.sections) && data.sections.length) {
+      return {
+        otherSectionId: data.otherSectionId || "other",
+        sections: data.sections.map((section) => ({
+          id: section.id || newFaqId("s"),
+          title: section.title || "",
+          emoji: section.emoji || "",
+          questions: (section.questions || []).map((q) => ({
+            id: q.id || newFaqId("q"),
+            question: q.question || "",
+            answer: q.answer || "",
+          })),
+        })),
+      };
+    }
+  } catch (err) {
+    console.error("FAQ load", err);
+  }
+  return builtinFaq();
+}
+
+/* ------------------------------------------------------------------ */
 /* Секция «Пользователи» — поиск и карточка с блокировкой              */
 /* ------------------------------------------------------------------ */
 
@@ -3461,6 +3744,7 @@ function startPanel() {
   startReviews();
   startReports();
   startSupport();
+  startFaq();
   startUsers();
   startBlocks();
   startAudit();
