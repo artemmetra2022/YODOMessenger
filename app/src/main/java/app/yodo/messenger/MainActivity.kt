@@ -33,6 +33,8 @@ import app.yodo.messenger.navigation.YodoNavGraph
 import app.yodo.messenger.ui.locale.LocalizedApp
 import app.yodo.messenger.ui.theme.getColorThemeByName
 import app.yodo.messenger.ui.theme.YodoMessengerTheme
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -44,6 +46,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var themePreferences: ThemePreferences
     @Inject lateinit var userSettingsPreferences: UserSettingsPreferences
     @Inject lateinit var languagePreferences: LanguagePreferences
+    @Inject lateinit var firestore: FirebaseFirestore
+    @Inject lateinit var firebaseAuth: FirebaseAuth
 
     // НОВОЕ (ссылка-приглашение и шаринг): chatId канала из входящей ссылки
     // yodo://channel/<chatId> — проверяется в Compose-дереве и открывает профиль канала.
@@ -53,6 +57,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingChannelDeepLink.value = extractChannelIdFromIntent(intent)
+        recordNewsClick(intent)
 
         val startDestination = if (authRepository.isLoggedIn()) {
             Routes.ChatList.route
@@ -175,6 +180,13 @@ class MainActivity : ComponentActivity() {
                                 startDestination = startDestination
                             )
 
+                            LaunchedEffect(intent?.getStringExtra(app.yodo.messenger.notifications.NotificationHelper.EXTRA_NEWS_CAMPAIGN_ID), authRepository.isLoggedIn()) {
+                                val campaignId = intent?.getStringExtra(app.yodo.messenger.notifications.NotificationHelper.EXTRA_NEWS_CAMPAIGN_ID)
+                                if (campaignId != null && authRepository.isLoggedIn()) {
+                                    navController.navigate(Routes.NewsDetail.createRoute(campaignId))
+                                }
+                            }
+
                             // НОВОЕ (ссылка-приглашение и шаринг): при открытии приложения по ссылке-
                             // приглашению (yodo://channel/<chatId>) — сразу переходит к профилю канала.
                             // Авторизованный и неавторизованный пользователь попадает сразу в обычный
@@ -199,6 +211,28 @@ class MainActivity : ComponentActivity() {
         // НОВОЕ: launchMode="singleTask" — при повторном открытии ссылки, когда активити
         // уже запущена, новый intent приходит сюда, а не в onCreate.
         extractChannelIdFromIntent(intent)?.let { pendingChannelDeepLink.value = it }
+        recordNewsClick(intent)
+    }
+
+    private fun recordNewsClick(intent: android.content.Intent?) {
+        val campaignId = intent?.getStringExtra(app.yodo.messenger.notifications.NotificationHelper.EXTRA_NEWS_CAMPAIGN_ID) ?: return
+        val variant = intent.getStringExtra(app.yodo.messenger.notifications.NotificationHelper.EXTRA_NEWS_VARIANT) ?: "A"
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        val ref = firestore.collection("newsCampaigns").document(campaignId)
+        val viewRef = ref.collection("views").document(uid)
+        firestore.runTransaction { tx ->
+            val snapshot = tx.get(ref)
+            val viewSnapshot = tx.get(viewRef)
+            val opened = (snapshot.getLong("openedCount") ?: 0L) + 1L
+            val field = if (variant == "B") "clicksB" else "clicksA"
+            val clicks = (snapshot.getLong(field) ?: 0L) + 1L
+            val sentField = if (variant == "B") "sentB" else "sentA"
+            val sent = snapshot.getLong(sentField) ?: 0L
+            val ctr = if (sent > 0) clicks.toDouble() / sent.toDouble() else 0.0
+            tx.update(ref, mapOf("openedCount" to opened, field to clicks, "ctr${variant}" to ctr, "lastClickedBy" to uid))
+            if (!viewSnapshot.exists()) tx.set(viewRef, mapOf("viewedAtMillis" to System.currentTimeMillis()))
+            null
+        }.addOnFailureListener { }
     }
 
     /** Извлекает chatId канала из ссылки вида yodo://channel/<chatId>, если она есть в intent. */

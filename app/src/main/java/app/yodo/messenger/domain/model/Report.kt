@@ -7,6 +7,9 @@ enum class ReportTargetType { MESSAGE, USER }
 enum class ReportReason(val label: String) {
     SPAM("Спам"),
     HARASSMENT("Оскорбления или травля"),
+    NSFW("NSFW / неприемлемый контент"),
+    ADVERTISEMENT("Реклама"),
+
     VIOLENCE("Насилие или угрозы"),
     ILLEGAL_CONTENT("Запрещённый контент"),
     FRAUD("Мошенничество"),
@@ -59,7 +62,11 @@ data class Report(
     val resolution: ReportResolution? = null,
     // НОВОЕ (AD): отметка «обжалование блокировки» + приложенное фото.
     val isAppeal: Boolean = false,
-    val appealPhotoBase64: String? = null
+    val appealPhotoBase64: String? = null,
+    // Модерация с 24-часовым периодом на пересмотр решения об удалении.
+    val deletionScheduledAt: Long? = null,
+    val deletionCancelled: Boolean = false,
+    val deletionSilent: Boolean = false
 )
 
 /** Комментарий админа в ходе рассмотрения жалобы (обсуждение может идти в несколько реплик). */

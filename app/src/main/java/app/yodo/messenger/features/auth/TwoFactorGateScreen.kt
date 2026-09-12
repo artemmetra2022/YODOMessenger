@@ -62,6 +62,46 @@ fun TwoFactorGateScreen(
                 CircularProgressIndicator(color = colorTheme.primary)
             }
         }
+
+        is TwoFactorGateUiState.AwaitingAdminTotp -> {
+            var code by remember { mutableStateOf("") }
+            Scaffold { padding ->
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Дополнительная защита администратора", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Введите 6-значный код из приложения-аутентификатора.", textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(24.dp))
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it.filter(Char::isDigit).take(6) },
+                        label = { Text("Код администратора") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        isError = state.error != null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    state.error?.let { Text(it, color = YodoError, style = MaterialTheme.typography.bodySmall) }
+                    Spacer(Modifier.height(20.dp))
+                    Button(
+                        onClick = { viewModel.verifyAdminTotp(code) },
+                        enabled = code.length == 6 && !state.isVerifying,
+                        colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (state.isVerifying) CircularProgressIndicator(modifier = Modifier.height(20.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        else Text("Продолжить")
+                    }
+                    TextButton(onClick = {
+                        viewModel.cancelAndLogout()
+                        onCancelled()
+                    }) { Text(stringResource(R.string.two_factor_logout)) }
+                }
+            }
+        }
         is TwoFactorGateUiState.AwaitingEmailCode -> {
             var code by remember { mutableStateOf("") }
 

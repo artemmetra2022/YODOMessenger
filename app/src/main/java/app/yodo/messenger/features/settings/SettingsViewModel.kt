@@ -12,7 +12,6 @@ import app.yodo.messenger.data.local.FontSize
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinCheckResult
 import app.yodo.messenger.data.local.PinRequirement
-import app.yodo.messenger.data.local.SchoolPreferences
 import app.yodo.messenger.data.local.ThemePreferences
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.ChatFolder
@@ -38,11 +37,9 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val themePreferences: ThemePreferences,
     private val userSettingsPreferences: UserSettingsPreferences,
-    private val schoolPreferences: SchoolPreferences,
     private val languagePreferences: LanguagePreferences,
     private val draftsPreferences: DraftsPreferences,
     private val authRepository: AuthRepository,
-    private val appSettingsRepository: app.yodo.messenger.domain.repository.AppSettingsRepository,
     private val firebaseAuth: FirebaseAuth,
     private val presenceRepository: PresenceRepository,
     private val userRepository: UserRepository
@@ -73,15 +70,6 @@ class SettingsViewModel @Inject constructor(
     // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
     val showSettingsInGlobalSearch: StateFlow<Boolean> = userSettingsPreferences.showSettingsInGlobalSearch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» в разделе «Аккаунт».
-    val schoolSectionEnabled: StateFlow<Boolean> = schoolPreferences.sectionEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-
-    // НОВОЕ (глобальное скрытие «Школы»): админ прячет раздел у всех; админы
-    // кнопку видят всегда, чтобы вернуть раздел. До подгрузки — false (видно).
-    val schoolSectionGloballyHidden: StateFlow<Boolean> =
-        appSettingsRepository.observeSchoolSectionHidden()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val pinRequirement: StateFlow<PinRequirement> = userSettingsPreferences.pinRequirement.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PinRequirement.NEVER)
     val isPinSet: StateFlow<Boolean> = userSettingsPreferences.isPinSet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)

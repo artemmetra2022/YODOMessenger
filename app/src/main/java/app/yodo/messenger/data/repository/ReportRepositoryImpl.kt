@@ -1,5 +1,11 @@
 package app.yodo.messenger.data.repository
 
+import android.content.Context
+import androidx.work.Data
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
+import app.yodo.messenger.data.worker.ModerationDeletionWorker
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.domain.model.AdminActionType
 import app.yodo.messenger.domain.model.Report
@@ -21,12 +27,14 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class ReportRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
+    @ApplicationContext private val appContext: Context,
     private val firebaseAuth: FirebaseAuth,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository
@@ -133,7 +141,10 @@ class ReportRepositoryImpl @Inject constructor(
             resolution = resolution,
             // НОВОЕ (AD): отметка обжалования и фото.
             isAppeal = (data["isAppeal"] as? Boolean) ?: (reason == ReportReason.APPEAL),
-            appealPhotoBase64 = data["appealPhotoBase64"] as? String
+            appealPhotoBase64 = data["appealPhotoBase64"] as? String,
+            deletionScheduledAt = (data["deletionScheduledAt"] as? Number)?.toLong(),
+            deletionCancelled = (data["deletionCancelled"] as? Boolean) ?: false,
+            deletionSilent = (data["deletionSilent"] as? Boolean) ?: false
         )
     }
 
@@ -215,26 +226,50 @@ class ReportRepositoryImpl @Inject constructor(
         val report = getReport(chatId, reportId)
             ?: return ReportActionResult.Error("Жалоба не найдена")
 
+        // Удаление никогда не выполняется сразу: администратору даётся обязательное
+        // 24-часовое окно для пересмотра решения.
         if (deleteMessage && report.targetMessageId != null) {
-            // НОВОЕ (баг 10): два режима удаления по жалобе —
-            //  1) обычное административное удаление: isDeleted=true + deletedByAdmin=true,
-            //     в чате видно «Сообщение удалено администратором»;
-            //  2) «тихое удаление» (silentDelete): документ сообщения удаляется целиком,
-            //     сообщение бесследно исчезает у всех участников.
-            val result = if (silentDelete) {
-                messageRepository.hardDeleteMessage(chatId, report.targetMessageId)
-            } else {
-                messageRepository.deleteMessage(chatId, report.targetMessageId, deletedByAdmin = true)
+            val now = System.currentTimeMillis()
+            val executeAt = now + 24L * 60L * 60L * 1000L
+            return try {
+                scheduleDeletionWorker(
+                    chatId = chatId,
+                    reportId = reportId,
+                    messageId = report.targetMessageId,
+                    executeAt = executeAt,
+                    silentDelete = silentDelete
+                )
+
+                // Бан пользователя (если выбран) остаётся отдельным действием и
+                // применяется сразу; само удаление — только через 24 часа.
+                if (banUser) {
+                    when (val result = chatRepository.banMember(chatId, report.targetUserId)) {
+                        is ChannelUpdateResult.Error -> return ReportActionResult.Error(result.message)
+                        else -> {}
+                    }
+                }
+
+                val uid = firebaseAuth.currentUser?.uid
+                    ?: return ReportActionResult.Error("Нужно войти в аккаунт")
+                val reviewerName = currentUserName()
+                reportsRef(chatId).document(reportId).update(
+                    mapOf(
+                        "deletionScheduledAt" to executeAt,
+                        "deletionCancelled" to false,
+                        "deletionSilent" to silentDelete,
+                        "deletionResolution" to resolution.name,
+                        "reviewedBy" to uid,
+                        "reviewedByName" to reviewerName,
+                        "reviewerComment" to comment.take(1000)
+                    )
+                ).await()
+
+                ReportActionResult.Success
+            } catch (e: Exception) {
+                ReportActionResult.Error(e.toUserMessage("Не удалось запланировать удаление"))
             }
-            if (result is SendMessageResult.Error) {
-                return ReportActionResult.Error(result.message)
-            }
-            chatRepository.logAdminAction(
-                chatId, AdminActionType.MESSAGE_DELETED,
-                details = if (silentDelete) "По жалобе #$reportId (тихое удаление)" else "По жалобе #$reportId",
-                targetUserId = report.targetUserId, targetUserName = report.targetUserName
-            )
         }
+
         if (banUser) {
             when (val result = chatRepository.banMember(chatId, report.targetUserId)) {
                 is ChannelUpdateResult.Error -> return ReportActionResult.Error(result.message)
@@ -242,6 +277,52 @@ class ReportRepositoryImpl @Inject constructor(
             }
         }
         return finalizeReport(chatId, reportId, ReportStatus.RESOLVED, resolution, comment)
+    }
+
+    private suspend fun scheduleDeletionWorker(
+        chatId: String,
+        reportId: String,
+        messageId: String,
+        executeAt: Long,
+        silentDelete: Boolean
+    ): ReportActionResult {
+        val delay = (executeAt - System.currentTimeMillis()).coerceAtLeast(0L)
+        val data = Data.Builder()
+            .putString(ModerationDeletionWorker.KEY_CHAT_ID, chatId)
+            .putString(ModerationDeletionWorker.KEY_REPORT_ID, reportId)
+            .putString(ModerationDeletionWorker.KEY_MESSAGE_ID, messageId)
+            .putLong(ModerationDeletionWorker.KEY_EXECUTE_AT, executeAt)
+            .putBoolean(ModerationDeletionWorker.KEY_SILENT_DELETE, silentDelete)
+            .build()
+
+        val request = OneTimeWorkRequestBuilder<ModerationDeletionWorker>()
+            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setInputData(data)
+            .build()
+
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            "moderation_delete_${chatId}_${reportId}",
+            androidx.work.ExistingWorkPolicy.REPLACE,
+            request
+        )
+        return ReportActionResult.Success
+    }
+
+    override suspend fun cancelScheduledDeletion(chatId: String, reportId: String): ReportActionResult {
+        return try {
+            WorkManager.getInstance(appContext)
+                .cancelUniqueWork("moderation_delete_${chatId}_${reportId}")
+            reportsRef(chatId).document(reportId).update(
+                mapOf(
+                    "deletionCancelled" to true,
+                    "deletionScheduledAt" to null,
+                    "deletionSilent" to false
+                )
+            ).await()
+            ReportActionResult.Success
+        } catch (e: Exception) {
+            ReportActionResult.Error(e.toUserMessage("Не удалось отменить удаление"))
+        }
     }
 
     private suspend fun finalizeReport(

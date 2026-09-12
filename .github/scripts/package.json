@@ -1,0 +1,12 @@
+{
+  "name": "yodo-messenger-github-actions",
+  "description": "Скрипт рассылки push-уведомлений, запускается исключительно через GitHub Actions по расписанию.",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.1.0"
+  }
+}

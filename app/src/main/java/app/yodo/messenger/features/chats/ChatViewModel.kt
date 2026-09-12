@@ -11,10 +11,8 @@ import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.NotificationMessageStore
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.AdminActionType
-import app.yodo.messenger.domain.model.FaqSection
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.Message
-import app.yodo.messenger.domain.model.SupportFaqData
 import app.yodo.messenger.domain.model.SupportRestriction
 import app.yodo.messenger.domain.model.UserPresence
 import app.yodo.messenger.domain.repository.ChatRepository
@@ -32,7 +30,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -183,16 +180,6 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState
-
-    // НОВОЕ (редактор FAQ в веб-админке): разделы FAQ-бота поддержки. Если админ ничего
-    // не менял, документ недоступен или пуст — показывается встроенный список.
-    val supportFaqSections: StateFlow<List<FaqSection>> = chatRepository.observeSupportFaq()
-        .map { remote -> remote?.takeIf { it.isNotEmpty() } ?: SupportFaqData.sections }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = SupportFaqData.sections
-        )
 
     val sendOnEnter: StateFlow<Boolean> = userSettingsPreferences.sendOnEnter.stateIn(
         scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = true

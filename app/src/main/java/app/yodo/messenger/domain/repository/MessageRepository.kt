@@ -107,12 +107,15 @@ interface MessageRepository {
     suspend fun exportChatHistory(chatId: String): String
     suspend fun deleteExpiredMessages(chatId: String)
 
-    // НОВОЕ (переработка каналов): комментарии к постам.
-    fun observeComments(chatId: String, messageId: String): Flow<List<Comment>>
-    suspend fun addComment(chatId: String, messageId: String, text: String): SendMessageResult
-    suspend fun deleteComment(chatId: String, messageId: String, commentId: String): SendMessageResult
     /** Число постов в канале (для профиля канала). */
     suspend fun countMessages(chatId: String): Int
     /** Последние посты канала (для превью в профиле канала). */
     suspend fun getRecentMessages(chatId: String, limit: Int): List<Message>
+
+    /** Возвращает сообщение-цель и до N сообщений до/после него для контекста модерации. */
+    suspend fun getMessageContext(
+        chatId: String,
+        messageId: String,
+        radius: Int = 3
+    ): List<Message>
 }

@@ -72,34 +72,6 @@ sealed class Routes(val route: String) {
     }
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
     data object Tools : Routes("tools")
-
-    // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 (перенос
-    // функционала Telegram-бота) + экран настройки его отображения.
-    // Главный вход — из Настройки → Аккаунт (см. AccountSettingsScreen),
-    // пункт можно скрыть переключателем schoolSectionEnabled.
-    data object School : Routes("school")
-    data object SchoolTeachers : Routes("school_teachers")
-    data object SchoolNews : Routes("school_news")
-    data object SchoolSchedule : Routes("school_schedule")
-    data object SchoolPolls : Routes("school_polls")
-    data object SchoolQuiz : Routes("school_quiz")
-    data object SchoolGame : Routes("school_game")
-    data object SchoolReview : Routes("school_review")
-    data object SchoolFaq : Routes("school_faq")
-    data object SchoolParents : Routes("school_parents")
-    data object SchoolAdmin : Routes("school_admin")
-    data object SchoolSettings : Routes("school_settings")
-    // НОВОЕ (учительские страницы): страница учителя (mode=page из справочника,
-    // mode=my — «моя страница» для аккаунта, привязанного админом) и админ-
-    // панель профилей учителей с привязкой аккаунтов.
-    data object SchoolTeacherPage : Routes("school_teacher_page/{teacherName}/{mode}") {
-        const val ARG_TEACHER_NAME = "teacherName"
-        const val ARG_MODE = "mode"
-        fun createRoute(teacherName: String, myPage: Boolean = false): String =
-            "school_teacher_page/${java.net.URLEncoder.encode(teacherName, "UTF-8")}/${if (myPage) "my" else "page"}"
-    }
-    data object SchoolTeacherAdmin : Routes("school_teacher_admin")
-
     data object SecurityCenter : Routes("security_center")
     // НОВОЕ (вход по QR-коду): сканер QR из веб-версии в «Центре безопасности».
     data object QrLogin : Routes("qr_login")
@@ -220,12 +192,28 @@ sealed class Routes(val route: String) {
     // аккаунтов — точка входа во все админ-функции приложения вместо того,
     // чтобы искать их по разным экранам (Настройки, FAB чатов, профиль юзера).
     data object AdminHome : Routes("admin_home")
+    data object AdminDashboard : Routes("admin_dashboard")
     // НОВОЕ: список/поиск пользователей для глобальной блокировки прямо из Админки,
     // без необходимости искать конкретного человека через общий поиск по чатам.
     data object AdminUsers : Routes("admin_users")
+    data object AdminSecurity : Routes("admin_security")
     // НОВОЕ (глобальный аудит-лог): журнал действий Админки (глобальные
     // блокировки/разблокировки, изменение настроек приложения).
     data object AdminAuditLog : Routes("admin_audit_log")
+    data object Moderation : Routes("moderation")
+    data object AdminBehaviorMonitoring : Routes("admin_behavior_monitoring")
+    data object AdminFaq : Routes("admin_faq")
+    data object AdminNewsCampaigns : Routes("admin_news_campaigns")
+    data object AdminTeachers : Routes("admin_teachers")
+    data object Teachers : Routes("teachers")
+    data object TeacherProfile : Routes("teacher_profile/{userId}") {
+        fun createRoute(userId: String) = "teacher_profile/$userId"
+        const val ARG_USER_ID = "userId"
+    }
+    data object NewsDetail : Routes("news_detail/{campaignId}") {
+        fun createRoute(campaignId: String) = "news_detail/$campaignId"
+        const val ARG_CAMPAIGN_ID = "campaignId"
+    }
 
     // НОВОЕ: личный блокнот «Заметки».
 }

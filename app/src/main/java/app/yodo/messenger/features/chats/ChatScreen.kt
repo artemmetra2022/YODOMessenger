@@ -2,6 +2,7 @@ package app.yodo.messenger.features.chats
 
 import app.yodo.messenger.ui.components.FullscreenDialog
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
+import app.yodo.messenger.domain.model.SupportFaqRepository
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -183,7 +184,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
-import app.yodo.messenger.domain.model.FaqSection
 import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.MessageStatus
 import app.yodo.messenger.domain.model.SupportFaqData
@@ -235,7 +235,6 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val supportFaqSections by viewModel.supportFaqSections.collectAsState()
     val sendOnEnter by viewModel.sendOnEnter.collectAsState()
     val autoDownloadImages by viewModel.autoDownloadImages.collectAsState()
     val advancedPollsEnabled by viewModel.advancedPollsEnabled.collectAsState()
@@ -251,6 +250,8 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val faqSections by SupportFaqRepository.sections.collectAsState()
+    LaunchedEffect(Unit) { SupportFaqRepository.load() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val selectedMessageIds = remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -951,7 +952,7 @@ fun ChatScreen(
                 if (isSupportChat && uiState.supportFaqScreen != null) {
                     SupportFaqPanel(
                         screen = uiState.supportFaqScreen!!,
-                        sections = supportFaqSections,
+                        sections = faqSections,
                         colorTheme = colorTheme,
                         onSelectSection = { viewModel.openFaqSection(it) },
                         onSelectQuestion = { sectionId, questionId ->
@@ -3241,7 +3242,7 @@ private fun MessageInputBar(
 @Composable
 private fun SupportFaqPanel(
     screen: SupportFaqScreen,
-    sections: List<FaqSection>,
+    sections: List<app.yodo.messenger.domain.model.FaqSection>,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
     onSelectSection: (String) -> Unit,
     onSelectQuestion: (String, String) -> Unit,
@@ -3250,6 +3251,7 @@ private fun SupportFaqPanel(
     onContactOperator: () -> Unit,
     onCollapse: () -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
         Column(
             modifier = Modifier
@@ -3284,9 +3286,9 @@ private fun SupportFaqPanel(
                     text = when (screen) {
                         is SupportFaqScreen.SectionList -> "Чем помочь?"
                         is SupportFaqScreen.QuestionList ->
-                            sections.firstOrNull { it.id == screen.sectionId }?.title ?: "Вопросы"
+                            sections.find { it.id == screen.sectionId }?.title ?: "Вопросы"
                         is SupportFaqScreen.Answer ->
-                            sections.firstOrNull { it.id == screen.sectionId }?.title ?: "Ответ"
+                            sections.find { it.id == screen.sectionId }?.title ?: "Ответ"
                     },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
@@ -3326,7 +3328,7 @@ private fun SupportFaqPanel(
                     if (screen.sectionId == SupportFaqData.OTHER_SECTION_ID) {
                         OtherQuestionBlock(colorTheme = colorTheme, onContactOperator = onContactOperator)
                     } else {
-                        val section = sections.firstOrNull { it.id == screen.sectionId }
+                        val section = sections.find { it.id == screen.sectionId }
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 6.dp)
@@ -3344,8 +3346,8 @@ private fun SupportFaqPanel(
                     }
                 }
                 is SupportFaqScreen.Answer -> {
-                    val question = sections.firstOrNull { it.id == screen.sectionId }
-                        ?.questions?.firstOrNull { it.id == screen.questionId }
+                    val question = sections.firstOrNull { it.id == screen.sectionId }?.questions?.firstOrNull { it.id == screen.questionId }
+                    LaunchedEffect(question?.id) { question?.let { SupportFaqRepository.recordView(it.id) } }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3367,21 +3369,15 @@ private fun SupportFaqPanel(
                         Spacer(modifier = Modifier.height(16.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = { onBackToQuestions(screen.sectionId) },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Другие вопросы", style = MaterialTheme.typography.labelMedium)
-                            }
-                            Button(
-                                onClick = onContactOperator,
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary)
-                            ) {
-                                Text("Это не помогло", style = MaterialTheme.typography.labelMedium, color = Color.White)
-                            }
+                            OutlinedButton(onClick = { question?.let { coroutineScope.launch { SupportFaqRepository.recordFeedback(it.id, true) } } }, modifier = Modifier.weight(1f)) { Text("👍 Полезно") }
+                            OutlinedButton(onClick = { question?.let { coroutineScope.launch { SupportFaqRepository.recordFeedback(it.id, false) } } }, modifier = Modifier.weight(1f)) { Text("👎 Нет") }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(onClick = { onBackToQuestions(screen.sectionId) }, modifier = Modifier.weight(1f)) { Text("Другие вопросы") }
+                            Button(onClick = onContactOperator, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary)) { Text("Это не помогло", color = Color.White) }
                         }
                     }
                 }

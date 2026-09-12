@@ -67,6 +67,9 @@ interface ReportRepository {
         silentDelete: Boolean = false
     ): ReportActionResult
 
+    /** Запланировать удаление сообщения через 24 часа, оставив админу время на пересмотр. */
+    suspend fun cancelScheduledDeletion(chatId: String, reportId: String): ReportActionResult
+
     /** Число жалоб в очереди (для бейджа на кнопке входа в раздел). */
     suspend fun countPendingReports(chatId: String): Int
 

@@ -14,18 +14,6 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
-    // ИСПРАВЛЕНО (Questions CG): разделы «Вопросы учеников» (Inbox) и «Обзор»
-    // веб-админки читают вопросы ВСЕХ учителей через collection-group запрос
-    // collectionGroup(db, "questions") — точно как reports выше. Вложенное
-    // правило `schoolTeacherProfiles/{teacherName}/questions/{questionId}` не
-    // разрешает collection-group запрос, поэтому без этого блока чтение
-    // отклонялось даже админу (permission-denied). Разрешение симметрично
-    // reports: сквозной доступ только двум админам; обычные постраничные
-    // чтения внутри одного учителя остаются за вложенным правилом (isSignedIn).
-    match /{path=**}/questions/{questionId} {
-      allow read: if isOfficialChannelAdmin();
-    }
-
     // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
     // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
     // сразу после полноэкранного просмотра — иначе фото так и останется читаемым на
@@ -42,12 +30,36 @@ service cloud.firestore {
           .hasOnly(["imageBase64", "viewOnceOpened"]);
     }
 
-    function isOfficialChannelAdmin() {
-      // Только два доверенных email-адреса (аккаунты создателей приложения)
-      // могут писать в официальный канал рассылок.
+    // НОВОЕ (автоматическая модерация): глобальные правила автофильтра.
+    // Управлять ими могут только два главных администратора. Клиент читает
+    // включённые правила перед отправкой, чтобы фильтрация работала до E2EE.
+    match /moderationRules/{ruleId} {
+      allow read, create, update, delete: if isOfficialChannelAdmin();
+    }
+
+    // НОВОЕ (история удалённых сообщений): сохраняется исходный документ
+    // сообщения на 30 дней, после чего запись можно безопасно очистить.
+    // Просмотр/восстановление доступны только главным администраторам.
+    // Автомодерация создаёт запись от имени самого автора сообщения.
+    match /moderationDeletedMessages/{entryId} {
+      allow read, delete: if isOfficialChannelAdmin();
+      allow create: if isSignedIn() &&
+        (request.auth.uid == request.resource.data.senderId || isOfficialChannelAdmin());
+      allow update: if false;
+    }
+
+    function isRootAdmin() {
       return isSignedIn() &&
         request.auth.token.email.lower() in
           ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru'];
+    }
+
+    function isOfficialChannelAdmin() {
+      // Главные админы + администраторы, назначенные из панели.
+      return isRootAdmin() ||
+        (isSignedIn() &&
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true);
     }
 
     // НОВОЕ (модерация групп/каналов): владелец чата, назначенный админ, либо
@@ -117,6 +129,55 @@ service cloud.firestore {
     // НОВОЕ (AD): глобальные блокировки аккаунтов. Читать свою запись может
     // сам пользователь (чтобы показать экран «Вы заблокированы»), а также
     // два админа. Создавать/снимать блокировку могут ТОЛЬКО два админа.
+    // Назначение ролей администраторов. Записывать могут только два главных
+    // администратора; читать — сам назначенный админ и главные администраторы.
+    // НОВОЕ (расширенные новости): опубликованные кампании читают авторизованные
+    // пользователи; менять кампанию и управлять аналитикой может только админ.
+    match /newsCampaigns/{campaignId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOfficialChannelAdmin();
+      match /views/{uid} {
+        allow read: if isOfficialChannelAdmin() || (isSignedIn() && request.auth.uid == uid);
+        allow create: if isSignedIn() && request.auth.uid == uid &&
+          request.resource.data.keys().hasOnly(['displayName','classId','groupId','viewedAtMillis','reaction']) &&
+          request.resource.data.viewedAtMillis is int;
+        allow update: if isSignedIn() && request.auth.uid == uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','classId','groupId','viewedAtMillis','reaction']);
+        allow delete: if isOfficialChannelAdmin() || (isSignedIn() && request.auth.uid == uid);
+      }
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+        allow delete: if isOfficialChannelAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+        allow update: if false;
+      }
+    }
+    match /newsTemplates/{templateId} {
+      allow read, create, update, delete: if isOfficialChannelAdmin();
+    }
+
+    // Профили учителей: публичное чтение карточек; редактирование только админам.
+    // Учитель может менять только собственные настройки уведомлений.
+    match /teacherProfiles/{teacherId} {
+      allow read: if isSignedIn();
+      allow create: if isOfficialChannelAdmin();
+      allow update: if isOfficialChannelAdmin() ||
+        (isSignedIn() && request.auth.uid == teacherId &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['notifyNewQuestions','notifyMessages','acceptingQuestions','vacationFromMillis','vacationToMillis']));
+      allow delete: if isOfficialChannelAdmin();
+    }
+
+    // Очередь push-уведомлений учителям обрабатывается только GitHub Actions.
+    match /teacherNotificationQueue/{notificationId} {
+      allow read, create, update, delete: if isOfficialChannelAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow read: if isRootAdmin() || (isSignedIn() && request.auth.uid == adminId);
+      allow create, update, delete: if isRootAdmin();
+    }
+
     match /globalBlocks/{blockedUserId} {
       allow read: if isSignedIn() &&
         (request.auth.uid == blockedUserId || isOfficialChannelAdmin());
@@ -143,7 +204,7 @@ service cloud.firestore {
 
     // НОВОЕ (push о модерации): корневая коллекция moderationNotifications —
     // очередь событий модерации (глобальный бан/разбан), которую периодически
-    // вычитывает push-worker/index.js через Admin SDK (обходит эти правила
+    // вычитывает GitHub Actions (.github/scripts/send-push-notifications.js) через Admin SDK (обходит эти правила
     // полностью, так что доступ воркера ими не ограничивается). С клиента
     // разрешено только СОЗДАНИЕ — двум админам (UserRepositoryImpl.
     // queueModerationNotification), когда они блокируют/разблокируют
@@ -156,19 +217,6 @@ service cloud.firestore {
       allow read: if false;
       allow create: if isOfficialChannelAdmin();
       allow update, delete: if false;
-    }
-
-    // НОВОЕ (Push-центр веб-админки): корневая коллекция pushBroadcasts —
-    // очередь произвольных рассылок (объявление всем / подписчикам школы /
-    // конкретному пользователю), которые панель ставит в очередь, а
-    // push-worker/index.js вычитывает каждые ~5 минут через Admin SDK
-    // (обходит эти правила) и помечает notified: true. Читать историю и
-    // ставить новую рассылку могут только два доверенных админа; удалять
-    // можно (отмена ещё не отправленной рассылки / чистка истории).
-    // Обновлять записи с клиента нельзя — notified пишет только воркер.
-    match /pushBroadcasts/{broadcastId} {
-      allow read, create, delete: if isOfficialChannelAdmin();
-      allow update: if false;
     }
 
     // НОВОЕ (п.19 ТЗ): ограничение возможности писать в поддержку — мера мягче
@@ -184,175 +232,76 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ (мониторинг поведения): события удаления чатов и счётчики
+    // ограничения для новых профилей. События пишет только сам пользователь;
+    // админ читает агрегированные события через AdminBehaviorMonitoring.
+    match /behaviorEvents/{eventId} {
+      allow read: if isOfficialChannelAdmin();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /newcomerRateLimits/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId &&
+        request.resource.data.keys().hasOnly(['windowStart', 'count', 'pausedUntil']) &&
+        request.resource.data.windowStart <= request.time.toMillis() &&
+        request.resource.data.windowStart >= request.time.toMillis() - 120000 &&
+        request.resource.data.count == 1 &&
+        request.resource.data.pausedUntil == 0;
+      allow update: if isSignedIn() && request.auth.uid == userId &&
+        request.resource.data.keys().hasOnly(['windowStart', 'count', 'pausedUntil']) &&
+        (
+          (
+            request.time.toMillis() - resource.data.windowStart >= 60000 &&
+            request.resource.data.windowStart <= request.time.toMillis() &&
+            request.resource.data.windowStart >= request.time.toMillis() - 120000 &&
+            request.resource.data.count == 1 &&
+            request.resource.data.pausedUntil == 0
+          ) ||
+          (
+            request.resource.data.windowStart == resource.data.windowStart &&
+            request.resource.data.count == resource.data.count + 1 &&
+            request.resource.data.pausedUntil == resource.data.pausedUntil
+          ) ||
+          (
+            request.resource.data.windowStart == resource.data.windowStart &&
+            request.resource.data.count == resource.data.count &&
+            request.resource.data.pausedUntil > request.time.toMillis()
+          )
+        );
+      allow delete: if false;
+    }
+
     // НОВОЕ: глобальные настройки приложения (сейчас — только флаг
     // requireEmailVerification, переключатель "требовать подтверждение почты
     // при входе"). Читать может кто угодно, даже без авторизации — значение
     // нужно ДО завершения логина, чтобы решить, показывать ли экран
     // "подтвердите почту". Менять могут только 2 доверенных email.
-    match /config/appSettings {
-      allow read: if true;
+    match /config/behaviorMonitoring {
+      allow read: if isSignedIn();
       allow write: if isOfficialChannelAdmin();
     }
 
-    // НОВОЕ (FAQ-бот поддержки): редактируемый из веб-админки (раздел
-    // «FAQ-бот») список разделов и вопросов чата поддержки. Читать может кто
-    // угодно — веб-версия тянет документ обычным fetch без SDK/логина; менять
-    // могут только 2 доверенных email. Android-приложение читает этот же
-    // документ и при пустом/недоступном значении остаётся на встроенном наборе.
-    match /config/supportFaq {
-      allow read: if true;
-      allow write: if isOfficialChannelAdmin();
-    }
-
-    // НОВОЕ (раздел «Школа»): динамический контент школьного справочника
-    // (перенос функционала Telegram-бота гимназии №196). Модель прав:
-    //  - schoolNews   — читают все авторизованные; писать/удалять — только админы;
-    //  - schoolPolls  — читают все авторизованные; голосовать (voters/votes)
-    //                    может любой авторизованный ровно один раз (rules не
-    //                    позволяют повторно голосовать или менять чужие поля);
-    //                    создавать/удалять — только админы;
-    //  - schoolIdeas  — создать может любой авторизованный (только от своего
-    //                    имени), читать — только админы (идеи приватны);
-    //  - schoolReviews— документ = uid автора: читать могут все авторизованные,
-    //                    писать можно ТОЛЬКО свой документ и только от своего имени.
-    match /schoolNews/{newsId} {
+    // НОВОЕ (FAQ-админка): управляемый FAQ, статистика просмотров/оценок и история версий.
+    match /faqEntries/{questionId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isOfficialChannelAdmin();
     }
-    match /schoolPolls/{pollId} {
-      allow read: if isSignedIn();
-      // Голосование: пользователь добавляет СВОЙ uid в voters и увеличивает
-      // счётчик одного варианта. Меняться могут только votes/voters, uid автора
-      // голоса обязан отсутствовать в voters до обновления (один голос на опрос)
-      // и добавляться как единственный новый ключ карты voters.
-      // НОВОЕ (закрытие опросов из веб-админки): голосование в закрытом
-      // (closed == true) опросе запрещено и на уровне правил — кнопки и
-      // клиентская проверка в vote() обходятся прямым запросом к Firestore.
-      allow update: if isSignedIn() &&
-        resource.data.closed != true &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes', 'voters']) &&
-        request.auth.uid in request.resource.data.voters &&
-        !(request.auth.uid in resource.data.voters) &&
-        request.resource.data.voters.diff(resource.data.voters).affectedKeys()
-          .hasOnly([request.auth.uid]);
-      // НОВОЕ (закрытие опросов из веб-админки): админ закрывает/переоткрывает
-      // опрос, меняя ТОЛЬКО флаг closed.
-      allow update: if isOfficialChannelAdmin() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['closed']);
-      allow create, delete: if isOfficialChannelAdmin();
-    }
-    match /schoolIdeas/{ideaId} {
+    match /faqStats/{questionId} {
       allow read: if isOfficialChannelAdmin();
-      allow create: if isSignedIn() &&
-        request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if false;
-    }
-    match /schoolReviews/{uid} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn() &&
-        request.auth.uid == uid &&
-        request.resource.data.authorId == request.auth.uid;
+      allow create, update: if isSignedIn();
       allow delete: if false;
     }
-    // НОВОЕ (учительские страницы): «второй профиль» учителя поверх обычного
-    // аккаунта мессенджера (перенос учительских страниц Telegram-бота).
-    //  - читать профили/вопросы могут все авторизованные;
-    //  - создавать профили и привязывать/отвязывать аккаунты — только админы;
-    //  - файл урока (fileUrl/fileNote/fileUpdatedAt) меняет ТОЛЬКО привязанный
-    //    учитель (linkedUserId == его uid) или админ;
-    //  - подписка: ученик добавляет/убирает только СВОЙ uid из массива
-    //    subscribers, не трогая другие поля;
-    //  - вопросы: задать может любой авторизованный (только от своего имени);
-    //    скрыть/показать — привязанный учитель или админ; чужие вопросы
-    //    редактировать нельзя.
-    match /schoolTeacherProfiles/{teacherName} {
-      allow read: if isSignedIn();
-      allow create, delete: if isOfficialChannelAdmin();
-      // Обновление профиля: три легитимных случая.
-      allow update: if isSignedIn() && (
-        // 1) Админ: полные права (создание профиля, привязка, отвязка).
-        isOfficialChannelAdmin() ||
-        // 2) Привязанный учитель: может менять ТОЛЬКО файл урока.
-        (resource.data.linkedUserId == request.auth.uid &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['fileUrl', 'fileNote', 'fileUpdatedAt'])) ||
-        // 3) Ученик: подписка/отписка — только свой uid в массиве subscribers.
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscribers']) &&
-          (
-            // отписка: uid удаляется из массива
-            (!(request.auth.uid in request.resource.data.subscribers) &&
-              request.auth.uid in resource.data.subscribers)
-            ||
-            // подписка: uid добавляется в массив
-            (request.auth.uid in request.resource.data.subscribers &&
-              !(request.auth.uid in resource.data.subscribers))
-          )
-      );
-      // Вопросы под страницей учителя (подколлекция questions).
-      match /questions/{questionId} {
-        allow read: if isSignedIn();
-        // Задать вопрос может любой авторизованный — но только от своего имени
-        // и в стартовом состоянии: скрытый=false, БЕЗ ответа (подделать ответ
-        // учителя при создании нельзя), notified=false (флаг очереди push-
-        // воркера). Отсутствие полей у старых версий клиента допускается —
-        // главное, чтобы они не содержали непустых значений.
-        allow create: if isSignedIn() &&
-          request.resource.data.fromUid == request.auth.uid &&
-          request.resource.data.hidden == false &&
-          (!('answer' in request.resource.data) || request.resource.data.answer == '') &&
-          (!('notified' in request.resource.data) || request.resource.data.notified == false);
-        // Изменить вопрос может только привязанный учитель или админ — и ровно
-        // одним из двух способов: скрыть/показать (hidden) или ответить/
-        // отредактировать ответ (answer + answeredAt). Ученик не может ни
-        // скрыть чужой вопрос, ни написать ответ за учителя.
-        allow update: if isSignedIn() &&
-          (
-            isOfficialChannelAdmin() ||
-            get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
-              == request.auth.uid
-          ) &&
-          (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden']) ||
-            request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['answer', 'answeredAt'])
-          );
-        allow delete: if false;
-      }
+    match /faqVersions/{versionId} {
+      allow read: if isOfficialChannelAdmin();
+      allow create: if isOfficialChannelAdmin();
+      allow update, delete: if false;
+    }
 
-      // НОВОЕ (push подписчикам): подколлекция fileNotifications — события
-      // «файл урока обновлён» для push-воркера (запись создаёт клиент в
-      // SchoolRepositoryImpl.setTeacherFile, воркер вычитывает через
-      // collectionGroup и помечает notified=true через Admin SDK). С клиента
-      // разрешено только создание записи с notified=false — и только
-      // привязанному учителю или админу. Чтение с клиента не нужно.
-      match /fileNotifications/{notifId} {
-        allow read: if false;
-        allow create: if isSignedIn() &&
-          (
-            isOfficialChannelAdmin() ||
-            get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
-              == request.auth.uid
-          ) &&
-          request.resource.data.notified == false;
-        allow update, delete: if false;
-      }
-
-      // НОВОЕ (история файлов урока): подколлекция lessonFiles — история
-      // обновлений файла урока (запись создаётся в
-      // SchoolRepositoryImpl.setTeacherFile при каждом обновлении). Читать
-      // могут все авторизованные (блок «Предыдущие файлы» на странице
-      // учителя), писать — только привязанный учитель или админ, только
-      // создавать (история неизменяема и не удаляется с клиента).
-      match /lessonFiles/{fileId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() &&
-          (
-            isOfficialChannelAdmin() ||
-            get(/databases/$(database)/documents/schoolTeacherProfiles/$(teacherName)).data.linkedUserId
-              == request.auth.uid
-          );
-        allow update, delete: if false;
-      }
+    match /config/appSettings {
+      allow read: if true;
+      allow write: if isOfficialChannelAdmin();
     }
 
     // НОВОЕ (вход по QR-коду): временный "мостик" между веб-версией (не авторизована)
@@ -412,6 +361,14 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    // Админская история входов/сессий. IP заполняется только серверным источником;
+    // клиент Firebase Auth не раскрывает IP Android-приложению.
+    match /adminLoginHistory/{userId}/entries/{entryId} {
+      allow read: if isOfficialChannelAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update, delete: if false;
+    }
+
     match /users/{userId} {
       // Публичное чтение нужно для входа по username (email резолвится ДО
       // авторизации в FirebaseAuth) и для профилей пользователей.
@@ -429,7 +386,12 @@ service cloud.firestore {
       // выполняются уже вошедшим пользователем.
       allow get: if true;
       allow list: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (
+        request.auth.uid == userId ||
+        (isOfficialChannelAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["classId"]))
+      );
+      allow delete: if isSignedIn() && request.auth.uid == userId;
 
       // Сессии (устройства) — только владелец аккаунта может читать и писать.
       match /sessions/{sessionId} {
@@ -451,6 +413,12 @@ service cloud.firestore {
       // НОВОЕ (История изменений профиля): журнал изменений владельца.
       // Правила не каскадируются на подколлекции, поэтому без этого блока
       // запись в profileHistory блокировалась и история оставалась пустой.
+      match /blockHistory/{entryId} {
+        allow read: if isOfficialChannelAdmin() || (isSignedIn() && request.auth.uid == userId);
+        allow create: if isOfficialChannelAdmin();
+        allow update, delete: if false;
+      }
+
       match /profileHistory/{entryId} {
         allow read: if isSignedIn() && request.auth.uid == userId;
         allow create: if isSignedIn() && request.auth.uid == userId;
@@ -755,18 +723,8 @@ service cloud.firestore {
           );
         allow update: if isSignedIn() &&
           (
-            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds ||
-            // НОВОЕ (веб-админка: раздел «Жалобы»): два главных админа закрывают
-            // жалобы (обновляют ТОЛЬКО поля рассмотрения — status/resolution/
-            // reviewedBy/reviewedByName/reviewedAt/reviewerComment), не будучи
-            // участниками чата. Белый список полей повторяет ReportRepositoryImpl.
-            // finalizeReport — произвольный rewrite чужой жалобы запрещён.
-            (
-              isOfficialChannelAdmin() &&
-              request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(['status', 'resolution', 'reviewedBy', 'reviewedByName',
-                          'reviewedAt', 'reviewerComment'])
-            )
+            isOfficialChannelAdmin() ||
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           );
         allow delete: if false;
 
@@ -800,6 +758,7 @@ service cloud.firestore {
         // модерация обеспечивается ветками allow update/delete ниже.
         allow read: if isSignedIn() &&
           (
+            isOfficialChannelAdmin() ||
             chatId == 'yodo_official_channel' ||
             chatId == ('saved_' + request.auth.uid) ||
             (isSupportChat(chatId) && canAccessSupportChat(chatId)) ||

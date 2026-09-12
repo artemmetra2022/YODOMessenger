@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -53,10 +55,15 @@ import app.yodo.messenger.domain.model.Report
 import app.yodo.messenger.domain.model.ReportComment
 import app.yodo.messenger.domain.model.ReportResolution
 import app.yodo.messenger.domain.model.ReportStatus
+import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.ReportTargetType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 @Composable
 fun ReportDetailScreen(
@@ -69,6 +76,7 @@ fun ReportDetailScreen(
     var commentText by remember { mutableStateOf("") }
     var showResolveDialog by remember { mutableStateOf(false) }
     var showDismissDialog by remember { mutableStateOf(false) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(actionCompleted) {
         if (actionCompleted) onBackClick()
@@ -97,6 +105,53 @@ fun ReportDetailScreen(
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(modifier = Modifier.weight(1f)) {
                 item { ReportSummaryCard(report) }
+
+                if (report.deletionScheduledAt != null && !report.deletionCancelled) {
+                    item {
+                        ScheduledDeletionCard(
+                            executeAt = report.deletionScheduledAt,
+                            onCancel = { viewModel.cancelScheduledDeletion() }
+                        )
+                    }
+                }
+
+                uiState.bulkDeletionScheduledAt?.let { executeAt ->
+                    item {
+                        BulkScheduledCard(executeAt)
+                    }
+                }
+
+                if (uiState.contextMessages.isNotEmpty()) {
+                    item {
+                        Text(
+                            "Контекст жалобы",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                    items(uiState.contextMessages, key = { it.id }) { message ->
+                        MessageContextRow(
+                            message = message,
+                            isTarget = message.id == report.targetMessageId
+                        )
+                    }
+                }
+
+                if (report.targetType == ReportTargetType.MESSAGE && report.targetMessageId != null) {
+                    item {
+                        OutlinedButton(
+                            onClick = { showBulkDeleteDialog = true },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Удалить сообщения пользователя за период")
+                        }
+                    }
+                }
+
                 item {
                     Text(
                         "Обсуждение",
@@ -111,7 +166,7 @@ fun ReportDetailScreen(
                 }
             }
 
-            if (report.status == ReportStatus.PENDING) {
+            if (report.status == ReportStatus.PENDING && report.deletionScheduledAt == null) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
@@ -175,6 +230,17 @@ fun ReportDetailScreen(
                 }
             )
         }
+        if (showBulkDeleteDialog) {
+            BulkDeleteDialog(
+                userName = report.targetUserName,
+                onDismiss = { showBulkDeleteDialog = false },
+                onConfirm = { startAt, endAt ->
+                    showBulkDeleteDialog = false
+                    viewModel.scheduleBulkDeletion(startAt, endAt)
+                }
+            )
+        }
+
         errorMessage?.let {
             AlertDialog(
                 onDismissRequest = { viewModel.consumeErrorMessage() },
@@ -184,6 +250,181 @@ fun ReportDetailScreen(
             )
         }
     }
+}
+
+@Composable
+private fun ScheduledDeletionCard(
+    executeAt: Long,
+    onCancel: () -> Unit
+) {
+    val remaining = (executeAt - System.currentTimeMillis()).coerceAtLeast(0L)
+    val hours = (remaining / (60L * 60L * 1000L)).coerceAtLeast(0L)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(12.dp)
+    ) {
+        Text("Удаление запланировано", fontWeight = FontWeight.Bold)
+        Text(
+            "Сообщение будет удалено через 24 часа после решения администратора. " +
+                "Сейчас осталось примерно ${hours + 1} ч.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        TextButton(onClick = onCancel) {
+            Text("Отменить удаление")
+        }
+    }
+}
+
+@Composable
+private fun BulkScheduledCard(executeAt: Long) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(12.dp)
+    ) {
+        Text("Массовое удаление запланировано", fontWeight = FontWeight.Bold)
+        Text(
+            "Сообщения выбранного пользователя за период будут обработаны через 24 часа. " +
+                "До этого момента их можно не удалять.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        Text(
+            "Выполнение: ${SimpleDateFormat("d MMM yyyy, HH:mm", Locale("ru")).format(Date(executeAt))}",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun MessageContextRow(message: Message, isTarget: Boolean) {
+    val title = if (isTarget) "⚑ Сообщение из жалобы" else "Сообщение"
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (isTarget) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+            )
+            .padding(10.dp)
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isTarget) FontWeight.Bold else FontWeight.Normal,
+            color = if (isTarget) MaterialTheme.colorScheme.onErrorContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            message.previewText().ifBlank { "Медиа/сообщение без текста" },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(top = 3.dp)
+        )
+        Text(
+            SimpleDateFormat("d MMM, HH:mm", Locale("ru")).format(Date(message.timestamp)),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 3.dp)
+        )
+    }
+}
+
+@Composable
+private fun BulkDeleteDialog(
+    userName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (Long, Long) -> Unit
+) {
+    val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+    val today = LocalDate.now()
+    var startText by remember { mutableStateOf(today.minusDays(7).format(formatter)) }
+    var endText by remember { mutableStateOf(today.format(formatter)) }
+    var selectedDays by remember { mutableStateOf(7L) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun applyDays(days: Long) {
+        selectedDays = days
+        startText = today.minusDays(days).format(formatter)
+        endText = today.format(formatter)
+        error = null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Массовое удаление") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Удалить сообщения пользователя «$userName» за выбранный период? " +
+                        "Удаление будет выполнено только через 24 часа."
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = selectedDays == 1L,
+                        onClick = { applyDays(1) },
+                        label = { Text("24 ч") }
+                    )
+                    FilterChip(
+                        selected = selectedDays == 7L,
+                        onClick = { applyDays(7) },
+                        label = { Text("7 дней") }
+                    )
+                    FilterChip(
+                        selected = selectedDays == 30L,
+                        onClick = { applyDays(30) },
+                        label = { Text("30 дней") }
+                    )
+                }
+                OutlinedTextField(
+                    value = startText,
+                    onValueChange = { startText = it; selectedDays = 0L },
+                    label = { Text("С даты (ДД.ММ.ГГГГ)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = endText,
+                    onValueChange = { endText = it; selectedDays = 0L },
+                    label = { Text("По дату (ДД.ММ.ГГГГ)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                try {
+                    val start = LocalDate.parse(startText, formatter)
+                    val end = LocalDate.parse(endText, formatter)
+                    if (end.isBefore(start)) {
+                        error = "Конечная дата не может быть раньше начальной."
+                    } else {
+                        val zone = ZoneId.systemDefault()
+                        val startAt = start.atStartOfDay(zone).toInstant().toEpochMilli()
+                        val endAt = end.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+                        onConfirm(startAt, endAt)
+                    }
+                } catch (_: DateTimeParseException) {
+                    error = "Введите даты в формате ДД.ММ.ГГГГ."
+                }
+            }) { Text("Запланировать") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
 }
 
 @Composable

@@ -6,6 +6,15 @@ import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.domain.model.GlobalAdminActionType
 import app.yodo.messenger.domain.model.GlobalAdminLogEntry
 import app.yodo.messenger.domain.model.GlobalBlock
+import app.yodo.messenger.domain.model.AdminBlockHistoryEntry
+import app.yodo.messenger.domain.model.AdminGroupChannelEntry
+import app.yodo.messenger.domain.model.AdminLoginEntry
+import app.yodo.messenger.domain.model.AdminUserDetails
+import app.yodo.messenger.domain.model.AdminUserModerationStats
+import app.yodo.messenger.domain.model.AdminTimelineEntry
+import app.yodo.messenger.domain.model.AdminActivityPoint
+import app.yodo.messenger.domain.model.AdminAssignment
+import app.yodo.messenger.domain.model.AdminRole
 import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.ProfileHistoryEntry
 import app.yodo.messenger.domain.model.YodoUser
@@ -37,6 +46,21 @@ class UserRepositoryImpl @Inject constructor(
     override fun observeCurrentUser(): Flow<YodoUser?> = callbackFlow {
         val uid = firebaseAuth.currentUser?.uid
         if (uid == null) { trySend(null); close(); return@callbackFlow }
+        // Фиксируем открытие сессии для админ-карточки. Реальный IP Android-клиент
+        // Firebase SDK не предоставляет, поэтому поле остаётся null до появления
+        // серверного источника IP (например, Cloud Function).
+        runCatching {
+            val now = System.currentTimeMillis()
+            firestore.collection("users").document(uid).update("lastActiveAt", now).await()
+            firestore.collection("adminLoginHistory").document(uid).collection("entries").add(
+                mapOf(
+                    "timestamp" to now,
+                    "provider" to (firebaseAuth.currentUser?.providerData?.lastOrNull()?.providerId ?: "unknown"),
+                    "device" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                    "ipAddress" to null
+                )
+            ).await()
+        }
         val listener = firestore.collection("users").document(uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null || !snapshot.exists()) {
@@ -150,8 +174,7 @@ class UserRepositoryImpl @Inject constructor(
     }
 
     override suspend fun searchUsers(query: String): List<YodoUser> {
-        val trimmed = query.trim().removePrefix("@")
-        val normalized = trimmed.lowercase()
+        val normalized = query.trim().removePrefix("@").lowercase()
         if (normalized.isBlank()) return emptyList()
         val currentUid = firebaseAuth.currentUser?.uid
         val usersRef = firestore.collection("users")
@@ -160,12 +183,7 @@ class UserRepositoryImpl @Inject constructor(
                 .startAt(normalized).endAt(normalized + "\uf8ff").limit(20).get().await()
             val byUsername = usersRef.orderBy("usernameLowercase")
                 .startAt(normalized).endAt(normalized + "\uf8ff").limit(20).get().await()
-            // Публичный ID вида YODO-XXXX-XXXX хранится в верхнем регистре —
-            // точное совпадение, чтобы можно было привязать учителя по ID из профиля.
-            val byPublicId = if (normalized.startsWith("yodo-")) {
-                usersRef.whereEqualTo("publicId", trimmed.uppercase()).limit(20).get().await()
-            } else null
-            (byName.documents + byUsername.documents + (byPublicId?.documents ?: emptyList()))
+            (byName.documents + byUsername.documents)
                 .distinctBy { it.id }.filter { it.id != currentUid }
                 .map { it.toYodoUser(it.id) }
         } catch (e: Exception) { emptyList() }
@@ -428,8 +446,18 @@ class UserRepositoryImpl @Inject constructor(
     // НОВОЕ (AD): глобальная блокировка аккаунта администратором приложения (2 почты).
     private fun globalBlocksRef() = firestore.collection("globalBlocks")
 
-    private fun isAdminEmail(): Boolean =
-        firebaseAuth.currentUser?.email?.lowercase() in ChatRepository.ADMIN_EMAILS
+    private fun isRootAdmin(): Boolean =
+        firebaseAuth.currentUser?.email?.lowercase() in ChatRepository.ADMIN_EMAILS.map { it.lowercase() }
+
+    private suspend fun isAdminEmail(): Boolean {
+        val email = firebaseAuth.currentUser?.email?.lowercase()
+        if (email in ChatRepository.ADMIN_EMAILS.map { it.lowercase() }) return true
+        val uid = firebaseAuth.currentUser?.uid ?: return false
+        return runCatching {
+            val d = firestore.collection("admins").document(uid).get().await()
+            d.exists() && d.getBoolean("enabled") != false
+        }.getOrDefault(false)
+    }
 
     private fun parseGlobalBlock(uid: String, data: Map<String, Any?>) = GlobalBlock(
         userId = uid,
@@ -482,7 +510,7 @@ class UserRepositoryImpl @Inject constructor(
     }
 
     // НОВОЕ (push о модерации): кладёт запись в очередь moderationNotifications,
-    // которую периодически вычитывает push-worker/index.js (та же схема, что и
+    // которую периодически вычитывает GitHub Actions (.github/scripts/send-push-notifications.js) (та же схема, что и
     // очередь notified==false в messages, только для событий модерации, а не
     // сообщений чата). Клиент получает push через YodoFirebaseMessagingService
     // с data.type == "moderation" и показывает его через
@@ -565,6 +593,296 @@ class UserRepositoryImpl @Inject constructor(
     // НОВОЕ (глобальный аудит-лог): публичная обёртка над logGlobalAdminAction
     // для события изменения настройки "требовать подтверждение email" —
     // вызывается из AdminHomeViewModel сразу после AppSettingsRepository.
+    override suspend fun getAdminUsers(): List<YodoUser> {
+        if (!isAdminEmail()) return emptyList()
+        return try {
+            firestore.collection("users").get().await().documents.map { it.toYodoUser(it.id) }
+                .sortedByDescending { it.createdAt }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    override suspend fun getAdminUserModerationStats(): Map<String, AdminUserModerationStats> {
+        if (!isAdminEmail()) return emptyMap()
+        return try {
+            val reportCounts = mutableMapOf<String, Int>()
+            firestore.collectionGroup("reports").get().await().documents.forEach { d ->
+                val uid = d.getString("targetUserId") ?: return@forEach
+                reportCounts[uid] = (reportCounts[uid] ?: 0) + 1
+            }
+            val blockCounts = mutableMapOf<String, Int>()
+            firestore.collectionGroup("blockHistory")
+                .whereEqualTo("action", "BLOCK")
+                .get().await().documents.forEach { d ->
+                    val uid = d.reference.parent.parent?.id ?: return@forEach
+                    blockCounts[uid] = (blockCounts[uid] ?: 0) + 1
+                }
+            (reportCounts.keys + blockCounts.keys).associateWith { uid ->
+                val reports = reportCounts[uid] ?: 0
+                val blocks = blockCounts[uid] ?: 0
+                AdminUserModerationStats(reports, blocks, reports >= 3 || blocks >= 3)
+            }
+        } catch (_: Exception) { emptyMap() }
+    }
+
+    override suspend fun updateUsersClass(uids: List<String>, classId: String): ProfileUpdateResult {
+        if (!isAdminEmail()) return ProfileUpdateResult.Error("Нет прав администратора")
+        val ids = uids.map(String::trim).filter(String::isNotBlank).distinct()
+        if (ids.isEmpty()) return ProfileUpdateResult.Error("Не выбраны пользователи")
+        if (classId.length > 80) return ProfileUpdateResult.Error("Слишком длинное название класса")
+        return try {
+            val batch = firestore.batch()
+            ids.forEach { uid ->
+                batch.update(firestore.collection("users").document(uid), "classId", classId.ifBlank { null })
+            }
+            batch.commit().await()
+            logGlobalAdminAction(
+                GlobalAdminActionType.USER_CLASS_CHANGED,
+                details = "Изменён класс у ${ids.size} пользователей: ${classId.ifBlank { "не указан" }}"
+            )
+            ProfileUpdateResult.Success
+        } catch (e: Exception) {
+            ProfileUpdateResult.Error(e.toUserMessage("Не удалось изменить класс пользователей"))
+        }
+    }
+
+    override suspend fun getAdminUserDetails(uid: String): AdminUserDetails? {
+        if (!isAdminEmail()) return null
+        return try {
+            val user = getUserById(uid) ?: return null
+            val loginDocs = firestore.collection("adminLoginHistory").document(uid)
+                .collection("entries").orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(100).get().await().documents
+            val logins = loginDocs.map { d ->
+                AdminLoginEntry(
+                    id = d.id,
+                    timestamp = d.getLong("timestamp") ?: 0L,
+                    provider = d.getString("provider") ?: "unknown",
+                    device = d.getString("device") ?: "",
+                    ipAddress = d.getString("ipAddress")
+                )
+            }
+
+            val blockDocs = firestore.collection("users").document(uid).collection("blockHistory")
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(50).get().await().documents
+            val blockHistory = blockDocs.map { d ->
+                AdminBlockHistoryEntry(
+                    id = d.id,
+                    action = d.getString("action") ?: "",
+                    reason = d.getString("reason") ?: "",
+                    description = d.getString("description") ?: "",
+                    byName = d.getString("byName") ?: "",
+                    timestamp = d.getLong("timestamp") ?: 0L
+                )
+            }
+
+            val chats = firestore.collection("chats")
+                .whereArrayContains("participantIds", uid).get().await().documents
+            val groups = chats.filter { it.getString("type") == "GROUP" || it.getString("type") == "CHANNEL" }
+                .map { d ->
+                    val admins = (d.get("adminIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    val role = when {
+                        d.getString("createdBy") == uid -> "Владелец"
+                        uid in admins -> "Администратор"
+                        else -> "Участник"
+                    }
+                    AdminGroupChannelEntry(
+                        chatId = d.id,
+                        title = d.getString("title") ?: "Без названия",
+                        type = d.getString("type") ?: "GROUP",
+                        role = role
+                    )
+                }
+
+            val messagesSent = try {
+                firestore.collectionGroup("messages").whereEqualTo("senderId", uid).get().await().size()
+            } catch (_: Exception) { 0 }
+
+            val reportsReceived = try {
+                firestore.collectionGroup("reports").whereEqualTo("targetUserId", uid).get().await().size()
+            } catch (_: Exception) { 0 }
+
+            val ips = logins.mapNotNull { it.ipAddress }.filter { it.isNotBlank() && it != "unknown" }.distinct()
+            val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
+            val activityDocs = loginDocs.filter { (it.getLong("timestamp") ?: 0L) >= cutoff }
+            val activityMap = linkedMapOf<Long, Int>()
+            activityDocs.forEach { d ->
+                val ts = d.getLong("timestamp") ?: return@forEach
+                val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+                cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+                cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+                val day = cal.timeInMillis
+                activityMap[day] = (activityMap[day] ?: 0) + 1
+            }
+            val activity = (0..29).map { offset ->
+                val cal = java.util.Calendar.getInstance()
+                cal.add(java.util.Calendar.DAY_OF_YEAR, -offset)
+                cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+                cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+                val day = cal.timeInMillis
+                AdminActivityPoint(dayStart = day, logins = activityMap[day] ?: 0, total = activityMap[day] ?: 0)
+            }.reversed()
+            val actionHistory = try {
+                firestore.collection("adminAuditLog")
+                    .whereEqualTo("targetUserId", uid)
+                    .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .limit(50).get().await().documents.map { d ->
+                        AdminTimelineEntry(
+                            id = d.id, type = "ACTION", title = d.getString("actionType") ?: "Действие",
+                            details = d.getString("details") ?: "", timestamp = d.getLong("timestamp") ?: 0L,
+                            actorName = d.getString("actorName") ?: "Админ"
+                        )
+                    }
+            } catch (_: Exception) { emptyList() }
+            val reportHistory = try {
+                firestore.collectionGroup("reports")
+                    .whereEqualTo("targetUserId", uid)
+                    .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .limit(50).get().await().documents.map { d ->
+                        AdminTimelineEntry(
+                            id = d.id, type = "REPORT", title = d.getString("reason") ?: "Жалоба",
+                            details = d.getString("description") ?: d.getString("details") ?: "",
+                            timestamp = d.getLong("createdAt") ?: 0L, status = d.getString("status") ?: ""
+                        )
+                    }
+            } catch (_: Exception) { emptyList() }
+            val messageHistory = try {
+                firestore.collectionGroup("messages")
+                    .whereEqualTo("senderId", uid)
+                    .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .limit(50).get().await().documents.map { d ->
+                        AdminTimelineEntry(
+                            id = d.id, type = "MESSAGE", title = "Сообщение",
+                            details = d.getString("text")?.take(240) ?: d.getString("content")?.take(240) ?: "[без текста]",
+                            timestamp = d.getLong("timestamp") ?: 0L,
+                            status = if (d.getBoolean("isDeleted") == true) "Удалено" else ""
+                        )
+                    }
+            } catch (_: Exception) { emptyList() }
+            val appealHistory = try {
+                val result = mutableListOf<AdminTimelineEntry>()
+                listOf("appeals", "supportRequests").forEach { collectionName ->
+                    runCatching {
+                        firestore.collection(collectionName).whereEqualTo("userId", uid)
+                            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                            .limit(50).get().await().documents.forEach { d ->
+                                result += AdminTimelineEntry(
+                                    id = d.id, type = "APPEAL", title = d.getString("title") ?: "Обращение",
+                                    details = d.getString("message") ?: d.getString("text") ?: "",
+                                    timestamp = d.getLong("createdAt") ?: 0L, status = d.getString("status") ?: ""
+                                )
+                            }
+                    }
+                }
+                result.sortedByDescending { it.timestamp }.take(50)
+            } catch (_: Exception) { emptyList() }
+
+            val assignment = getAdminAssignment(uid)
+            AdminUserDetails(
+                user = user, loginHistory = logins.take(5), messagesSent = messagesSent,
+                reportsReceived = reportsReceived, groupsAndChannels = groups, ipAddresses = ips,
+                blockHistory = blockHistory, activity = activity, adminAssignment = assignment,
+                actionHistory = actionHistory, reportHistory = reportHistory, messageHistory = messageHistory,
+                appealHistory = appealHistory
+            )
+        } catch (e: Exception) { null }
+    }
+
+
+    override suspend fun assignAdmin(uid: String, role: AdminRole): ProfileUpdateResult {
+        if (!isRootAdmin()) return ProfileUpdateResult.Error("Только главный администратор может менять роли")
+        if (uid.isBlank()) return ProfileUpdateResult.Error("Некорректный пользователь")
+        if (role == AdminRole.SUPER_ADMIN && firebaseAuth.currentUser?.uid == uid) {
+            return ProfileUpdateResult.Error("Нельзя менять собственную роль")
+        }
+        return try {
+            val me = firebaseAuth.currentUser?.uid ?: return ProfileUpdateResult.Error("Нет активной сессии")
+            val now = System.currentTimeMillis()
+            firestore.collection("admins").document(uid).set(
+                mapOf("uid" to uid, "role" to role.name, "assignedAt" to now, "assignedBy" to me, "enabled" to true)
+            ).await()
+            firestore.collection("users").document(uid).update("adminRole", role.name).await()
+            logGlobalAdminAction(
+                GlobalAdminActionType.ADMIN_ROLE_CHANGED,
+                details = "Назначен ${role.label}",
+                targetUserId = uid,
+                targetUserName = firestore.collection("users").document(uid).get().await().getString("displayName")
+            )
+            ProfileUpdateResult.Success
+        } catch (e: Exception) {
+            ProfileUpdateResult.Error(e.toUserMessage())
+        }
+    }
+
+    override suspend fun removeAdmin(uid: String): ProfileUpdateResult {
+        if (!isRootAdmin()) return ProfileUpdateResult.Error("Только главный администратор может менять роли")
+        if (uid == firebaseAuth.currentUser?.uid) return ProfileUpdateResult.Error("Нельзя снять администратора с себя")
+        return try {
+            firestore.collection("admins").document(uid).delete().await()
+            firestore.collection("users").document(uid).update("adminRole", null).await()
+            logGlobalAdminAction(GlobalAdminActionType.ADMIN_ROLE_CHANGED, details = "Администратор снят", targetUserId = uid)
+            ProfileUpdateResult.Success
+        } catch (e: Exception) {
+            ProfileUpdateResult.Error(e.toUserMessage())
+        }
+    }
+
+    override suspend fun getAdminAssignment(uid: String): AdminAssignment? {
+        return try {
+            val d = firestore.collection("admins").document(uid).get().await()
+            if (!d.exists() || d.getBoolean("enabled") == false) return null
+            val role = runCatching { AdminRole.valueOf(d.getString("role") ?: "ADMIN") }.getOrDefault(AdminRole.ADMIN)
+            AdminAssignment(uid, role, d.getLong("assignedAt") ?: 0L, d.getString("assignedBy") ?: "", d.getBoolean("enabled") ?: true)
+        } catch (_: Exception) { null }
+    }
+
+    override suspend fun getMyAdminAssignment(): AdminAssignment? =
+        firebaseAuth.currentUser?.uid?.let { getAdminAssignment(it) }
+
+    override suspend fun setGlobalBlockWithHistory(
+        uid: String,
+        reason: String,
+        description: String
+    ): ProfileUpdateResult {
+        val result = setGlobalBlock(uid, if (description.isBlank()) reason else "$reason — $description")
+        if (result is ProfileUpdateResult.Success) {
+            writeBlockHistory(uid, "BLOCK", reason, description)
+        }
+        return result
+    }
+
+    override suspend fun removeGlobalBlockWithHistory(uid: String): ProfileUpdateResult {
+        val result = removeGlobalBlock(uid)
+        if (result is ProfileUpdateResult.Success) {
+            writeBlockHistory(uid, "UNBLOCK", "", "")
+        }
+        return result
+    }
+
+    private suspend fun writeBlockHistory(
+        uid: String,
+        action: String,
+        reason: String,
+        description: String
+    ) {
+        if (!isAdminEmail()) return
+        runCatching {
+            val me = firebaseAuth.currentUser ?: return@runCatching
+            val name = firestore.collection("users").document(me.uid).get().await()
+                .getString("displayName") ?: me.email ?: "Администратор"
+            firestore.collection("users").document(uid).collection("blockHistory").add(
+                mapOf(
+                    "action" to action,
+                    "reason" to reason.take(200),
+                    "description" to description.take(1000),
+                    "byId" to me.uid,
+                    "byName" to name,
+                    "timestamp" to System.currentTimeMillis()
+                )
+            ).await()
+        }
+    }
+
     override suspend fun logRequireEmailVerificationChanged(enabled: Boolean) {
         if (!isAdminEmail()) return
         logGlobalAdminAction(
@@ -630,10 +948,128 @@ class UserRepositoryImpl @Inject constructor(
         emojiStatus = getString("emojiStatus"),
         customStatus = getString("customStatus"),
         isEmailVerified = getBoolean("isEmailVerified") ?: false,
+        createdAt = getLong("createdAt") ?: 0L,
+        lastActiveAt = getLong("lastActiveAt") ?: 0L,
+        country = getString("country"),
+        classId = getString("classId") ?: getString("class_id"),
+        accountStatus = getString("accountStatus"),
+        adminRole = getString("adminRole"),
         whoCanInviteToGroups = PrivacyWho.fromString(getString("whoCanInviteToGroups")),
         whoCanMessageMe = PrivacyWho.fromString(getString("whoCanMessageMe")),
         whoCanSeeMyProfile = PrivacyWho.fromString(getString("whoCanSeeMyProfile")),
         messagePrivacyExceptions = (get("messagePrivacyExceptions") as? List<*>)
             ?.filterIsInstance<String>() ?: emptyList()
     )
+
+    override suspend fun getBehaviorMonitoringSnapshot(): app.yodo.messenger.domain.model.BehaviorMonitoringSnapshot {
+        if (!isAdminEmail()) return app.yodo.messenger.domain.model.BehaviorMonitoringSnapshot()
+        return try {
+            val now = System.currentTimeMillis()
+            val hourAgo = now - 60L * 60 * 1000
+            val tenMinutesAgo = now - 10L * 60 * 1000
+
+            val users = firestore.collection("users").get().await().documents
+                .map { it.toYodoUser(it.id) }
+            val byId = users.associateBy { it.uid }
+
+            val reportCounts = mutableMapOf<String, Int>()
+            val reportTotals = mutableMapOf<String, Int>()
+            firestore.collectionGroup("reports").get().await().documents.forEach { d ->
+                val uid = d.getString("targetUserId") ?: return@forEach
+                reportTotals[uid] = (reportTotals[uid] ?: 0) + 1
+                val createdAt = d.getLong("createdAt") ?: 0L
+                if (createdAt >= hourAgo) reportCounts[uid] = (reportCounts[uid] ?: 0) + 1
+            }
+
+            val messageCounts = mutableMapOf<String, Int>()
+            firestore.collectionGroup("messages")
+                .whereGreaterThanOrEqualTo("timestamp", tenMinutesAgo)
+                .get().await().documents.forEach { d ->
+                    if (d.getBoolean("isDeleted") == true) return@forEach
+                    val uid = d.getString("senderId") ?: return@forEach
+                    messageCounts[uid] = (messageCounts[uid] ?: 0) + 1
+                }
+
+            val deleteCounts = mutableMapOf<String, Int>()
+            firestore.collection("behaviorEvents")
+                .whereEqualTo("type", "CHAT_DELETED")
+                .whereGreaterThanOrEqualTo("createdAt", hourAgo)
+                .get().await().documents.forEach { d ->
+                    val uid = d.getString("userId") ?: return@forEach
+                    deleteCounts[uid] = (deleteCounts[uid] ?: 0) + 1
+                }
+
+            val blockCounts = mutableMapOf<String, Int>()
+            firestore.collectionGroup("blockHistory")
+                .whereEqualTo("action", "BLOCK")
+                .get().await().documents.forEach { d ->
+                    val uid = d.reference.parent.parent?.id ?: return@forEach
+                    blockCounts[uid] = (blockCounts[uid] ?: 0) + 1
+                }
+
+            val difficult = users.mapNotNull { user ->
+                val reportTotal = reportTotals[user.uid] ?: 0
+                val blocks = blockCounts[user.uid] ?: 0
+                if (reportTotal >= 3 || blocks >= 3) {
+                    app.yodo.messenger.domain.model.DifficultUser(user, reportTotal, blocks)
+                } else null
+            }.sortedByDescending { it.totalFlags }
+
+            val alerts = mutableListOf<app.yodo.messenger.domain.model.BehaviorAlert>()
+            reportCounts.filter { it.value >= 3 }.forEach { (uid, count) ->
+                val u = byId[uid] ?: return@forEach
+                alerts += app.yodo.messenger.domain.model.BehaviorAlert(
+                    uid, u.displayName, "REPORTS_SPIKE",
+                    "Много жалоб за короткое время",
+                    "$count жалоб за последний час", count, 60, now
+                )
+            }
+            messageCounts.filter { it.value >= 20 }.forEach { (uid, count) ->
+                val u = byId[uid] ?: return@forEach
+                alerts += app.yodo.messenger.domain.model.BehaviorAlert(
+                    uid, u.displayName, "MASS_MESSAGING",
+                    "Массовая отправка сообщений",
+                    "$count сообщений за последние 10 минут", count, 10, now
+                )
+            }
+            deleteCounts.filter { it.value >= 3 }.forEach { (uid, count) ->
+                val u = byId[uid] ?: return@forEach
+                alerts += app.yodo.messenger.domain.model.BehaviorAlert(
+                    uid, u.displayName, "CHAT_DELETIONS",
+                    "Частое удаление чатов",
+                    "$count удалений чатов за последний час", count, 60, now
+                )
+            }
+
+            app.yodo.messenger.domain.model.BehaviorMonitoringSnapshot(
+                alerts = alerts.sortedByDescending { it.count },
+                difficultUsers = difficult,
+                newcomerPauseEnabled = isNewcomerMessagingPauseEnabled()
+            )
+        } catch (_: Exception) {
+            app.yodo.messenger.domain.model.BehaviorMonitoringSnapshot(
+                newcomerPauseEnabled = isNewcomerMessagingPauseEnabled()
+            )
+        }
+    }
+
+    override suspend fun setNewcomerMessagingPauseEnabled(enabled: Boolean): ProfileUpdateResult {
+        if (!isAdminEmail()) return ProfileUpdateResult.Error("Нет прав администратора")
+        return try {
+            firestore.collection("config").document("behaviorMonitoring")
+                .set(mapOf("newcomerPauseEnabled" to enabled), com.google.firebase.firestore.SetOptions.merge())
+                .await()
+            ProfileUpdateResult.Success
+        } catch (e: Exception) {
+            ProfileUpdateResult.Error(e.toUserMessage("Не удалось изменить настройку"))
+        }
+    }
+
+    override suspend fun isNewcomerMessagingPauseEnabled(): Boolean {
+        return try {
+            firestore.collection("config").document("behaviorMonitoring").get().await()
+                .getBoolean("newcomerPauseEnabled") ?: true
+        } catch (_: Exception) { true }
+    }
+
 }

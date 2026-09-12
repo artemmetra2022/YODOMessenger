@@ -30,6 +30,14 @@ data class YodoUser(
     // НОВОЕ (email-статус): подтверждена ли почта. Дублируется из Firebase Auth в Firestore,
     // чтобы бейдж "подтверждён/не подтверждён" был виден и в чужом профиле (не только в своём).
     val isEmailVerified: Boolean = false,
+    // Административная аналитика: дата регистрации/последней активности и страна.
+    val createdAt: Long = 0L,
+    val lastActiveAt: Long = 0L,
+    val country: String? = null,
+    // Административное управление: класс/группа пользователя.
+    val classId: String? = null,
+    val accountStatus: String? = null,
+    val adminRole: String? = null,
     // НОВОЕ (п.15): настройки приватности «кто может …».
     // Приглашать в группы/каналы, писать в личку, просматривать профиль.
     val whoCanInviteToGroups: PrivacyWho = PrivacyWho.EVERYONE,

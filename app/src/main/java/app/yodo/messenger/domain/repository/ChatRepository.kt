@@ -11,7 +11,6 @@ import app.yodo.messenger.domain.model.ChannelRestrictions
 import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.JoinRequest
 import app.yodo.messenger.domain.model.CustomRole
-import app.yodo.messenger.domain.model.FaqSection
 import app.yodo.messenger.domain.model.ForumTopic
 import app.yodo.messenger.domain.model.MemberPermissions
 import app.yodo.messenger.domain.model.SupportRestriction
@@ -249,12 +248,6 @@ interface ChatRepository {
     suspend fun getOrCreateSupportChat(): CreateChatResult
     /** Для админ-панели: поток всех бесед поддержки (новые сверху). */
     fun observeSupportConversations(): Flow<List<SupportConversation>>
-
-    // === НОВОЕ (редактор FAQ в веб-админке) ===
-    /** Список разделов FAQ-бота, отредактированный в веб-админке (config/supportFaq).
-     *  null — правок нет, документ недоступен или пуст: в приложении показывается
-     *  встроенный [app.yodo.messenger.domain.model.SupportFaqData.sections]. */
-    fun observeSupportFaq(): Flow<List<FaqSection>?>
 
     // НОВОЕ (п.18 ТЗ): только 1 активное (без ответа) обращение в поддержку.
     /** true, если последнее сообщение в чате поддержки текущего пользователя — от него самого

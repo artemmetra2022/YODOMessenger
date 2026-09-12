@@ -8,6 +8,8 @@ import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.MessageStatus
 import app.yodo.messenger.domain.model.Poll
 import app.yodo.messenger.domain.model.ScheduledMessage
+import app.yodo.messenger.domain.model.ModerationDeleteReason
+import app.yodo.messenger.domain.repository.ModerationRepository
 import app.yodo.messenger.domain.repository.MessageRepository
 import app.yodo.messenger.domain.repository.ReplyContext
 import app.yodo.messenger.domain.repository.SendMessageResult
@@ -34,7 +36,8 @@ class MessageRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val firebaseAuth: FirebaseAuth,
     private val userSettingsPreferences: UserSettingsPreferences,
-    private val cryptoManager: CryptoManager
+    private val cryptoManager: CryptoManager,
+    private val moderationRepository: ModerationRepository
 ) : MessageRepository {
 
     override fun observeMessages(chatId: String, topicId: String?): Flow<List<Message>> = callbackFlow {
@@ -132,6 +135,57 @@ class MessageRepositoryImpl @Inject constructor(
     // TTL чата по умолчанию только для этого сообщения (как иконка часов рядом с полем ввода
     // в Telegram). Когда override не задан, поведение полностью совпадает со старым —
     // используется disappearingTtlSeconds из документа чата.
+    private class NewcomerRateLimitedException : Exception()
+
+    /**
+     * Мягкое ограничение для новых профилей: первые 5 сообщений в минуту проходят,
+     * затем отправка ставится на паузу на 60 секунд. Счётчик хранится в Firestore
+     * и обновляется транзакцией, поэтому быстрые параллельные отправки не обходят лимит.
+     */
+    private suspend fun checkNewcomerMessagingPause(uid: String): Boolean {
+        return try {
+            val config = firestore.collection("config").document("behaviorMonitoring").get().await()
+            if (config.getBoolean("newcomerPauseEnabled") == false) return true
+
+            val user = firestore.collection("users").document(uid).get().await()
+            val createdAt = user.getLong("createdAt") ?: return true
+            if (createdAt <= 0L || System.currentTimeMillis() - createdAt >= 3L * 24 * 60 * 60 * 1000) return true
+
+            // Главные/назначенные админы не ограничиваются.
+            val isAdmin = firebaseAuth.currentUser?.email?.lowercase() in
+                ChatRepository.ADMIN_EMAILS.map { it.lowercase() } ||
+                firestore.collection("admins").document(uid).get().await()
+                    .let { it.exists() && it.getBoolean("enabled") != false }
+            if (isAdmin) return true
+
+            val now = System.currentTimeMillis()
+            val rateRef = firestore.collection("newcomerRateLimits").document(uid)
+            firestore.runTransaction { txn ->
+                val snap = txn.get(rateRef)
+                val pausedUntil = snap.getLong("pausedUntil") ?: 0L
+                if (pausedUntil > now) throw NewcomerRateLimitedException()
+
+                val windowStart = snap.getLong("windowStart") ?: 0L
+                val count = snap.getLong("count")?.toInt() ?: 0
+                if (windowStart <= 0L || now - windowStart >= 60_000L) {
+                    txn.set(rateRef, mapOf("windowStart" to now, "count" to 1L, "pausedUntil" to 0L))
+                } else if (count >= 5) {
+                    txn.update(rateRef, mapOf("pausedUntil" to now + 60_000L))
+                    throw NewcomerRateLimitedException()
+                } else {
+                    txn.update(rateRef, "count", count + 1L)
+                }
+                null
+            }.await()
+            true
+        } catch (_: NewcomerRateLimitedException) {
+            false
+        } catch (_: Exception) {
+            // Не ломаем отправку при временной недоступности мониторинга.
+            true
+        }
+    }
+
     private suspend fun sendRawMessage(
         chatId: String,
         data: MutableMap<String, Any?>,
@@ -141,6 +195,23 @@ class MessageRepositoryImpl @Inject constructor(
         topicId: String? = null
     ): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
+        if (!checkNewcomerMessagingPause(uid)) {
+            return SendMessageResult.Error(
+                "Для новых профилей действует пауза: максимум 5 сообщений в минуту. Попробуйте снова через минуту."
+            )
+        }
+        // Автоматическая модерация стоит в самом общем пути отправки, поэтому
+        // работает и для текста, подписей к фото, файлов и других сообщений.
+        // Для E2EE используется транзитный _plainPreview, который удаляется ниже.
+        val moderationText = (data["text"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["_plainPreview"] as? String)?.takeIf { it.isNotBlank() }
+        if (!moderationText.isNullOrBlank()) {
+            val matchedRule = moderationRepository.findMatchingRule(moderationText)
+            if (matchedRule != null) {
+                archiveAutomaticallyDeletedMessage(chatId, data, matchedRule)
+                return SendMessageResult.Error("Сообщение удалено автоматически: ${matchedRule.reason.label}")
+            }
+        }
         return try {
             val chatRef = firestore.collection("chats").document(chatId)
             val chatSnapshot = chatRef.get().await()
@@ -308,8 +379,34 @@ class MessageRepositoryImpl @Inject constructor(
                 batch.update(chatRef.collection("topics").document(topicId), topicUpdates)
             }
             batch.commit().await()
+            queueTeacherMessageNotifications(participantIds, uid, previewText, chatId)
             SendMessageResult.Success(messageId = newDocRef.id)
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отправить сообщение")) }
+    }
+
+    /** GitHub Actions later delivers these queued notifications through FCM. */
+    private suspend fun queueTeacherMessageNotifications(
+        participantIds: List<String>, senderId: String, previewText: String, chatId: String
+    ) {
+        try {
+            participantIds.filter { it != senderId }.forEach { teacherId ->
+                val teacher = firestore.collection("teacherProfiles").document(teacherId).get().await()
+                if (!teacher.exists() || teacher.getBoolean("notifyMessages") == false) return@forEach
+                firestore.collection("teacherNotificationQueue").add(
+                    mapOf(
+                        "teacherId" to teacherId,
+                        "type" to "message",
+                        "title" to "Новое сообщение",
+                        "body" to previewText.take(160),
+                        "chatId" to chatId,
+                        "notified" to false,
+                        "createdAtMillis" to System.currentTimeMillis()
+                    )
+                ).await()
+            }
+        } catch (_: Exception) {
+            // Уведомление не должно блокировать отправку сообщения.
+        }
     }
 
     // Служебное исключение для runTransaction: сигнализирует, что у пользователя уже
@@ -724,6 +821,8 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun editMessage(chatId: String, messageId: String, newText: String): SendMessageResult {
         val trimmed = newText.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Сообщение не может быть пустым")
+        val matchedRule = moderationRepository.findMatchingRule(trimmed)
+        if (matchedRule != null) return SendMessageResult.Error("Изменение удалено автоматически: ${matchedRule.reason.label}")
         return try {
             firestore.collection("chats").document(chatId)
                 .collection("messages").document(messageId)
@@ -734,9 +833,10 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun deleteMessage(chatId: String, messageId: String, deletedByAdmin: Boolean): SendMessageResult {
         return try {
-            firestore.collection("chats").document(chatId)
+            val messageRef = firestore.collection("chats").document(chatId)
                 .collection("messages").document(messageId)
-                .update(mapOf(
+            if (deletedByAdmin) archiveDeletedMessage(chatId, messageRef, ModerationDeleteReason.OTHER, false)
+            messageRef.update(mapOf(
                     "isDeleted" to true, "text" to "",
                     // НОВОЕ (баг 10): административное удаление помечаем отдельным флагом,
                     // чтобы в чате показать «Сообщение удалено администратором».
@@ -765,9 +865,10 @@ class MessageRepositoryImpl @Inject constructor(
     // на его месте не остаётся заглушки «удалено» — сообщение просто исчезает.
     override suspend fun hardDeleteMessage(chatId: String, messageId: String): SendMessageResult {
         return try {
-            firestore.collection("chats").document(chatId)
+            val messageRef = firestore.collection("chats").document(chatId)
                 .collection("messages").document(messageId)
-                .delete().await()
+            archiveDeletedMessage(chatId, messageRef, ModerationDeleteReason.OTHER, false)
+            messageRef.delete().await()
             SendMessageResult.Success()
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось удалить")) }
     }
@@ -1218,6 +1319,42 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun getMessageContext(
+        chatId: String,
+        messageId: String,
+        radius: Int
+    ): List<Message> {
+        return try {
+            val messagesRef = firestore.collection("chats").document(chatId).collection("messages")
+            val targetDoc = messagesRef.document(messageId).get().await()
+            if (!targetDoc.exists()) return emptyList()
+            val target = mapDocToMessage(targetDoc, chatId) ?: return emptyList()
+            val timestamp = target.timestamp
+            val safeRadius = radius.coerceIn(1, 10)
+
+            val before = messagesRef
+                .whereLessThanOrEqualTo("timestamp", timestamp)
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit((safeRadius + 1).toLong())
+                .get().await().documents
+                .mapNotNull { mapDocToMessage(it, chatId) }
+
+            val after = messagesRef
+                .whereGreaterThanOrEqualTo("timestamp", timestamp)
+                .orderBy("timestamp", Query.Direction.ASCENDING)
+                .limit((safeRadius + 1).toLong())
+                .get().await().documents
+                .mapNotNull { mapDocToMessage(it, chatId) }
+
+            (before.asReversed() + after)
+                .distinctBy { it.id }
+                .sortedBy { it.timestamp }
+                .filter { it.expiresAt == null || it.expiresAt > System.currentTimeMillis() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     override suspend fun countMessages(chatId: String): Int {
         return try {
             val snapshot = firestore.collection("chats").document(chatId)
@@ -1254,6 +1391,52 @@ class MessageRepositoryImpl @Inject constructor(
         val encMap = doc.get("encByUid") as? Map<*, *>
         val cipher = encMap?.get(myUid) as? String ?: return "🔒 Зашифрованное сообщение"
         return cryptoManager.decrypt(cipher) ?: "🔒 Не удалось расшифровать"
+    }
+
+    private suspend fun archiveDeletedMessage(
+        chatId: String, messageRef: com.google.firebase.firestore.DocumentReference,
+        reason: ModerationDeleteReason, automatic: Boolean
+    ) {
+        val snapshot = messageRef.get().await()
+        if (!snapshot.exists()) return
+        val data = snapshot.data ?: return
+        val now = System.currentTimeMillis()
+        val senderId = snapshot.getString("senderId").orEmpty()
+        val senderName = firestore.collection("users").document(senderId).get().await()
+            .getString("displayName").orEmpty()
+        val preview = (snapshot.getString("text") ?: "").take(500)
+        firestore.collection("moderationDeletedMessages").document().set(
+            mapOf(
+                "chatId" to chatId, "messageId" to snapshot.id, "senderId" to senderId,
+                "senderName" to senderName, "preview" to preview, "reason" to reason.name,
+                "deletedAt" to now, "restoreUntil" to now + 30L * 24 * 60 * 60 * 1000,
+                "deletedBy" to firebaseAuth.currentUser?.uid.orEmpty(),
+                "automatic" to automatic, "originalData" to data
+            )
+        ).await()
+    }
+
+    private suspend fun archiveAutomaticallyDeletedMessage(
+        chatId: String, data: MutableMap<String, Any?>, rule: app.yodo.messenger.domain.model.ModerationRule
+    ) {
+        val now = System.currentTimeMillis()
+        val senderId = firebaseAuth.currentUser?.uid.orEmpty()
+        val messageId = "auto_$now"
+        val original = data.toMutableMap().apply {
+            put("senderId", senderId)
+            put("timestamp", now)
+            put("status", MessageStatus.SENT.name)
+        }.toMap()
+        firestore.collection("moderationDeletedMessages").document().set(
+            mapOf(
+                "chatId" to chatId, "messageId" to messageId, "senderId" to senderId,
+                "senderName" to firestore.collection("users").document(senderId).get().await().getString("displayName").orEmpty(),
+                "preview" to (data["text"] as? String).orEmpty().take(500),
+                "reason" to rule.reason.name, "deletedAt" to now,
+                "restoreUntil" to now + 30L * 24 * 60 * 60 * 1000,
+                "deletedBy" to "AUTO_MODERATION", "automatic" to true, "originalData" to original
+            )
+        ).await()
     }
 
     private fun mapDocToMessage(doc: DocumentSnapshot, chatId: String): Message? {

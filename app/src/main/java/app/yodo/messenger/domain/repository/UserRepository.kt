@@ -3,6 +3,7 @@ package app.yodo.messenger.domain.repository
 import android.graphics.Bitmap
 import android.net.Uri
 import app.yodo.messenger.domain.model.GlobalBlock
+import app.yodo.messenger.domain.model.AdminUserDetails
 import app.yodo.messenger.domain.model.PrivacyWho
 import app.yodo.messenger.domain.model.ProfileHistoryEntry
 import app.yodo.messenger.domain.model.YodoUser
@@ -72,6 +73,18 @@ interface UserRepository {
     /** Глобальная блокировка конкретного пользователя (для админ-UI). */
     suspend fun getGlobalBlock(uid: String): GlobalBlock?
 
+    // Расширенная админ-аналитика пользователей.
+    suspend fun getAdminUsers(): List<YodoUser>
+    suspend fun getAdminUserModerationStats(): Map<String, app.yodo.messenger.domain.model.AdminUserModerationStats>
+    suspend fun updateUsersClass(uids: List<String>, classId: String): ProfileUpdateResult
+    suspend fun getAdminUserDetails(uid: String): AdminUserDetails?
+    suspend fun assignAdmin(uid: String, role: app.yodo.messenger.domain.model.AdminRole): ProfileUpdateResult
+    suspend fun removeAdmin(uid: String): ProfileUpdateResult
+    suspend fun getAdminAssignment(uid: String): app.yodo.messenger.domain.model.AdminAssignment?
+    suspend fun getMyAdminAssignment(): app.yodo.messenger.domain.model.AdminAssignment?
+    suspend fun setGlobalBlockWithHistory(uid: String, reason: String, description: String = ""): ProfileUpdateResult
+    suspend fun removeGlobalBlockWithHistory(uid: String): ProfileUpdateResult
+
     // НОВОЕ (глобальный аудит-лог): чтение журнала для AdminAuditLogScreen.
     // Доступно только двум главным админам — проверяется и здесь (защита UI),
     // и в firestore.rules (защита данных).
@@ -85,4 +98,9 @@ interface UserRepository {
     // AppSettingsRepository.setRequireEmailVerification, чтобы это изменение
     // тоже попадало в общий журнал действий Админки.
     suspend fun logRequireEmailVerificationChanged(enabled: Boolean)
+
+    // Мониторинг поведения: подозрительная активность и список "трудных" пользователей.
+    suspend fun getBehaviorMonitoringSnapshot(): app.yodo.messenger.domain.model.BehaviorMonitoringSnapshot
+    suspend fun setNewcomerMessagingPauseEnabled(enabled: Boolean): ProfileUpdateResult
+    suspend fun isNewcomerMessagingPauseEnabled(): Boolean
 }

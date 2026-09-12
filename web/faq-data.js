@@ -1,14 +1,10 @@
 /**
  * YODO Messenger — данные FAQ-бота поддержки (веб-версия).
- * Изначальное зеркало Android-версии: app/src/main/java/app/yodo/messenger/domain/model/SupportFaq.kt.
+ * Полное зеркало Android-версии: app/src/main/java/app/yodo/messenger/domain/model/SupportFaq.kt.
  * Обычный (не module) скрипт: подключается в index.html ДО app.js и кладёт
  * данные в window.SUPPORT_FAQ, откуда их читает FAQ-панель чата поддержки.
- *
- * Ниже — ВСТРОЕННЫЙ набор (fallback). Если в Firestore есть документ
- * config/supportFaq (его правит админка, раздел «FAQ-бот»), он подменяет
- * window.SUPPORT_FAQ сразу после загрузки — см. блок в конце файла.
  */
-window.SUPPORT_FAQ_DEFAULTS = {
+window.SUPPORT_FAQ = {
   otherSectionId: "other",
   sections: [
     {
@@ -384,72 +380,3 @@ window.SUPPORT_FAQ_DEFAULTS = {
     }
   ]
 };
-
-// Пока документ не прочитан — панель поддержки работает на встроенном наборе.
-window.SUPPORT_FAQ = window.SUPPORT_FAQ_DEFAULTS;
-
-/* ------------------------------------------------------------------ */
-/* Живой FAQ из Firestore (config/supportFaq)                          */
-/* ------------------------------------------------------------------ */
-
-/**
- * Админка (раздел «FAQ-бот») сохраняет отредактированный список в
- * config/supportFaq. Здесь он подтягивается поверх встроенного набора без
- * пересборки сайта. Чтение публичное (правила: allow read: if true), поэтому
- * используем REST-эндпоинт Firestore, а не SDK — faq-data.js подключается
- * раньше app.js обычным (не module) скриптом.
- *
- * app.js читает window.SUPPORT_FAQ заново при каждой отрисовке панели, так что
- * ответ, пришедший после старта, подхватится при следующем открытии чата
- * поддержки. Ошибка/пустой документ — тихо остаёмся на встроенном наборе.
- */
-(function () {
-  var FAQ_DOC_URL =
-    "https://firestore.googleapis.com/v1/projects/yodomessenger/databases/(default)/documents/config/supportFaq" +
-    "?key=AIzaSyBN0R6R54f1Dah3vp7WrYrsY95e5NgMZA4";
-
-  // Firestore REST отдаёт значения в типизированном виде ("stringValue",
-  // "mapValue", "arrayValue", …) — разворачиваем в обычный JS-объект.
-  function fromFirestoreValue(value) {
-    if (!value || typeof value !== "object") return null;
-    if ("stringValue" in value) return value.stringValue;
-    if ("booleanValue" in value) return value.booleanValue;
-    if ("integerValue" in value) return Number(value.integerValue);
-    if ("doubleValue" in value) return value.doubleValue;
-    if ("nullValue" in value) return null;
-    if ("mapValue" in value) {
-      return fromFirestoreFields(value.mapValue.fields);
-    }
-    if ("arrayValue" in value) {
-      return (value.arrayValue.values || []).map(fromFirestoreValue);
-    }
-    return null;
-  }
-
-  // document.fields — это карта «имя поля -> значение», а не одно значение.
-  function fromFirestoreFields(fields) {
-    var out = {};
-    Object.keys(fields || {}).forEach(function (key) {
-      out[key] = fromFirestoreValue(fields[key]);
-    });
-    return out;
-  }
-
-  fetch(FAQ_DOC_URL, { cache: "no-store" })
-    .then(function (response) {
-      return response.ok ? response.json() : null;
-    })
-    .then(function (document) {
-      if (!document || !document.fields) return;
-      var data = fromFirestoreFields(document.fields);
-      var sections = Array.isArray(data.sections) ? data.sections : [];
-      if (!sections.length) return;
-      window.SUPPORT_FAQ = {
-        otherSectionId: data.otherSectionId || "other",
-        sections: sections,
-      };
-    })
-    .catch(function () {
-      // нет сети/документа — встроенный набор остаётся как есть
-    });
-})();

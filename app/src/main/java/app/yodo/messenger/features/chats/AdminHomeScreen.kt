@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MarkEmailRead
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.Card
@@ -50,12 +52,18 @@ import androidx.hilt.navigation.compose.hiltViewModel
  */
 @Composable
 fun AdminHomeScreen(
+    onOpenDashboard: () -> Unit,
     onOpenSupportInbox: () -> Unit,
     onOpenReports: () -> Unit,
     onOpenUsers: () -> Unit,
     onOpenOfficialChannel: (chatId: String) -> Unit,
     // НОВОЕ (глобальный аудит-лог): переход к журналу действий Админки.
     onOpenAuditLog: () -> Unit,
+    onOpenModeration: () -> Unit,
+    onOpenBehaviorMonitoring: () -> Unit,
+    onOpenFaq: () -> Unit,
+    onOpenNewsCampaigns: () -> Unit,
+    onOpenTeachers: () -> Unit,
     viewModel: AdminHomeViewModel = hiltViewModel()
 ) {
     val requireEmailVerification by viewModel.requireEmailVerification.collectAsState(initial = true)
@@ -73,6 +81,12 @@ fun AdminHomeScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            AdminSectionRow(
+                icon = Icons.Filled.History,
+                title = "Dashboard",
+                subtitle = "Сводка: пользователи, онлайн, чаты, жалобы, новости и учителя",
+                onClick = onOpenDashboard
+            )
             AdminSectionRow(
                 icon = Icons.Filled.SupportAgent,
                 title = "Обращения в поддержку",
@@ -96,6 +110,36 @@ fun AdminHomeScreen(
                 title = "Официальный канал",
                 subtitle = "Публикация постов и рассылок",
                 onClick = { onOpenOfficialChannel(viewModel.officialChannelId) }
+            )
+            AdminSectionRow(
+                icon = Icons.Filled.Security,
+                title = "Модерация",
+                subtitle = "Автофильтр, причины удаления и история на 30 дней",
+                onClick = onOpenModeration
+            )
+            AdminSectionRow(
+                icon = Icons.Filled.Security,
+                title = "Мониторинг поведения",
+                subtitle = "Подозрительная активность, пауза новичков и трудные пользователи",
+                onClick = onOpenBehaviorMonitoring
+            )
+            AdminSectionRow(
+                icon = Icons.Filled.HelpOutline,
+                title = "FAQ",
+                subtitle = "Редактор, статистика, история версий, импорт и экспорт",
+                onClick = onOpenFaq
+            )
+            AdminSectionRow(
+                icon = Icons.Filled.Campaign,
+                title = "Рассылки и новости",
+                subtitle = "Планирование, аудитории, A/B-тесты, шаблоны и push",
+                onClick = onOpenNewsCampaigns
+            )
+            AdminSectionRow(
+                icon = Icons.Filled.SupportAgent,
+                title = "Учителя",
+                subtitle = "Карточки, предметы, расписание, отпуск и уведомления",
+                onClick = onOpenTeachers
             )
             AdminSectionRow(
                 icon = Icons.Filled.History,

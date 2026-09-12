@@ -704,66 +704,6 @@ function navigateAfterAuth() {
   enterApp();
 }
 
-/* НОВОЕ (баннер): объявление от админа (config/appSettings) вверху
-   приложения. Показывается, если включено и текущее время в окне
-   [bannerStartAt, bannerEndAt] (пустые даты — всегда). Закрывается
-   крестиком до конца сессии. */
-function loadAppBanner() {
-  const el = $("app-banner");
-  el.classList.add("hidden");
-  el.innerHTML = "";
-  getDoc(doc(db, "config/appSettings"))
-    .then((snap) => {
-      if (!snap.exists() || snap.get("bannerEnabled") !== true) return;
-      const now = Date.now();
-      const startAt = snap.get("bannerStartAt") || 0;
-      const endAt = snap.get("bannerEndAt") || 0;
-      if (startAt && now < startAt) return;
-      if (endAt && now > endAt) return;
-      const title = snap.get("bannerTitle") || "";
-      const text = snap.get("bannerText") || "";
-      const linkText = snap.get("bannerLinkText") || "";
-      const linkUrl = snap.get("bannerLinkUrl") || "";
-      if (!title && !text) return;
-
-      const body = document.createElement("div");
-      body.className = "banner-body";
-      if (title) {
-        const t = document.createElement("span");
-        t.className = "banner-title";
-        t.textContent = title;
-        body.appendChild(t);
-      }
-      if (text) {
-        const t = document.createElement("span");
-        t.className = "banner-text";
-        t.textContent = " " + text;
-        body.appendChild(t);
-      }
-      el.appendChild(body);
-
-      if (linkText && linkUrl) {
-        const a = document.createElement("a");
-        a.className = "banner-link";
-        a.href = linkUrl;
-        a.target = "_blank";
-        a.rel = "noopener";
-        a.textContent = linkText;
-        el.appendChild(a);
-      }
-
-      const close = document.createElement("button");
-      close.type = "button";
-      close.className = "banner-close";
-      close.textContent = "✕";
-      close.addEventListener("click", () => el.classList.add("hidden"));
-      el.appendChild(close);
-
-      el.classList.remove("hidden");
-    })
-    .catch((err) => console.warn("Баннер: не удалось загрузить", err?.code || err));
-}
-
 async function enterApp() {
   if (!currentUser) return;
   // Подтягиваем профиль
@@ -778,7 +718,6 @@ async function enterApp() {
   isAdmin = isAdminEmail(currentUser.email);
 
   showScreen("screen-app");
-  loadAppBanner();
   listenChats();
   listenOfficialChannel();
   startPresenceHeartbeat();

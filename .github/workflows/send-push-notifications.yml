@@ -1,14 +1,17 @@
 name: Send Push Notifications
 
 on:
-  workflow_dispatch:      # можно запустить вручную для теста
+  workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *' # каждые 5 минут — минимальный интервал, который поддерживает GitHub Actions
+    - cron: '*/5 * * * *'
 
 jobs:
   send-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 4     # страхуемся, чтобы не пересечься со следующим запуском при зависании
+    timeout-minutes: 4
+    concurrency:
+      group: yodo-send-push
+      cancel-in-progress: false
 
     steps:
       - name: Checkout repository
@@ -20,16 +23,24 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install
-        working-directory: push-worker
+        working-directory: .github/scripts
+        run: npm install --no-audit --no-fund
 
-      - name: Write service account key
+      - name: Write Firebase service account
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/service-account.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FIREBASE_SERVICE_ACCOUNT"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
 
-      - name: Run push worker
+      - name: Process notifications and scheduled news campaigns
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/service-account.json
-        run: node index.js
-        working-directory: push-worker
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
+        working-directory: .github/scripts
+        run: node send-push-notifications.js
+
+      - name: Remove service account
+        if: always()
+        run: rm -f "$RUNNER_TEMP/service-account.json"

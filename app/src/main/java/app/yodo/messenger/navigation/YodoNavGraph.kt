@@ -29,6 +29,10 @@ import app.yodo.messenger.features.auth.WelcomeScreen
 import app.yodo.messenger.features.auth.GlobalBlockGateScreen
 import app.yodo.messenger.features.auth.GlobalBlockViewModel
 import app.yodo.messenger.features.chats.ChatScreen
+import app.yodo.messenger.features.chats.NewsDetailsScreen
+import app.yodo.messenger.features.teachers.AdminTeachersScreen
+import app.yodo.messenger.features.teachers.TeacherDirectoryScreen
+import app.yodo.messenger.features.teachers.TeacherProfileScreen
 import app.yodo.messenger.features.chats.ChatStatsScreen
 // НОВОЕ (переработка каналов): три новых экрана
 import app.yodo.messenger.features.chats.ChannelProfileScreen
@@ -278,6 +282,7 @@ fun YodoNavGraph(
         // существующему экрану/потоку, ничего не дублируя по логике.
         composable(Routes.AdminHome.route) {
             app.yodo.messenger.features.chats.AdminHomeScreen(
+                onOpenDashboard = { navController.navigate(Routes.AdminDashboard.route) },
                 onOpenSupportInbox = {
                     navController.navigate(Routes.AdminPanel.route)
                 },
@@ -293,18 +298,86 @@ fun YodoNavGraph(
                 // НОВОЕ (глобальный аудит-лог): переход к журналу действий Админки.
                 onOpenAuditLog = {
                     navController.navigate(Routes.AdminAuditLog.route)
-                }
+                },
+                onOpenModeration = {
+                    navController.navigate(Routes.Moderation.route)
+                },
+                onOpenBehaviorMonitoring = {
+                    navController.navigate(Routes.AdminBehaviorMonitoring.route)
+                },
+                onOpenFaq = { navController.navigate(Routes.AdminFaq.route) },
+                onOpenNewsCampaigns = { navController.navigate(Routes.AdminNewsCampaigns.route) },
+                onOpenTeachers = { navController.navigate(Routes.AdminTeachers.route) }
+            )
+        }
+        composable(Routes.AdminDashboard.route) {
+            app.yodo.messenger.features.chats.AdminDashboardScreen(
+                onBack = { navController.popBackStack() }
             )
         }
         // НОВОЕ (единая вкладка «Админка»): поиск пользователя и его глобальная
         // блокировка. Контекстная блокировка с профиля конкретного человека
         // (UserProfileScreen) остаётся отдельным, независимым путём.
+        composable(Routes.Moderation.route) {
+            app.yodo.messenger.features.chats.ModerationScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ: пользователи с правами администратора управляют автоматическими
+        // правилами фильтрации и 30-дневной историей удалений.
+        composable(Routes.AdminBehaviorMonitoring.route) {
+            app.yodo.messenger.features.chats.AdminBehaviorMonitoringScreen(
+                onBack = { navController.popBackStack() },
+                onOpenUserProfile = { userId ->
+                    navController.navigate(Routes.UserProfile.createRoute(userId))
+                }
+            )
+        }
+        composable(Routes.AdminNewsCampaigns.route) {
+            app.yodo.messenger.features.chats.AdminNewsCampaignsScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.AdminTeachers.route) {
+            AdminTeachersScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.Teachers.route) {
+            TeacherDirectoryScreen(
+                onBack = { navController.popBackStack() },
+                onOpenTeacher = { userId -> navController.navigate(Routes.TeacherProfile.createRoute(userId)) }
+            )
+        }
+        composable(Routes.TeacherProfile.route, arguments = listOf(navArgument(Routes.TeacherProfile.ARG_USER_ID) { type = NavType.StringType })) { backStackEntry ->
+            TeacherProfileScreen(
+                userId = backStackEntry.arguments?.getString(Routes.TeacherProfile.ARG_USER_ID).orEmpty(),
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.NewsDetail.route, arguments = listOf(navArgument(Routes.NewsDetail.ARG_CAMPAIGN_ID) { type = NavType.StringType })) { backStackEntry ->
+            NewsDetailsScreen(
+                campaignId = backStackEntry.arguments?.getString(Routes.NewsDetail.ARG_CAMPAIGN_ID).orEmpty(),
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.AdminFaq.route) {
+            app.yodo.messenger.features.chats.AdminFaqScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
         composable(Routes.AdminUsers.route) {
             app.yodo.messenger.features.chats.AdminUsersScreen(
                 onBack = { navController.popBackStack() },
                 onOpenUserProfile = { userId ->
                     navController.navigate(Routes.UserProfile.createRoute(userId))
+                },
+                onOpenSecurity = {
+                    navController.navigate(Routes.AdminSecurity.route)
                 }
+            )
+        }
+        composable(Routes.AdminSecurity.route) {
+            app.yodo.messenger.features.chats.AdminSecurityScreen(
+                onBack = { navController.popBackStack() }
             )
         }
         // НОВОЕ (глобальный аудит-лог): журнал действий Админки.
@@ -378,117 +451,6 @@ fun YodoNavGraph(
         // НОВОЕ (батч 7): экран «Фишки и инструменты».
         composable(Routes.Tools.route) {
             app.yodo.messenger.features.tools.ToolsScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 — перенос
-        // функционала Telegram-бота. Вход из Настройки → Аккаунт.
-        composable(Routes.School.route) {
-            app.yodo.messenger.features.school.SchoolScreen(
-                onBackClick = { navController.popBackStack() },
-                onOpenTeachers = { navController.navigate(Routes.SchoolTeachers.route) },
-                onOpenNews = { navController.navigate(Routes.SchoolNews.route) },
-                onOpenSchedule = { navController.navigate(Routes.SchoolSchedule.route) },
-                onOpenPolls = { navController.navigate(Routes.SchoolPolls.route) },
-                onOpenQuiz = { navController.navigate(Routes.SchoolQuiz.route) },
-                onOpenGame = { navController.navigate(Routes.SchoolGame.route) },
-                onOpenReview = { navController.navigate(Routes.SchoolReview.route) },
-                onOpenFaq = { navController.navigate(Routes.SchoolFaq.route) },
-                onOpenParents = { navController.navigate(Routes.SchoolParents.route) },
-                onOpenAdmin = {
-                    navController.navigate(Routes.SchoolAdmin.route)
-                },
-                onOpenMyTeacherPage = {
-                    navController.navigate(Routes.SchoolTeacherPage.createRoute("", myPage = true))
-                }
-            )
-        }
-        composable(Routes.SchoolTeachers.route) {
-            app.yodo.messenger.features.school.SchoolTeachersScreen(
-                onBackClick = { navController.popBackStack() },
-                // НОВОЕ (учительские страницы): из карточки учителя — на его страницу.
-                onOpenTeacherPage = { teacherName ->
-                    navController.navigate(Routes.SchoolTeacherPage.createRoute(teacherName))
-                }
-            )
-        }
-        composable(Routes.SchoolNews.route) {
-            app.yodo.messenger.features.school.SchoolNewsScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolSchedule.route) {
-            app.yodo.messenger.features.school.SchoolScheduleScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolPolls.route) {
-            app.yodo.messenger.features.school.SchoolPollsScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolQuiz.route) {
-            app.yodo.messenger.features.school.SchoolQuizScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolGame.route) {
-            app.yodo.messenger.features.school.SchoolGameScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolReview.route) {
-            app.yodo.messenger.features.school.SchoolReviewScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolFaq.route) {
-            app.yodo.messenger.features.school.SchoolFaqScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolParents.route) {
-            app.yodo.messenger.features.school.SchoolParentsScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        composable(Routes.SchoolAdmin.route) {
-            app.yodo.messenger.features.school.SchoolAdminScreen(
-                onBackClick = { navController.popBackStack() },
-                onOpenTeacherProfiles = {
-                    navController.navigate(Routes.SchoolTeacherAdmin.route)
-                }
-            )
-        }
-        composable(Routes.SchoolSettings.route) {
-            app.yodo.messenger.features.school.SchoolSettingsScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        // НОВОЕ (учительские страницы): страница учителя — для ученика (файл,
-        // вопросы, подписка) и для владельца (обновление файла, скрытие вопросов).
-        // Аргументы маршрута автоматически доступны ViewModel'и через
-        // SavedStateHandle (teacherName/mode), имя URL-декодируется там же.
-        composable(
-            route = Routes.SchoolTeacherPage.route,
-            arguments = listOf(
-                navArgument(Routes.SchoolTeacherPage.ARG_TEACHER_NAME) {
-                    type = NavType.StringType
-                    defaultValue = ""
-                },
-                navArgument(Routes.SchoolTeacherPage.ARG_MODE) {
-                    type = NavType.StringType
-                    defaultValue = "page"
-                }
-            )
-        ) {
-            app.yodo.messenger.features.school.SchoolTeacherPageScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-        // НОВОЕ (учительские страницы): админ-панель профилей учителей.
-        composable(Routes.SchoolTeacherAdmin.route) {
-            app.yodo.messenger.features.school.SchoolTeacherAdminScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }
@@ -913,9 +875,6 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() },
                 // НОВОЕ (батч 7): открыть «Фишки и инструменты».
                 onOpenTools = { navController.navigate(Routes.Tools.route) },
-                // НОВОЕ (раздел «Школа»): открыть школьный раздел и его настройки.
-                onOpenSchool = { navController.navigate(Routes.School.route) },
-                onOpenSchoolSettings = { navController.navigate(Routes.SchoolSettings.route) },
                 onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
                 // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
                 onOpenReports = { navController.navigate(Routes.ReportInbox.route) },

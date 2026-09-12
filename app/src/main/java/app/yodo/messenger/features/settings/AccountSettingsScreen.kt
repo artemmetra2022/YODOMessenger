@@ -61,8 +61,6 @@ import app.yodo.messenger.ui.theme.YodoError
 fun AccountSettingsScreen(
     onBackClick: () -> Unit,
     onOpenTools: () -> Unit,
-    onOpenSchool: () -> Unit = {},
-    onOpenSchoolSettings: () -> Unit = {},
     onOpenSecurity: () -> Unit,
     onOpenReports: () -> Unit,
     onOpenOnboarding: () -> Unit,
@@ -76,13 +74,6 @@ fun AccountSettingsScreen(
     val errorMessageResId by viewModel.errorMessageResId.collectAsState()
     val showSettingsInGlobalSearch by viewModel.showSettingsInGlobalSearch.collectAsState()
     val hideStatusBarOnChatList by viewModel.hideStatusBarOnChatList.collectAsState()
-    // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» (переключатель
-    // на экране «Настройки раздела „Школа“»). Плюс глобальное скрытие админом:
-    // обычные пользователи кнопку не видят, админы — всегда (чтобы вернуть).
-    val schoolSectionEnabled by viewModel.schoolSectionEnabled.collectAsState()
-    val schoolSectionGloballyHidden by viewModel.schoolSectionGloballyHidden.collectAsState()
-    val showSchoolSection = schoolSectionEnabled &&
-        (!schoolSectionGloballyHidden || viewModel.isAppAdmin)
 
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
 
@@ -179,33 +170,6 @@ fun AccountSettingsScreen(
                         subtitle = "20 мини-функций: заметки, таймер, пароли, конвертеры и другое",
                         colorTheme = colorTheme,
                         onClick = onOpenTools
-                    )
-                }
-            }
-            // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 и
-            // настройка его отображения. Пункт скрывается переключателем или
-            // глобально админом (showSchoolSection уже учитывает оба случая).
-            if (showSchoolSection) {
-                item {
-                    SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SCHOOL, anchorPositions, highlightedAnchor, colorTheme)) {
-                        SettingsNavigateRow(
-                            icon = Icons.Filled.School,
-                            title = "Школа",
-                            subtitle = "Справочник гимназии №196: учителя, новости, расписание, опросы, викторина и игры",
-                            colorTheme = colorTheme,
-                            onClick = onOpenSchool
-                        )
-                    }
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SCHOOL_SETTINGS, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsNavigateRow(
-                        icon = Icons.Filled.School,
-                        title = "Настройки раздела «Школа»",
-                        subtitle = "Показывать раздел целиком и выбирать отдельные подразделы",
-                        colorTheme = colorTheme,
-                        onClick = onOpenSchoolSettings
                     )
                 }
             }

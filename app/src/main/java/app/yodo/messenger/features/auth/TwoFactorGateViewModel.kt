@@ -3,6 +3,7 @@ package app.yodo.messenger.features.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.domain.repository.AuthRepository
+import app.yodo.messenger.domain.repository.AdminSecurityRepository
 import app.yodo.messenger.domain.repository.TwoFactorEmailSendResult
 import app.yodo.messenger.domain.repository.TwoFactorRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,11 @@ sealed class TwoFactorGateUiState {
     /** Не включена — можно сразу пропускать пользователя дальше. */
     data object NotRequired : TwoFactorGateUiState()
     /** Включена — код на почту отправляется/отправлен, показываем поле ввода 6-значного кода. */
+    data class AwaitingAdminTotp(
+        val error: String? = null,
+        val isVerifying: Boolean = false
+    ) : TwoFactorGateUiState()
+
     data class AwaitingEmailCode(
         val maskedEmail: String,
         val error: String? = null,
@@ -32,6 +38,7 @@ sealed class TwoFactorGateUiState {
 @HiltViewModel
 class TwoFactorGateViewModel @Inject constructor(
     private val twoFactorRepository: TwoFactorRepository,
+    private val adminSecurityRepository: AdminSecurityRepository,
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
@@ -44,7 +51,7 @@ class TwoFactorGateViewModel @Inject constructor(
             if (state.enabled) {
                 requestEmailCode(isResend = false)
             } else {
-                _uiState.value = TwoFactorGateUiState.NotRequired
+                checkAdminTotp()
             }
         }
     }
@@ -87,10 +94,30 @@ class TwoFactorGateViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = twoFactorRepository.verifyEmailCode(code)
             _uiState.value = if (ok) {
-                TwoFactorGateUiState.Verified
+                if (adminSecurityRepository.observeState().first().enabled) {
+                    TwoFactorGateUiState.AwaitingAdminTotp()
+                } else {
+                    TwoFactorGateUiState.Verified
+                }
             } else {
                 current.copy(isVerifying = false, error = "Неверный или устаревший код")
             }
+        }
+    }
+
+    private suspend fun checkAdminTotp() {
+        val adminState = adminSecurityRepository.observeState().first()
+        _uiState.value = if (adminState.enabled) TwoFactorGateUiState.AwaitingAdminTotp() else TwoFactorGateUiState.NotRequired
+    }
+
+    fun verifyAdminTotp(code: String) {
+        val current = _uiState.value
+        if (current !is TwoFactorGateUiState.AwaitingAdminTotp) return
+        _uiState.value = current.copy(isVerifying = true, error = null)
+        viewModelScope.launch {
+            val ok = adminSecurityRepository.verify(code)
+            _uiState.value = if (ok) TwoFactorGateUiState.Verified
+            else current.copy(isVerifying = false, error = "Неверный код администратора")
         }
     }
 

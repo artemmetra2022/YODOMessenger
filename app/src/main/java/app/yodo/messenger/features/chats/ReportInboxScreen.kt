@@ -1,11 +1,13 @@
 package app.yodo.messenger.features.chats
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,8 +39,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Offset
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.domain.model.ReportStatus
+import app.yodo.messenger.domain.model.ReportReason
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,6 +51,41 @@ import java.util.Locale
  * НОВОЕ (AC): глобальный раздел «Жалобы» — все жалобы и обжалования в одном месте.
  * Доступен только главным админам (2 почты).
  */
+@Composable
+private fun InboxReasonChart(counts: Map<ReportReason, Int>) {
+    val ordered = listOf(
+        ReportReason.SPAM, ReportReason.HARASSMENT, ReportReason.NSFW,
+        ReportReason.ADVERTISEMENT, ReportReason.OTHER
+    )
+    val data = ordered.map { it to (counts[it] ?: 0) }.filter { it.second > 0 }
+    val total = data.sumOf { it.second }
+    if (total == 0) return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text("Распределение жалоб", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Canvas(Modifier.size(100.dp)) {
+                var start = -90f
+                val colors = listOf(
+                    MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.error,
+                    MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.secondary,
+                    MaterialTheme.colorScheme.outline
+                )
+                data.forEachIndexed { index, (_, value) ->
+                    val sweep = value.toFloat() / total * 360f
+                    drawArc(colors[index % colors.size], start, sweep, true, Offset.Zero, size)
+                    start += sweep
+                }
+            }
+            Spacer(Modifier.size(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                data.forEach { (reason, count) ->
+                    Text("${reason.label}: $count", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportInboxScreen(
@@ -57,6 +96,8 @@ fun ReportInboxScreen(
     val reports by viewModel.reports.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val statusFilter by viewModel.statusFilter.collectAsState()
+    val reasonFilter by viewModel.reasonFilter.collectAsState()
+    val reasonCounts by viewModel.reasonCounts.collectAsState()
 
     Scaffold(
         topBar = {
@@ -94,6 +135,34 @@ fun ReportInboxScreen(
                         onClick = { viewModel.setStatusFilter(null) },
                         label = { Text("Все") }
                     )
+                }
+
+                InboxReasonChart(reasonCounts)
+
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = reasonFilter == null,
+                            onClick = { viewModel.setReasonFilter(null) },
+                            label = { Text("Все типы") }
+                        )
+                    }
+                    listOf(
+                        ReportReason.SPAM, ReportReason.HARASSMENT, ReportReason.NSFW,
+                        ReportReason.ADVERTISEMENT, ReportReason.OTHER
+                    ).forEach { reason ->
+                        item {
+                            FilterChip(
+                                selected = reasonFilter == reason,
+                                onClick = { viewModel.setReasonFilter(reason) },
+                                label = { Text(reason.label) }
+                            )
+                        }
+                    }
                 }
 
                 when {

@@ -1,6 +1,7 @@
 package app.yodo.messenger.features.chats
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -44,6 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.domain.model.Report
 import app.yodo.messenger.domain.model.ReportStatus
 import app.yodo.messenger.domain.model.ReportTargetType
+import app.yodo.messenger.domain.model.ReportReason
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -103,6 +105,36 @@ fun ReportQueueScreen(
                 }
             }
 
+            ReportReasonChart(uiState.reasonCounts)
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = uiState.reasonFilter == null,
+                        onClick = { viewModel.setReasonFilter(null) },
+                        label = { Text("Все типы") }
+                    )
+                }
+                listOf(
+                    ReportReason.SPAM,
+                    ReportReason.HARASSMENT,
+                    ReportReason.NSFW,
+                    ReportReason.ADVERTISEMENT,
+                    ReportReason.OTHER
+                ).forEach { reason ->
+                    item {
+                        FilterChip(
+                            selected = uiState.reasonFilter == reason,
+                            onClick = { viewModel.setReasonFilter(reason) },
+                            label = { Text(reason.label) }
+                        )
+                    }
+                }
+            }
+
             if (uiState.isLoading) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -120,6 +152,80 @@ fun ReportQueueScreen(
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(uiState.reports, key = { it.id }) { report ->
                         ReportQueueRow(report = report, onClick = { onOpenReport(report.id) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReportReasonChart(counts: Map<ReportReason, Int>) {
+    val ordered = listOf(
+        ReportReason.SPAM,
+        ReportReason.HARASSMENT,
+        ReportReason.NSFW,
+        ReportReason.ADVERTISEMENT,
+        ReportReason.OTHER
+    )
+    val data = ordered.map { it to (counts[it] ?: 0) }.filter { it.second > 0 }
+    val total = data.sumOf { it.second }
+    if (total == 0) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Text(
+            "Распределение жалоб",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Canvas(modifier = Modifier.size(116.dp)) {
+                var startAngle = -90f
+                val colors = listOf(
+                    MaterialTheme.colorScheme.primary,
+                    MaterialTheme.colorScheme.error,
+                    MaterialTheme.colorScheme.tertiary,
+                    MaterialTheme.colorScheme.secondary,
+                    MaterialTheme.colorScheme.outline
+                )
+                data.forEachIndexed { index, (_, count) ->
+                    val sweep = count.toFloat() / total.toFloat() * 360f
+                    drawArc(
+                        color = colors[index % colors.size],
+                        startAngle = startAngle,
+                        sweepAngle = sweep,
+                        useCenter = true,
+                        topLeft = Offset.Zero,
+                        size = size
+                    )
+                    startAngle += sweep
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                data.forEachIndexed { index, (reason, count) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(9.dp).clip(CircleShape)
+                                .background(
+                                    listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.error,
+                                        MaterialTheme.colorScheme.tertiary,
+                                        MaterialTheme.colorScheme.secondary,
+                                        MaterialTheme.colorScheme.outline
+                                    )[index % 5]
+                                )
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("${reason.label}: $count", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

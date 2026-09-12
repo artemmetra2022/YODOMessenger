@@ -58,9 +58,6 @@ object SettingsSearchIndex {
     const val ANCHOR_DELETE_ACCOUNT = "delete_account"
     const val ANCHOR_SEARCH_IN_GLOBAL = "search_in_global"
     const val ANCHOR_HIDE_STATUS_BAR_CHAT_LIST = "hide_status_bar_chat_list"
-    // НОВОЕ (раздел «Школа»): якоря пунктов школьного раздела.
-    const val ANCHOR_SCHOOL = "school"
-    const val ANCHOR_SCHOOL_SETTINGS = "school_settings"
 
     private const val SEC_APPEARANCE = "Оформление"
     private const val SEC_CUSTOMIZATION = "Кастомизация"
@@ -321,19 +318,6 @@ object SettingsSearchIndex {
             id = "hide_status_bar_chat_list", anchorId = ANCHOR_HIDE_STATUS_BAR_CHAT_LIST,
             title = "Скрывать статус-бар в списке чатов", subtitle = "Полностью скрывать системную панель времени и батареи на главном экране",
             keywords = listOf("статус бар", "статусбар", "скрыть статус бар", "полноэкранный режим", "immersive"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
-        ),
-        // НОВОЕ (раздел «Школа»): пункты школьного раздела в поиске настроек.
-        SettingsSearchItem(
-            id = "school", anchorId = ANCHOR_SCHOOL,
-            title = "Школа", subtitle = "Справочник гимназии №196: учителя, новости, расписание, опросы, викторина и игры",
-            keywords = listOf("школа", "гимназия", "учителя", "предметы", "расписание", "звонки", "каникулы", "новости школы", "викторина", "школьный справочник"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
-        ),
-        SettingsSearchItem(
-            id = "school_settings", anchorId = ANCHOR_SCHOOL_SETTINGS,
-            title = "Настройки раздела «Школа»", subtitle = "Показывать раздел целиком и выбирать отдельные подразделы",
-            keywords = listOf("настройки школы", "скрыть школу", "подразделы школы", "отображение школы"),
             sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         )
     )

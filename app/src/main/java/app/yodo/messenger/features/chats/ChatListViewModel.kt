@@ -370,11 +370,6 @@ class ChatListViewModel @Inject constructor(
             runCatching {
                 val token = FirebaseMessaging.getInstance().token.await()
                 firestore.collection("users").document(uid).update("fcmToken", token).await()
-                // НОВОЕ (push о новостях/опросах школы): первый запуск/логин —
-                // явно инициализируем флаг подписки, чтобы воркер видел
-                // подписчика (отсутствие поля = дефолт true, но так надёжнее).
-                firestore.collection("users").document(uid)
-                    .set(mapOf("schoolPushEnabled" to true), com.google.firebase.firestore.SetOptions.merge()).await()
             }
         }
     }
