@@ -439,6 +439,36 @@ class UserRepositoryImpl @Inject constructor(
         blockedAt = (data["blockedAt"] as? Number)?.toLong() ?: 0L
     )
 
+    // НОВОЕ (история блокировок): запись в корневую коллекцию blockHistory —
+    // журнал блокировок и разблокировок для карточки пользователя в веб-админке.
+    // Формат 1:1 с web/admin.js (writeBlockHistory). Best-effort: сбой истории
+    // не должен ломать саму блокировку.
+    private suspend fun writeBlockHistory(
+        userId: String,
+        action: String,
+        reasonCode: String,
+        reasonText: String,
+        reasonLabel: String
+    ) {
+        val me = firebaseAuth.currentUser ?: return
+        try {
+            val myName = firestore.collection("users").document(me.uid).get().await()
+                .getString("displayName") ?: (me.email ?: "Админ")
+            firestore.collection("blockHistory").add(mapOf(
+                "userId" to userId,
+                "action" to action,
+                "reasonCode" to reasonCode,
+                "reasonText" to reasonText,
+                "reasonLabel" to reasonLabel,
+                "actorId" to me.uid,
+                "actorName" to myName,
+                "at" to System.currentTimeMillis()
+            )).await()
+        } catch (e: Exception) {
+            android.util.Log.w("UserRepositoryImpl", "writeBlockHistory failed", e)
+        }
+    }
+
     override fun observeMyGlobalBlock(): Flow<GlobalBlock?> = callbackFlow {
         val uid = firebaseAuth.currentUser?.uid
         if (uid == null) { trySend(null); close(); return@callbackFlow }
@@ -509,6 +539,8 @@ class UserRepositoryImpl @Inject constructor(
                 .getString("displayName") ?: (me.email ?: "Админ")
             globalBlocksRef().document(uid).set(mapOf(
                 "reason" to reason.take(500),
+                "reasonCode" to "",
+                "reasonText" to reason.take(500),
                 "blockedBy" to me.uid,
                 "blockedByName" to myName,
                 "blockedAt" to System.currentTimeMillis()
@@ -520,6 +552,14 @@ class UserRepositoryImpl @Inject constructor(
                 details = reason.take(500),
                 targetUserId = uid,
                 targetUserName = targetName
+            )
+            // НОВОЕ (история блокировок): журнал для карточки пользователя в веб-админке.
+            writeBlockHistory(
+                userId = uid,
+                action = "BLOCKED",
+                reasonCode = "",
+                reasonText = reason.take(500),
+                reasonLabel = reason.take(500).ifBlank { "Блокировка администрацией" }
             )
             // НОВОЕ (push о модерации): уведомляем заблокированного пользователя.
             queueModerationNotification(
@@ -541,6 +581,14 @@ class UserRepositoryImpl @Inject constructor(
                 GlobalAdminActionType.USER_GLOBALLY_UNBLOCKED,
                 targetUserId = uid,
                 targetUserName = targetName
+            )
+            // НОВОЕ (история блокировок): фиксируем снятие блокировки в журнале.
+            writeBlockHistory(
+                userId = uid,
+                action = "UNBLOCKED",
+                reasonCode = "",
+                reasonText = "",
+                reasonLabel = "Блокировка снята"
             )
             // НОВОЕ (push о модерации): уведомляем разблокированного пользователя.
             queueModerationNotification(

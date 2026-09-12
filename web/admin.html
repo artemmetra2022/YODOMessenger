@@ -74,6 +74,17 @@
           <button type="button" class="btn-secondary" id="btn-refresh-summary">Обновить сводку</button>
         </div>
 
+        <!-- НОВОЕ (аналитика): активность приложения за последний месяц. -->
+        <div class="card">
+          <div class="card-head">
+            <h2>Аналитика активности (30 дней)</h2>
+            <button type="button" class="btn-secondary" id="btn-activity-refresh">Обновить</button>
+          </div>
+          <p class="card-hint">Число сообщений по дням за последние 30 дней по всему приложению (collection-group messages). Наведите на столбец — точное значение за день.</p>
+          <div id="activity-chart" class="activity-chart"></div>
+          <p class="card-hint" id="activity-summary"></p>
+        </div>
+
         <div class="card">
           <h2>Раздел «Школа»</h2>
           <p class="card-hint">Скрытие действует глобально для всех пользователей (кроме админов).</p>
@@ -532,9 +543,12 @@
         <div class="card">
           <h2>Заблокировать по UID</h2>
           <p class="card-hint">UID можно скопировать в разделе «Пользователи» или в Firebase Console → Authentication. Заблокированный видит причину и может подать обжалование — оно появится в разделе «Жалобы».</p>
-          <form id="form-block-uid" class="form-row">
+          <form id="form-block-uid" class="form-col">
             <input type="text" id="block-uid" placeholder="UID пользователя" autocomplete="off">
-            <input type="text" id="block-reason" placeholder="Причина (видна пользователю)" autocomplete="off">
+            <div class="form-row">
+              <select id="block-reason-code"></select>
+              <input type="text" id="block-reason" placeholder="Свой текст причины (для «Другое»)" autocomplete="off">
+            </div>
             <button type="submit" class="btn-primary">Заблокировать</button>
           </form>
         </div>
@@ -634,6 +648,20 @@
       <div class="modal-actions">
         <button type="button" class="btn-link" id="btn-delete-reason-cancel">Отмена</button>
         <button type="button" class="btn-danger" id="btn-delete-reason-ok">Удалить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: причина блокировки (стандартный набор причин с описаниями) -->
+  <div id="block-reason-overlay" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h2>Причина блокировки</h2>
+      <p class="card-hint" id="block-reason-sub"></p>
+      <div id="block-reason-options" class="reason-options"></div>
+      <input type="text" id="block-reason-text" placeholder="Свой текст причины (для «Другое»)" autocomplete="off" class="hidden">
+      <div class="modal-actions">
+        <button type="button" class="btn-link" id="btn-block-reason-cancel">Отмена</button>
+        <button type="button" class="btn-danger" id="btn-block-reason-ok">Заблокировать</button>
       </div>
     </div>
   </div>

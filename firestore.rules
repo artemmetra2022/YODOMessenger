@@ -156,6 +156,17 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ (история блокировок): корневая коллекция blockHistory — журнал всех
+    // блокировок и разблокировок с причиной, автором и временем. Запись создаёт
+    // клиент, который банит: веб-панель или Android-приложение
+    // (UserRepositoryImpl.setGlobalBlock/removeGlobalBlock), поэтому create
+    // разрешён двум главным админам. Читают историю (в карточке пользователя и в
+    // разделе «Блокировки») только они же; записи неизменяемы.
+    match /blockHistory/{entryId} {
+      allow read, create: if isOfficialChannelAdmin();
+      allow update, delete: if false;
+    }
+
     // НОВОЕ (глобальный аудит-лог Админки): корневая коллекция adminAuditLog —
     // история действий, не привязанных к конкретному чату (глобальный бан/
     // разбан пользователя, изменение общих настроек приложения). Пишет и
@@ -469,8 +480,13 @@ service cloud.firestore {
       allow write: if isSignedIn() && request.auth.uid == userId;
 
       // Сессии (устройства) — только владелец аккаунта может читать и писать.
+      // НОВОЕ (расширенная карточка пользователя в веб-админке): последние входы/
+      // устройства любого пользователя видны двум главным админам (аналог
+      // «Login history»); запись остаётся только за владельцем аккаунта.
       match /sessions/{sessionId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        allow read: if isSignedIn() &&
+          (request.auth.uid == userId || isOfficialChannelAdmin());
+        allow write: if isSignedIn() && request.auth.uid == userId;
       }
 
       // НОВОЕ: приватные данные пользователя, которые нельзя раскрывать
@@ -564,7 +580,14 @@ service cloud.firestore {
           // завязана на regex по id документа (support_*), что Firestore не может
           // доказать для list-запроса (он фильтрует по полю type), и отклоняет его.
           // Эта ветка завязана на resource.data.type, который запрос и ограничивает.
-          || (isOfficialChannelAdmin() && resource != null && resource.data.type == 'SUPPORT'));
+          || (isOfficialChannelAdmin() && resource != null && resource.data.type == 'SUPPORT')
+          // НОВОЕ (карточка пользователя в веб-админке): админам нужно читать ЛЮБОЙ
+          // чат — чтобы показать список групп и каналов пользователя (запрос
+          // where("participantIds","array-contains",uid) не может быть доказан
+          // ветками выше, которые завязаны на type/accessMode/id документа).
+          // Уровень доступа не выше уже разрешённого: сквозное чтение messages
+          // админами (см. match /{path=**}/messages).
+          || isOfficialChannelAdmin());
 
       // ИСПРАВЛЕНО (безопасность): раньше любой авторизованный мог создать чат
       // с произвольными participantIds и createdBy — в том числе подменить чужое

@@ -32,6 +32,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getCountFromServer,
   addDoc,
   setDoc,
   updateDoc,
@@ -1673,10 +1674,13 @@ async function refreshChatPreviewAfterDelete(chatId, messageId) {
   });
 }
 
-// Блокировка аккаунта — формат 1:1 с UserRepositoryImpl.setGlobalBlock.
-async function setGlobalBlock(uid, reason) {
+// Блокировка аккаунта — формат 1:1 с UserRepositoryImpl.setGlobalBlock
+// (+ НОВОЕ: машиночитаемый код причины reasonCode и запись в историю блокировок).
+async function setGlobalBlock(uid, reason, reasonCode = "", reasonText = "") {
   await setDoc(doc(db, "globalBlocks", uid), {
     reason: reason || "",
+    reasonCode: reasonCode || "",
+    reasonText: reasonText || "",
     blockedBy: auth.currentUser.uid,
     blockedByName: adminActorName || auth.currentUser.email || "Админ",
     blockedAt: Date.now(),
@@ -1688,6 +1692,7 @@ async function setGlobalBlock(uid, reason) {
     notified: false,
     createdAt: Date.now(),
   }).catch(() => {});
+  await writeBlockHistory(uid, "BLOCKED", reasonCode, reasonText, reason || "");
 }
 
 function reportItem(docSnap) {
@@ -1791,7 +1796,8 @@ async function resolveReportAction(docSnap, action) {
         : `Отклонить жалобу на ${targetName}?`;
     if (!confirm(confirmText)) return;
     if (action === "blockUser") {
-      await setGlobalBlock(r.targetUserId, "Нарушение правил по жалобе: " + (REPORT_REASONS[r.reason] || r.reason));
+      const blockReason = "Нарушение правил по жалобе: " + (REPORT_REASONS[r.reason] || r.reason);
+      await setGlobalBlock(r.targetUserId, blockReason, "RULES", "");
       await finalizeReport(docSnap, "RESOLVED", "USER_BANNED", "Аккаунт заблокирован администратором");
       logAdminAction("REPORT_RESOLVED_USER_BANNED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
       toast("Аккаунт заблокирован, жалоба закрыта");
@@ -3686,6 +3692,144 @@ function renderUserCard(u, uid, block) {
   }
   bodyEl.innerHTML = rows.join("") + blockHtml;
   bodyEl.appendChild(actions);
+  // НОВОЕ (расширенная карточка): статистика, входы, группы, история блокировок
+  // и связанные записи аудита подгружаются отдельно, не блокируя профиль.
+  const stats = document.createElement("div");
+  stats.id = "user-card-stats";
+  stats.className = "user-card-stats";
+  stats.innerHTML = '<p class="empty-note">Загружаю статистику…</p>';
+  bodyEl.appendChild(stats);
+  loadUserCardStats(uid);
+}
+
+async function userCardSafe(fn) {
+  try { return { ok: true, value: await fn() }; }
+  catch (e) { return { ok: false, error: e }; }
+}
+
+function miniRow(left, right) {
+  return `<div class="mini-row"><span>${esc(left)}</span><span class="mini-dim">${esc(right)}</span></div>`;
+}
+
+/**
+ * НОВОЕ (расширенная карточка пользователя): последние входы/устройства (сессии),
+ * число отправленных сообщений, число жалоб на пользователя, группы и каналы,
+ * история блокировок и связанные записи журнала аудита.
+ * IP-адреса намеренно не собираются: Firestore не отдаёт IP клиента, а сессии
+ * (users/{uid}/sessions) его не хранят.
+ */
+async function loadUserCardStats(uid) {
+  const box = $("user-card-stats");
+  if (!box) return;
+  const [sessions, sent, reports, chats, blocks, audit] = await Promise.all([
+    userCardSafe(() => getDocs(query(collection(db, "users", uid, "sessions"), orderBy("lastActiveAt", "desc"), limit(5)))),
+    userCardSafe(() => getCountFromServer(query(collectionGroup(db, "messages"), where("senderId", "==", uid)))),
+    userCardSafe(() => getCountFromServer(query(collectionGroup(db, "reports"), where("targetUserId", "==", uid)))),
+    userCardSafe(() => getDocs(query(collection(db, "chats"), where("participantIds", "array-contains", uid), limit(50)))),
+    userCardSafe(() => getDocs(query(collection(db, "blockHistory"), where("userId", "==", uid), limit(50)))),
+    userCardSafe(() => getDocs(query(collection(db, "adminAuditLog"), where("targetUserId", "==", uid), orderBy("timestamp", "desc"), limit(20)))),
+  ]);
+  if (currentUserCardUid !== uid) return;
+
+  const sentCount = sent.ok ? sent.value.data().count : "—";
+  const reportCount = reports.ok ? reports.value.data().count : "—";
+  const groups = chats.ok
+    ? chats.value.docs.map((d) => d.data()).filter((c) => c.type === "GROUP" || c.type === "CHANNEL")
+    : [];
+  const history = blocks.ok
+    ? blocks.value.docs.map((d) => d.data()).sort((a, b) => (b.at || 0) - (a.at || 0))
+    : [];
+  const auditRows = audit.ok ? audit.value.docs.map((d) => d.data()) : [];
+
+  const parts = [];
+  parts.push(
+    `<div class="stat-grid">
+      <div class="stat-tile"><div class="stat-value">${esc(String(sentCount))}</div><div class="stat-label">Отправлено сообщений</div></div>
+      <div class="stat-tile"><div class="stat-value">${esc(String(reportCount))}</div><div class="stat-label">Жалоб на пользователя</div></div>
+      <div class="stat-tile"><div class="stat-value">${esc(String(groups.length))}</div><div class="stat-label">Групп и каналов</div></div>
+      <div class="stat-tile"><div class="stat-value">${esc(String(history.length))}</div><div class="stat-label">Записей блокировок</div></div>
+    </div>`
+  );
+  if (!sent.ok || !reports.ok) {
+    parts.push('<p class="card-hint">Часть счётчиков недоступна — проверьте правила и индексы Firestore (messages.senderId, reports.targetUserId).</p>');
+  }
+
+  parts.push("<h3>Последние входы / устройства</h3>");
+  if (!sessions.ok) {
+    parts.push('<p class="card-hint">Нет доступа к сессиям (проверьте правила Firestore для users/{uid}/sessions).</p>');
+  } else if (!sessions.value.size) {
+    parts.push('<p class="card-hint">Сессий не найдено.</p>');
+  } else {
+    parts.push(
+      '<div class="mini-list">' +
+        sessions.value.docs
+          .map((d) => {
+            const s = d.data();
+            const label = [s.deviceName, s.platform, s.appVersion].filter(Boolean).join(" · ") || d.id;
+            return miniRow(label, fmtDate(s.lastActiveAt || s.createdAt));
+          })
+          .join("") +
+        "</div>"
+    );
+  }
+
+  parts.push("<h3>Группы и каналы</h3>");
+  if (!chats.ok) {
+    parts.push('<p class="card-hint">Нет доступа к списку чатов (проверьте правила Firestore для chats).</p>');
+  } else if (!groups.length) {
+    parts.push('<p class="card-hint">Не состоит в группах и каналах.</p>');
+  } else {
+    parts.push(
+      '<div class="mini-list">' +
+        groups
+          .slice(0, 20)
+          .map((c) => miniRow((c.type === "CHANNEL" ? "📣 " : "👥 ") + (c.title || "Без названия"), c.type === "CHANNEL" ? "канал" : "группа"))
+          .join("") +
+        "</div>"
+    );
+  }
+
+  parts.push("<h3>История блокировок</h3>");
+  if (!blocks.ok) {
+    parts.push('<p class="card-hint">Нет доступа к истории блокировок.</p>');
+  } else if (!history.length) {
+    parts.push('<p class="card-hint">Блокировок не было.</p>');
+  } else {
+    parts.push(
+      '<div class="mini-list">' +
+        history
+          .slice(0, 20)
+          .map((h) => {
+            const blocked = h.action === "BLOCKED";
+            const label = (blocked ? "⛔ " : "✅ ") + (h.reasonLabel || (blocked ? "Блокировка" : "Блокировка снята"));
+            return miniRow(label, (h.actorName ? h.actorName + " · " : "") + fmtDate(h.at));
+          })
+          .join("") +
+        "</div>"
+    );
+  }
+
+  parts.push("<h3>Журнал действий (аудит)</h3>");
+  if (!audit.ok) {
+    parts.push('<p class="card-hint">Нет доступа к журналу аудита (нужен индекс adminAuditLog.targetUserId).</p>');
+  } else if (!auditRows.length) {
+    parts.push('<p class="card-hint">Записей нет.</p>');
+  } else {
+    parts.push(
+      '<div class="mini-list">' +
+        auditRows
+          .map((a) =>
+            miniRow(
+              (AUDIT_LABELS[a.actionType] || a.actionType || "?") + (a.details ? " · " + a.details : ""),
+              (a.actorName ? a.actorName + " · " : "") + fmtDate(a.timestamp)
+            )
+          )
+          .join("") +
+        "</div>"
+    );
+  }
+
+  box.innerHTML = parts.join("");
 }
 
 function closeUserCard() {
@@ -3696,12 +3840,14 @@ function closeUserCard() {
 }
 
 async function blockUserWithPrompt(uid, name) {
-  const reason = prompt("Причина блокировки (видна " + (name || "пользователю") + "):", "");
-  if (reason === null) return;
+  // НОВОЕ (причины блокировок): выбираем причину из стандартного набора с описанием.
+  const pick = await askBlockReason("Блокировка: " + (name || "пользователь") + " · " + uid);
+  if (!pick) return;
+  const reason = blockReasonText(pick);
   try {
-    await setGlobalBlock(uid, reason.trim());
-    logAdminAction("USER_GLOBALLY_BLOCKED", reason.trim(), uid, name);
-    toast("Аккаунт заблокирован" + (reason.trim() ? " — пользователь получит push" : ""));
+    await setGlobalBlock(uid, reason, pick.code, pick.text);
+    logAdminAction("USER_GLOBALLY_BLOCKED", reason, uid, name);
+    toast("Аккаунт заблокирован — пользователь получит push");
   } catch (err) {
     handleErr("Не удалось заблокировать")(err);
   }
@@ -3719,6 +3865,7 @@ async function unblockUser(uid, name) {
       createdAt: Date.now(),
     }).catch(() => {});
     logAdminAction("USER_GLOBALLY_UNBLOCKED", "", uid, name);
+    await writeBlockHistory(uid, "UNBLOCKED", "", "", "Блокировка снята");
     toast("Блокировка снята — пользователь получит push");
   } catch (err) {
     handleErr("Не удалось снять блокировку")(err);
@@ -3860,19 +4007,219 @@ function startUsers() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Причины блокировок и история блокировок (blockHistory)              */
+/* ------------------------------------------------------------------ */
+
+// НОВОЕ (причины блокировок): стандартный набор причин с описаниями. Выбранная
+// причина пишется в globalBlocks/{uid}.reasonCode и в историю blockHistory.
+const BLOCK_REASONS = [
+  { code: "SPAM", label: "Спам и рассылки", description: "Массовые рассылки, навязчивая реклама, флуд" },
+  { code: "INSULT", label: "Оскорбления и травля", description: "Оскорбления, угрозы, травля других пользователей" },
+  { code: "NSFW", label: "Неприемлемый контент", description: "NSFW, жестокость, шок-контент" },
+  { code: "FRAUD", label: "Мошенничество", description: "Обман, фишинг, выманивание данных или денег" },
+  { code: "RULES", label: "Нарушение правил", description: "Нарушение правил сервиса" },
+  { code: "BYPASS", label: "Обход блокировки", description: "Мультиаккаунт или обход прежней блокировки" },
+  { code: "OTHER", label: "Другое", description: "Другая причина — укажите свой текст" },
+];
+
+function blockReasonByCode(code) {
+  return BLOCK_REASONS.find((r) => r.code === code) || BLOCK_REASONS[BLOCK_REASONS.length - 1];
+}
+
+/** Текст причины для globalBlocks.reason и push-уведомления. */
+function blockReasonText(pick) {
+  if (!pick) return "";
+  if (pick.code === "OTHER" && pick.text) return pick.text;
+  return pick.label + (pick.description ? " — " + pick.description : "");
+}
+
+function populateBlockReasonSelect(select) {
+  select.innerHTML = "";
+  BLOCK_REASONS.forEach((r) => {
+    const opt = document.createElement("option");
+    opt.value = r.code;
+    opt.textContent = r.label;
+    select.appendChild(opt);
+  });
+}
+
+/** Запись в историю блокировок — форматы 1:1 с Android (writeBlockHistory). */
+async function writeBlockHistory(userId, action, reasonCode, reasonText, reasonLabel) {
+  if (!auth.currentUser) return;
+  try {
+    await addDoc(collection(db, "blockHistory"), {
+      userId,
+      action, // BLOCKED | UNBLOCKED
+      reasonCode: reasonCode || "",
+      reasonText: reasonText || "",
+      reasonLabel: reasonLabel || "",
+      actorId: auth.currentUser.uid,
+      actorName: adminActorName || auth.currentUser.email || "Админ",
+      at: Date.now(),
+    });
+  } catch (e) { /* best-effort: история не должна ломать саму блокировку */ }
+}
+
+/** Модалка выбора причины блокировки → { code, label, description, text } | null. */
+function askBlockReason(subtitle) {
+  return new Promise((resolve) => {
+    const overlay = $("block-reason-overlay");
+    const options = $("block-reason-options");
+    const customText = $("block-reason-text");
+    $("block-reason-sub").textContent = subtitle || "";
+    customText.value = "";
+    customText.classList.add("hidden");
+    let selected = "RULES";
+    options.innerHTML = "";
+    BLOCK_REASONS.forEach((r) => {
+      const label = document.createElement("label");
+      label.className = "radio-row";
+      label.innerHTML =
+        `<input type="radio" name="block-reason" value="${r.code}"${r.code === selected ? " checked" : ""}> ` +
+        `<b>${esc(r.label)}</b> <span class="mini-dim">${esc(r.description || "")}</span>`;
+      label.querySelector("input").addEventListener("change", () => {
+        selected = r.code;
+        customText.classList.toggle("hidden", r.code !== "OTHER");
+      });
+      options.appendChild(label);
+    });
+    overlay.classList.remove("hidden");
+    const onOk = () => {
+      if (selected === "OTHER" && !customText.value.trim()) {
+        toast("Укажите текст причины для «Другое»", false);
+        return;
+      }
+      const base = blockReasonByCode(selected);
+      finish({
+        code: base.code,
+        label: base.label,
+        description: base.description,
+        text: selected === "OTHER" ? customText.value.trim() : "",
+      });
+    };
+    const onCancel = () => finish(null);
+    const onOverlay = (e) => { if (e.target === overlay) finish(null); };
+    const onKey = (e) => { if (e.key === "Escape") finish(null); };
+    function finish(value) {
+      overlay.classList.add("hidden");
+      $("btn-block-reason-ok").removeEventListener("click", onOk);
+      $("btn-block-reason-cancel").removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onOverlay);
+      document.removeEventListener("keydown", onKey);
+      resolve(value);
+    }
+    $("btn-block-reason-ok").addEventListener("click", onOk);
+    $("btn-block-reason-cancel").addEventListener("click", onCancel);
+    overlay.addEventListener("click", onOverlay);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Аналитика активности за последний месяц                             */
+/* ------------------------------------------------------------------ */
+
+// НОВОЕ (аналитика): структура данных графика — массив { date, count } за 30
+// дней (счётчики берутся агрегатом getCountFromServer по collection-group
+// messages, поэтому не выкачиваем сами сообщения).
+const ACTIVITY_DAYS = 30;
+let activitySeries = [];
+
+function dayKey(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+
+async function buildActivitySeries(days = ACTIVITY_DAYS) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const start = startOfToday - i * 86400000;
+    series.push({ date: dayKey(start), start, end: start + 86400000, count: null });
+  }
+  await Promise.all(series.map(async (d) => {
+    try {
+      const snap = await getCountFromServer(
+        query(
+          collectionGroup(db, "messages"),
+          where("timestamp", ">=", d.start),
+          where("timestamp", "<", d.end)
+        )
+      );
+      d.count = snap.data().count;
+    } catch (e) { d.count = null; }
+  }));
+  return series.map((d) => ({ date: d.date, count: d.count }));
+}
+
+function renderActivityChart(series) {
+  const el = $("activity-chart");
+  if (!series.length) { el.innerHTML = ""; return; }
+  const max = Math.max(1, ...series.map((d) => d.count || 0));
+  const bars = series
+    .map((d) => {
+      const h = d.count ? Math.max(4, Math.round((d.count / max) * 100)) : 0;
+      const title = d.date + ": " + (d.count == null ? "нет данных" : d.count);
+      return `<div class="activity-bar${d.count ? "" : " empty"}" style="height:${h}%" title="${esc(title)}"></div>`;
+    })
+    .join("");
+  const labels = series
+    .map((d, i) => `<span>${i % 5 === 0 || i === series.length - 1 ? esc(d.date.slice(5)) : ""}</span>`)
+    .join("");
+  el.innerHTML = `<div class="activity-bars">${bars}</div><div class="activity-labels">${labels}</div>`;
+}
+
+async function loadActivity() {
+  const el = $("activity-chart");
+  const sum = $("activity-summary");
+  el.innerHTML = '<p class="empty-note">Загрузка…</p>';
+  sum.textContent = "";
+  try {
+    const series = await buildActivitySeries();
+    activitySeries = series;
+    renderActivityChart(series);
+    const known = series.filter((d) => d.count != null);
+    if (!known.length) {
+      sum.textContent = "Нет данных: проверьте, что индекс messages(timestamp) задеплоен.";
+      return;
+    }
+    const total = known.reduce((a, d) => a + (d.count || 0), 0);
+    const max = known.reduce((a, d) => ((d.count || 0) > (a.count || 0) ? d : a), { count: 0, date: "—" });
+    sum.textContent =
+      `Всего за ${ACTIVITY_DAYS} дней: ${total} · в среднем ${Math.round(total / ACTIVITY_DAYS)}/день · максимум ${max.count} (${max.date})`;
+  } catch (err) {
+    el.innerHTML = "";
+    handleErr("Не удалось построить аналитику (нужен индекс messages.timestamp)")(err);
+  }
+}
+
+function startActivity() {
+  $("btn-activity-refresh").addEventListener("click", loadActivity);
+  loadActivity();
+}
+
+/* ------------------------------------------------------------------ */
 /* Секция «Блокировки» — список globalBlocks и ручной бан по UID       */
 /* ------------------------------------------------------------------ */
 
 let blocksUnsub = null;
 
 function startBlocks() {
+  // НОВОЕ (причины блокировок): выпадающий список стандартных причин.
+  populateBlockReasonSelect($("block-reason-code"));
   $("form-block-uid").addEventListener("submit", async (e) => {
     e.preventDefault();
     const uid = $("block-uid").value.trim();
-    const reason = $("block-reason").value.trim();
+    const code = $("block-reason-code").value;
+    const text = $("block-reason").value.trim();
     if (!uid) return toast("Укажите UID пользователя", false);
+    const base = blockReasonByCode(code);
+    if (base.code === "OTHER" && !text) return toast("Укажите текст причины для «Другое»", false);
+    const reason = blockReasonText({ code: base.code, label: base.label, description: base.description, text });
     try {
-      await setGlobalBlock(uid, reason);
+      await setGlobalBlock(uid, reason, base.code, text);
       logAdminAction("USER_GLOBALLY_BLOCKED", reason, uid);
       toast("Аккаунт заблокирован");
       $("block-uid").value = "";
@@ -4694,6 +5041,7 @@ function refreshNiceSelect(select) {
 
 function startPanel() {
   startSummary();
+  startActivity();
   startSettings();
   startNews();
   startPolls();

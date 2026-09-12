@@ -14,6 +14,7 @@ import app.yodo.messenger.domain.repository.SendMessageResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -787,13 +788,16 @@ class MessageRepositoryImpl @Inject constructor(
             }
             // НОВОЕ (история удалённых сообщений): архивируем каждое сообщение
             // перед мягким удалением (best-effort — сбой архива не ломает удаление).
-            refs.chunked(100).forEach { chunk ->
+            // whereIn по documentId — пачками по 10 (лимит whereIn), чтобы не
+            // делать по одному чтению на сообщение.
+            val messagesCol = firestore.collection("chats").document(chatId).collection("messages")
+            messageIds.chunked(10).forEach { chunk ->
                 val snapshots = try {
-                    firestore.getAll(*chunk.toTypedArray()).await()
+                    messagesCol.whereIn(FieldPath.documentId(), chunk).get().await()
                 } catch (e: Exception) {
-                    emptyList()
+                    null
                 }
-                snapshots.filter { it.exists() }.forEach { snap ->
+                snapshots?.documents?.filter { it.exists() }?.forEach { snap ->
                     archiveDeletedMessage(
                         chatId, snap.id, snap,
                         reason = if (deletedByAdmin) "RULES" else "OTHER",
