@@ -44,8 +44,8 @@
   (hardDeleteMessage) запись в архив не создаёт — по своему назначению.
 - Firestore: новые правила — config/autoModeration (чтение всем авторизованным,
   запись двум админам) и корневая коллекция deletedMessages (создание —
-  автором удаления, чтение/восстановление/очистка — админам); новый
-  collection-group индекс messages(timestamp DESC) для сканирования
+  автором удаления, чтение/восстановление/очистка — админам); collection-group
+  индекс messages(timestamp) (single-field index controls) для сканирования
   автофильтром.
 - Аудит: новые типы MESSAGE_DELETED_WITH_REASON, MESSAGE_RESTORED,
   AUTO_FILTER_RULE_SAVED, AUTO_FILTER_MESSAGES_DELETED, DELETED_HISTORY_CLEANED.
