@@ -190,6 +190,13 @@ const AUDIT_LABELS = {
   CHANNEL_POST_DELETED: "Удаление поста в официальном канале",
   ADMIN_BROADCAST_QUEUED: "Рассылка из Push-центра",
   REPORT_BULK_MESSAGES_DELETED: "Массовое удаление сообщений",
+  // НОВОЕ (автофильтр и история удалённых): удаление с причиной, восстановление
+  // из истории, правка правил автофильтра, автоудаление и очистка архива.
+  MESSAGE_DELETED_WITH_REASON: "Удаление сообщения с причиной",
+  MESSAGE_RESTORED: "Восстановление удалённого сообщения",
+  AUTO_FILTER_RULE_SAVED: "Правка правил автофильтра",
+  AUTO_FILTER_MESSAGES_DELETED: "Автоудаление сообщений по фильтру",
+  DELETED_HISTORY_CLEANED: "Очистка истории удалённых (30 дней)",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -1752,21 +1759,38 @@ async function resolveReportAction(docSnap, action) {
   const r = docSnap.data();
   const chatId = docSnap.ref.parent.parent.id;
   const targetName = r.targetUserName || "пользователя";
-  const confirmText =
-    action === "deleteMessage"
-      ? `Удалить сообщение «${(r.targetMessagePreview || "").slice(0, 60)}» у ${targetName}? В чате появится «Сообщение удалено администратором».`
-      : action === "blockUser"
-        ? `Заблокировать аккаунт ${targetName}? ${r.isAppeal ? "Обжалование при этом будет отклонено. " : ""}Он не сможет пользоваться приложением.`
-        : `Отклонить жалобу на ${targetName}?`;
-  if (!confirm(confirmText)) return;
   try {
     if (action === "deleteMessage") {
+      // НОВОЕ (причины удаления): спрашиваем причину и сохраняем копию сообщения
+      // в историю удалённых (восстановление возможно 30 дней).
+      const pick = await askDeleteReason(
+        `Удалить сообщение «${(r.targetMessagePreview || "").slice(0, 60)}» у ${targetName}? В чате появится «Сообщение удалено администратором».`
+      );
+      if (!pick) return;
+      const msgSnap = await getDoc(doc(db, "chats", chatId, "messages", r.targetMessageId));
+      const entry = msgSnap.exists()
+        ? buildDeletedEntry(chatId, r.targetMessageId, msgSnap.data(), {
+            reason: pick.reason, reasonText: pick.reasonText, source: "WEB",
+          })
+        : null;
       await softDeleteMessage(chatId, r.targetMessageId);
+      if (entry) await archiveDeletedEntries([entry]);
       await refreshChatPreviewAfterDelete(chatId, r.targetMessageId);
       await finalizeReport(docSnap, "RESOLVED", "MESSAGE_DELETED", "Сообщение удалено администратором");
-      logAdminAction("REPORT_RESOLVED_MESSAGE_DELETED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
+      logAdminAction(
+        "MESSAGE_DELETED_WITH_REASON",
+        `Причина: ${DELETE_REASONS[pick.reason] || pick.reason}${pick.reasonText ? " — " + pick.reasonText : ""} (жалоба ${chatId}/${docSnap.id})`,
+        r.targetUserId, r.targetUserName
+      );
       toast("Сообщение удалено, жалоба закрыта");
-    } else if (action === "blockUser") {
+      return;
+    }
+    const confirmText =
+      action === "blockUser"
+        ? `Заблокировать аккаунт ${targetName}? ${r.isAppeal ? "Обжалование при этом будет отклонено. " : ""}Он не сможет пользоваться приложением.`
+        : `Отклонить жалобу на ${targetName}?`;
+    if (!confirm(confirmText)) return;
+    if (action === "blockUser") {
       await setGlobalBlock(r.targetUserId, "Нарушение правил по жалобе: " + (REPORT_REASONS[r.reason] || r.reason));
       await finalizeReport(docSnap, "RESOLVED", "USER_BANNED", "Аккаунт заблокирован администратором");
       logAdminAction("REPORT_RESOLVED_USER_BANNED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
@@ -1944,8 +1968,12 @@ async function bulkDeleteFind() {
       ref: d.ref,
       id: d.id,
       chatId: d.ref.parent.parent.id,
+      senderId: d.get("senderId") || "",
       timestamp: d.get("timestamp") || 0,
       preview: messagePreviewText(d.data()),
+      // НОВОЕ (история удалённых): сохраняем текст и (если небольшое) медиа,
+      // чтобы удалённое можно было восстановить из истории.
+      original: pickOriginalFields(d.data(), 200000),
     }));
     const chatCount = new Set(bulkDeleteMatches.map((m) => m.chatId)).size;
     const limited =
@@ -1994,13 +2022,11 @@ async function bulkDeleteRun() {
   }
   const matches = bulkDeleteMatches;
   const chatCount = new Set(matches.map((m) => m.chatId)).size;
-  if (
-    !confirm(
-      `Удалить ${matches.length} сообщений в ${chatCount} чатах? Отменить это нельзя: в переписке появится «Сообщение удалено администратором».`
-    )
-  ) {
-    return;
-  }
+  // НОВОЕ (причины удаления): одна причина на всю партию.
+  const pick = await askDeleteReason(
+    `Удалить ${matches.length} сообщений в ${chatCount} чатах? Отменить это нельзя: в переписке появится «Сообщение удалено администратором».`
+  );
+  if (!pick) return;
   const uid = $("bulk-del-uid").value.trim();
   const statusEl = $("bulk-del-status");
   $("btn-bulk-del-run").disabled = true;
@@ -2016,6 +2042,13 @@ async function bulkDeleteRun() {
       deleted += Math.min(BULK_DELETE_BATCH, matches.length - i);
       statusEl.textContent = `Удалено ${deleted} из ${matches.length}…`;
     }
+    // НОВОЕ (история удалённых): архивируем каждое удалённое сообщение с общей
+    // причиной, чтобы его можно было восстановить в течение 30 дней.
+    await archiveDeletedEntries(
+      matches.map((m) => deletedEntry(m.chatId, m.id, m.senderId, m.original, {
+        reason: pick.reason, reasonText: pick.reasonText, source: "WEB",
+      }))
+    );
     // Пересчёт превью списка чата нужен только там, где удалили последнее
     // сообщение, поэтому на чат достаточно самого свежего удалённого.
     const newestPerChat = new Map();
@@ -2033,7 +2066,7 @@ async function bulkDeleteRun() {
     }
     logAdminAction(
       "REPORT_BULK_MESSAGES_DELETED",
-      `Массовое удаление: ${deleted} сообщений в ${chatCount} чатах`,
+      `Массовое удаление: ${deleted} сообщений в ${chatCount} чатах · причина: ${DELETE_REASONS[pick.reason] || pick.reason}${pick.reasonText ? " — " + pick.reasonText : ""}`,
       uid,
       await resolveUserName(uid, "")
     );
@@ -2050,6 +2083,532 @@ async function bulkDeleteRun() {
   } finally {
     $("btn-bulk-del-find").disabled = false;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Причины удаления, история удалённых и автофильтр                    */
+/* ------------------------------------------------------------------ */
+
+// НОВОЕ (причины удаления): стандартный набор причин, который предлагается при
+// любом удалении сообщения. Ключи совпадают с Android-константами истории
+// удалённых (MessageRepositoryImpl.archiveDeletedMessage) — менять согласованно.
+const DELETE_REASONS = {
+  SPAM: "Спам",
+  INSULT: "Оскорбление",
+  NSFW: "NSFW",
+  RULES: "Нарушение правил",
+  OTHER: "Другое",
+};
+// Для отображения в истории: плюс причина, которую проставляет автофильтр.
+const DELETE_REASONS_WITH_AUTO = Object.assign({ AUTO: "Автофильтр" }, DELETE_REASONS);
+const DELETED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
+const AUTOFILTER_SCAN_LIMIT = 200;
+
+function reasonLabel(entry) {
+  if (entry.source === "AUTO" && !DELETE_REASONS[entry.reason]) return "Автофильтр";
+  return DELETE_REASONS_WITH_AUTO[entry.reason] || entry.reason || "?";
+}
+
+/**
+ * Модалка выбора причины удаления. Возвращает Promise с { reason, reasonText }
+ * либо null, если админ отменил. Кнопка «Удалить» сама служит подтверждением.
+ */
+function askDeleteReason(subtitle) {
+  return new Promise((resolve) => {
+    const overlay = $("delete-reason-overlay");
+    const options = $("delete-reason-options");
+    const customText = $("delete-reason-text");
+    $("delete-reason-sub").textContent = subtitle || "";
+    customText.value = "";
+    customText.classList.add("hidden");
+    let selected = "RULES";
+    options.innerHTML = "";
+    Object.keys(DELETE_REASONS).forEach((key) => {
+      const label = document.createElement("label");
+      label.className = "radio-row";
+      label.innerHTML =
+        `<input type="radio" name="delete-reason" value="${key}"${key === selected ? " checked" : ""}> ${esc(DELETE_REASONS[key])}`;
+      label.querySelector("input").addEventListener("change", () => {
+        selected = key;
+        customText.classList.toggle("hidden", key !== "OTHER");
+      });
+      options.appendChild(label);
+    });
+    overlay.classList.remove("hidden");
+    const onOk = () => {
+      if (selected === "OTHER" && !customText.value.trim()) {
+        toast("Укажите причину в поле «Другое»", false);
+        return;
+      }
+      finish({ reason: selected, reasonText: selected === "OTHER" ? customText.value.trim() : "" });
+    };
+    const onCancel = () => finish(null);
+    const onOverlay = (e) => { if (e.target === overlay) finish(null); };
+    const onKey = (e) => { if (e.key === "Escape") finish(null); };
+    function finish(value) {
+      overlay.classList.add("hidden");
+      $("btn-delete-reason-ok").removeEventListener("click", onOk);
+      $("btn-delete-reason-cancel").removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onOverlay);
+      document.removeEventListener("keydown", onKey);
+      resolve(value);
+    }
+    $("btn-delete-reason-ok").addEventListener("click", onOk);
+    $("btn-delete-reason-cancel").addEventListener("click", onCancel);
+    overlay.addEventListener("click", onOverlay);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+/**
+ * Поля сообщения, которые мягкое удаление стирает, — их и нужно сохранить в
+ * архив, чтобы можно было восстановить. Медиа (base64) может быть тяжёлым:
+ * пишем его, только если запись укладывается в лимит документа Firestore
+ * (~1 МиБ); иначе текст восстановится, а медиа — нет (mediaSkipped).
+ */
+function pickOriginalFields(m, maxMediaChars = 700000) {
+  const media = {};
+  ["imageBase64", "fileBase64", "fileName", "fileMimeType", "fileSizeBytes", "locationLat", "locationLng"]
+    .forEach((key) => {
+      if (m[key] !== undefined && m[key] !== null) media[key] = m[key];
+    });
+  const out = {
+    text: typeof m.text === "string" ? m.text : "",
+    preview: messagePreviewText(m),
+  };
+  if (Object.keys(media).length) {
+    let weight = 0;
+    Object.values(media).forEach((v) => { weight += typeof v === "string" ? v.length : 16; });
+    if (weight < maxMediaChars) out.media = media;
+    else out.mediaSkipped = true;
+  }
+  return out;
+}
+
+/** Архивная запись истории удалённых — формат 1:1 с Android (archiveDeletedMessage). */
+function deletedEntry(chatId, messageId, senderId, original, opts) {
+  const entry = {
+    chatId,
+    messageId,
+    senderId: senderId || "",
+    preview: original.preview || "",
+    originalText: original.text || "",
+    reason: opts.reason || "OTHER",
+    reasonText: opts.reasonText || "",
+    source: opts.source || "WEB",
+    deletedBy: auth.currentUser ? auth.currentUser.uid : "",
+    deletedByName: adminActorName || (auth.currentUser ? auth.currentUser.email || "" : "Админ"),
+    deletedAt: Date.now(),
+    restored: false,
+  };
+  if (original.media) entry.media = original.media;
+  if (original.mediaSkipped) entry.mediaSkipped = true;
+  return entry;
+}
+
+function buildDeletedEntry(chatId, messageId, m, opts) {
+  return deletedEntry(chatId, messageId, m.senderId || "", pickOriginalFields(m), opts);
+}
+
+/** Best-effort запись в архив: ошибка архива не должна ломать само удаление. */
+async function archiveDeletedEntries(entries) {
+  for (const entry of entries) {
+    try {
+      await addDoc(collection(db, "deletedMessages"), entry);
+    } catch (e) { /* best-effort */ }
+  }
+}
+
+/* ---------------------------- Автофильтр ---------------------------- */
+
+const AUTOFILTER_DOC = "config/autoModeration";
+const AUTOFILTER_TYPES = {
+  LINK: "Ссылка / подстрока",
+  DOMAIN: "Домен",
+  TEXT: "Слово / фраза",
+  REGEX: "Регулярное выражение",
+};
+let autofilterModel = { enabled: false, rules: [] };
+let autofilterMatches = [];
+
+function autofilterNewId() {
+  return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+/** Совпадение текста с одним правилом — та же семантика, что в Android (ruleMatches). */
+function ruleMatches(rule, text) {
+  if (!rule || !rule.pattern || !text) return false;
+  const type = (rule.type || "LINK").toUpperCase();
+  if (type === "REGEX") {
+    try { return new RegExp(rule.pattern, "i").test(text); } catch (e) { return false; }
+  }
+  const pattern = String(rule.pattern).toLowerCase();
+  if (type === "DOMAIN") {
+    const hosts = text.match(/(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi) || [];
+    return hosts.some((h) => {
+      const host = h.toLowerCase().replace(/^https?:\/\//, "");
+      return host === pattern || host.endsWith("." + pattern) || host.includes(pattern);
+    });
+  }
+  return String(text).toLowerCase().includes(pattern);
+}
+
+function activeAutofilterRules() {
+  return autofilterModel.rules.filter((r) => r && r.enabled !== false && r.pattern);
+}
+
+function firstMatchingRule(text) {
+  return activeAutofilterRules().find((r) => ruleMatches(r, text)) || null;
+}
+
+function renderAutofilter() {
+  $("autofilter-enabled").checked = autofilterModel.enabled === true;
+  const el = $("autofilter-rules");
+  const rules = autofilterModel.rules;
+  if (!rules.length) {
+    el.innerHTML = '<p class="empty-note">Правил пока нет — добавьте первое.</p>';
+    return;
+  }
+  el.innerHTML = "";
+  rules.forEach((rule) => {
+    const row = document.createElement("div");
+    row.className = "item";
+    const disabled = rule.enabled === false;
+    row.innerHTML = `
+      <div class="autofilter-rule-row">
+        <span class="badge badge-dim">${esc(AUTOFILTER_TYPES[(rule.type || "LINK").toUpperCase()] || rule.type || "?")}</span>
+        <span class="autofilter-pattern">${esc(rule.pattern || "")}</span>
+        <span class="badge ${disabled ? "badge-dim" : "badge-green"}">${esc(DELETE_REASONS[rule.reason] || rule.reason || "Нарушение правил")}</span>
+        <span class="item-sub">${disabled ? "выключено" : "включено"}</span>
+      </div>`;
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn-secondary";
+    toggleBtn.textContent = disabled ? "Включить" : "Выключить";
+    toggleBtn.addEventListener("click", () => {
+      rule.enabled = disabled;
+      saveAutofilter("Переключение правила: " + (rule.pattern || ""));
+    });
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-danger";
+    delBtn.textContent = "Удалить";
+    delBtn.addEventListener("click", () => {
+      if (!confirm("Удалить правило «" + (rule.pattern || "") + "»?")) return;
+      autofilterModel.rules = autofilterModel.rules.filter((r) => r !== rule);
+      saveAutofilter("Удаление правила: " + (rule.pattern || ""));
+    });
+    actions.appendChild(toggleBtn);
+    actions.appendChild(delBtn);
+    row.appendChild(actions);
+    el.appendChild(row);
+  });
+}
+
+async function loadAutofilter() {
+  try {
+    const snap = await getDoc(doc(db, AUTOFILTER_DOC));
+    const d = snap.exists() ? snap.data() : {};
+    autofilterModel = {
+      enabled: d.enabled === true,
+      rules: Array.isArray(d.rules) ? d.rules : [],
+    };
+  } catch (err) {
+    handleErr("Не удалось загрузить правила автофильтра")(err);
+    autofilterModel = { enabled: false, rules: [] };
+  }
+  renderAutofilter();
+}
+
+async function saveAutofilter(details) {
+  try {
+    await setDoc(doc(db, AUTOFILTER_DOC), {
+      enabled: autofilterModel.enabled === true,
+      rules: autofilterModel.rules,
+      updatedAt: Date.now(),
+      updatedByName: adminActorName || (auth.currentUser ? auth.currentUser.email || "" : "Админ"),
+    });
+    renderAutofilter();
+    logAdminAction("AUTO_FILTER_RULE_SAVED", details || "Правила автофильтра");
+    toast("Правила автофильтра сохранены");
+  } catch (err) {
+    handleErr("Не удалось сохранить правила автофильтра")(err);
+  }
+}
+
+function renderAutofilterPreview() {
+  const el = $("autofilter-preview");
+  if (!autofilterMatches.length) { el.innerHTML = ""; return; }
+  el.innerHTML = "";
+  autofilterMatches.slice(0, 50).forEach((m) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `
+      <div class="item-head">
+        <span class="item-title">${esc(m.preview || "(без текста)")}</span>
+        <span class="badge badge-yellow">${esc(AUTOFILTER_TYPES[(m.rule.type || "LINK").toUpperCase()] || m.rule.type || "?")}</span>
+        <span class="item-date">${fmtDate(m.timestamp)}</span>
+      </div>
+      <div class="item-sub">правило «${esc(m.rule.pattern || "")}» · причина: ${esc(DELETE_REASONS[m.rule.reason] || m.rule.reason || "Нарушение правил")} · чат ${esc(m.chatId)}</div>`;
+    el.appendChild(item);
+  });
+  if (autofilterMatches.length > 50) {
+    const note = document.createElement("p");
+    note.className = "empty-note";
+    note.textContent = `…и ещё ${autofilterMatches.length - 50} сообщений (в списке первые 50).`;
+    el.appendChild(note);
+  }
+}
+
+/** Проверка последних сообщений всех чатов на совпадение с правилами. */
+async function autofilterScan() {
+  const statusEl = $("autofilter-status");
+  const previewEl = $("autofilter-preview");
+  autofilterMatches = [];
+  $("btn-autofilter-apply").disabled = true;
+  statusEl.textContent = "";
+  if (!activeAutofilterRules().length) {
+    toast("Нет включённых правил автофильтра", false);
+    return;
+  }
+  setLoading(previewEl);
+  try {
+    const snap = await getDocs(
+      query(collectionGroup(db, "messages"), orderBy("timestamp", "desc"), limit(AUTOFILTER_SCAN_LIMIT))
+    );
+    // Уже удалённые не трогаем; в личных (E2EE) чатах текст пуст — они не видны.
+    const docs = snap.docs.filter((d) => d.get("isDeleted") !== true);
+    docs.forEach((d) => {
+      const m = d.data();
+      const rule = firstMatchingRule(typeof m.text === "string" ? m.text : "");
+      if (!rule) return;
+      autofilterMatches.push({
+        ref: d.ref,
+        id: d.id,
+        chatId: d.ref.parent.parent.id,
+        senderId: m.senderId || "",
+        timestamp: m.timestamp || 0,
+        preview: messagePreviewText(m),
+        rule,
+        original: pickOriginalFields(m, 200000),
+      });
+    });
+    statusEl.textContent = autofilterMatches.length
+      ? `Найдено сообщений: ${autofilterMatches.length} из ${docs.length} проверенных.`
+      : `Совпадений нет (проверено ${docs.length} сообщений).`;
+    renderAutofilterPreview();
+    $("btn-autofilter-apply").disabled = !autofilterMatches.length;
+  } catch (err) {
+    previewEl.innerHTML = "";
+    handleErr("Не удалось проверить сообщения (нужен индекс messages.timestamp)")(err);
+  }
+}
+
+async function autofilterApply() {
+  if (!autofilterMatches.length) return;
+  const matches = autofilterMatches;
+  if (!confirm(`Удалить ${matches.length} сообщений, совпавших с правилами автофильтра? Причина у каждого — из сработавшегося правила.`)) return;
+  const statusEl = $("autofilter-status");
+  $("btn-autofilter-apply").disabled = true;
+  $("btn-autofilter-scan").disabled = true;
+  let deleted = 0;
+  try {
+    for (let i = 0; i < matches.length; i += BULK_DELETE_BATCH) {
+      const batch = writeBatch(db);
+      matches.slice(i, i + BULK_DELETE_BATCH).forEach((m) => batch.update(m.ref, softDeletePayload()));
+      await batch.commit();
+      deleted += Math.min(BULK_DELETE_BATCH, matches.length - i);
+      statusEl.textContent = `Удалено ${deleted} из ${matches.length}…`;
+    }
+    await archiveDeletedEntries(
+      matches.map((m) => deletedEntry(m.chatId, m.id, m.senderId, m.original, {
+        reason: m.rule.reason || "RULES", reasonText: "", source: "AUTO",
+      }))
+    );
+    const newestPerChat = new Map();
+    matches.forEach((m) => {
+      const cur = newestPerChat.get(m.chatId);
+      if (!cur || m.timestamp > cur.timestamp) newestPerChat.set(m.chatId, m);
+    });
+    for (const [chatId, m] of newestPerChat) {
+      try { await refreshChatPreviewAfterDelete(chatId, m.id); } catch (e) { /* админ не участник */ }
+    }
+    logAdminAction("AUTO_FILTER_MESSAGES_DELETED", `Автофильтр: удалено ${deleted} сообщений`);
+    toast(`Автофильтр удалил сообщений: ${deleted}`);
+    statusEl.textContent = `Готово: удалено ${deleted} сообщений.`;
+    autofilterMatches = [];
+    renderAutofilterPreview();
+  } catch (err) {
+    handleErr("Не удалось удалить сообщения автофильтром")(err);
+  } finally {
+    $("btn-autofilter-scan").disabled = false;
+  }
+}
+
+/* ---------------------- История удалённых ---------------------- */
+
+let deletedMessagesCache = [];
+let deletedUnsub = null;
+const deletedNames = new Map();
+
+function deletedSenderLabel(uid, spanEl) {
+  if (!uid) { spanEl.textContent = "—"; return; }
+  if (deletedNames.has(uid)) { spanEl.textContent = deletedNames.get(uid); return; }
+  spanEl.textContent = "…";
+  resolveUserName(uid, "").then((name) => {
+    deletedNames.set(uid, name);
+    spanEl.textContent = name;
+  });
+}
+
+function deletedActorLabel(d, spanEl) {
+  if (d.deletedByName) { spanEl.textContent = d.deletedByName; return; }
+  deletedSenderLabel(d.deletedBy, spanEl);
+}
+
+function renderDeletedHistory() {
+  const el = $("deleted-list");
+  if (!deletedMessagesCache.length) {
+    el.innerHTML = '<p class="empty-note">Удалённых сообщений пока нет.</p>';
+    return;
+  }
+  el.innerHTML = "";
+  deletedMessagesCache.forEach((docSnap) => {
+    const d = docSnap.data();
+    const expired = Date.now() - (d.deletedAt || 0) > DELETED_RETENTION_MS;
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `
+      <div class="item-head">
+        <span class="item-title">${esc(d.preview || "(без текста)")}</span>
+        <span class="badge badge-dim">${esc(reasonLabel(d))}</span>
+        <span class="item-date">${fmtDate(d.deletedAt)}</span>
+      </div>
+      <div class="item-sub">чат <span class="deleted-chat"></span> · автор <span class="deleted-sender"></span> · удалил <span class="deleted-actor"></span>${d.source === "AUTO" ? " · автофильтр" : ""}</div>
+      ${d.reasonText ? `<div class="item-text">Причина: ${esc(d.reasonText)}</div>` : ""}
+      ${d.mediaSkipped ? '<div class="item-text">⚠️ Медиа не сохранено в архив — восстановится только текст.</div>' : ""}`;
+    item.querySelector(".deleted-chat").textContent = d.chatId || "—";
+    deletedSenderLabel(d.senderId, item.querySelector(".deleted-sender"));
+    deletedActorLabel(d, item.querySelector(".deleted-actor"));
+    if (d.restored) {
+      const note = document.createElement("div");
+      note.className = "deleted-restored";
+      note.textContent = `✅ Восстановлено${d.restoredAt ? " " + fmtDate(d.restoredAt) : ""}${d.restoredByName ? " — " + d.restoredByName : ""}`;
+      item.appendChild(note);
+    } else if (expired) {
+      const note = document.createElement("div");
+      note.className = "deleted-restored";
+      note.textContent = "⏳ Срок восстановления (30 дней) истёк.";
+      item.appendChild(note);
+    } else {
+      const actions = document.createElement("div");
+      actions.className = "item-actions deleted-entry-actions";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary";
+      btn.textContent = "Восстановить";
+      btn.addEventListener("click", () => restoreDeletedMessage(docSnap));
+      actions.appendChild(btn);
+      item.appendChild(actions);
+    }
+    el.appendChild(item);
+  });
+}
+
+async function restoreDeletedMessage(docSnap) {
+  const d = docSnap.data();
+  if (!confirm(`Восстановить сообщение в чате ${d.chatId}? Оно снова станет видно участникам.`)) return;
+  try {
+    const restore = { isDeleted: false, text: d.originalText || "", deletedByAdmin: false };
+    // Медиа восстанавливаем, если оно было сохранено в архиве.
+    if (d.media && typeof d.media === "object") Object.assign(restore, d.media);
+    await updateDoc(doc(db, "chats", d.chatId, "messages", d.messageId), restore);
+    await updateDoc(docSnap.ref, {
+      restored: true,
+      restoredAt: Date.now(),
+      restoredBy: auth.currentUser ? auth.currentUser.uid : "",
+      restoredByName: adminActorName || (auth.currentUser ? auth.currentUser.email || "" : "Админ"),
+    });
+    // Возвращаем корректное превью списка чатов (если это было последнее сообщение).
+    await refreshChatPreviewAfterDelete(d.chatId, d.messageId);
+    logAdminAction("MESSAGE_RESTORED", `Восстановлено сообщение ${d.chatId}/${d.messageId}`, d.senderId, await resolveUserName(d.senderId, ""));
+    toast("Сообщение восстановлено");
+  } catch (err) {
+    handleErr("Не удалось восстановить сообщение")(err);
+  }
+}
+
+async function deletedHistoryCleanup() {
+  const cutoff = Date.now() - DELETED_RETENTION_MS;
+  if (!confirm("Удалить из архива записи старше 30 дней? Восстановить их уже нельзя.")) return;
+  try {
+    const snap = await getDocs(
+      query(collection(db, "deletedMessages"), where("deletedAt", "<", cutoff), limit(400))
+    );
+    if (!snap.size) { toast("Записей старше 30 дней нет"); return; }
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    logAdminAction("DELETED_HISTORY_CLEANED", `Удалено архивных записей: ${snap.size}`);
+    toast(`Удалено архивных записей: ${snap.size}`);
+  } catch (err) {
+    handleErr("Не удалось очистить архив")(err);
+  }
+}
+
+/** Инициализация блока «Причины удаления» / «Автофильтр» / «История удалённых». */
+function startModerationExtras() {
+  // Стандартный набор причин — только для справки (он зашит в модалку удаления).
+  const reasonList = $("reason-list");
+  reasonList.innerHTML = "";
+  Object.keys(DELETE_REASONS).forEach((key) => {
+    const row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML = `<div class="item-head"><span class="item-title">${esc(DELETE_REASONS[key])}</span></div>`;
+    reasonList.appendChild(row);
+  });
+
+  // Автофильтр.
+  const reasonSelect = $("autofilter-reason");
+  reasonSelect.innerHTML = "";
+  Object.keys(DELETE_REASONS).forEach((key) => {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = DELETE_REASONS[key];
+    reasonSelect.appendChild(opt);
+  });
+  $("autofilter-enabled").addEventListener("change", () => {
+    autofilterModel.enabled = $("autofilter-enabled").checked;
+    saveAutofilter(autofilterModel.enabled ? "Автофильтр включён" : "Автофильтр выключен");
+  });
+  $("form-autofilter-rule").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const pattern = $("autofilter-pattern").value.trim();
+    if (!pattern) return;
+    autofilterModel.rules.push({
+      id: autofilterNewId(),
+      type: $("autofilter-type").value,
+      pattern,
+      reason: reasonSelect.value,
+      enabled: true,
+    });
+    $("autofilter-pattern").value = "";
+    saveAutofilter("Добавлено правило: " + pattern);
+  });
+  $("btn-autofilter-scan").addEventListener("click", autofilterScan);
+  $("btn-autofilter-apply").addEventListener("click", autofilterApply);
+  loadAutofilter();
+
+  // История удалённых.
+  setLoading($("deleted-list"));
+  deletedUnsub = onSnapshot(
+    query(collection(db, "deletedMessages"), orderBy("deletedAt", "desc"), limit(200)),
+    (snap) => { deletedMessagesCache = snap.docs; renderDeletedHistory(); },
+    handleErr("Не удалось загрузить историю удалённых")
+  );
+  $("btn-deleted-cleanup").addEventListener("click", deletedHistoryCleanup);
 }
 
 // Количество висящих жалоб для бейджа — тот же запрос, что и лента.
@@ -2245,6 +2804,9 @@ function startReports() {
   // НОВОЕ (расширенная модерация): массовое удаление сообщений по периоду.
   $("btn-bulk-del-find").addEventListener("click", bulkDeleteFind);
   $("btn-bulk-del-run").addEventListener("click", bulkDeleteRun);
+
+  // НОВОЕ (расширенная модерация): причины удаления, автофильтр, история удалённых.
+  startModerationExtras();
 }
 
 /* ------------------------------------------------------------------ */

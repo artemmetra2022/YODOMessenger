@@ -558,6 +558,34 @@ h1 { font-size: 24px; margin-bottom: 20px; }
 .ctx-msg-name { font-weight: 600; word-break: break-word; }
 .ctx-msg .item-date { margin-left: auto; }
 
+/* ===== Причины удаления, автофильтр, история удалённых ===== */
+
+.reason-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin: 4px 0 10px;
+}
+.reason-options .radio-row { padding: 6px 4px; border-radius: 8px; cursor: pointer; }
+.reason-options .radio-row:hover { background: var(--bg-input); }
+
+.autofilter-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.autofilter-rule-row .autofilter-pattern {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+.autofilter-rule-row .item-sub { margin-left: auto; }
+
+.deleted-entry-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.deleted-restored { color: var(--text-dim); font-size: 13px; }
+
 /* ===== Карточка пользователя ===== */
 
 .user-card-row {

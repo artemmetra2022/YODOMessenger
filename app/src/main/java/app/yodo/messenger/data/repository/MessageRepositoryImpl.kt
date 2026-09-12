@@ -332,7 +332,15 @@ class MessageRepositoryImpl @Inject constructor(
         topicId?.let { data["topicId"] = it }
         // НОВОЕ (сквозное шифрование): для личных чатов шифруем текст под ключи участников.
         tryEncryptTextData(chatId, data)
-        return sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent, topicId)
+        val result = sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent, topicId)
+        // НОВОЕ (автофильтр сообщений): если текст совпал с правилом из
+        // config/autoModeration — сразу удаляем отправленное сообщение и пишем
+        // запись в историю удалённых. Проверяем открытый текст ДО шифрования,
+        // поэтому фильтр работает и в личных (E2EE) чатах.
+        if (result is SendMessageResult.Success) {
+            applyAutoFilter(chatId, result.messageId, trimmed)
+        }
+        return result
     }
 
     /**
@@ -734,21 +742,20 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun deleteMessage(chatId: String, messageId: String, deletedByAdmin: Boolean): SendMessageResult {
         return try {
-            firestore.collection("chats").document(chatId)
+            val messageRef = firestore.collection("chats").document(chatId)
                 .collection("messages").document(messageId)
-                .update(mapOf(
-                    "isDeleted" to true, "text" to "",
-                    // НОВОЕ (баг 10): административное удаление помечаем отдельным флагом,
-                    // чтобы в чате показать «Сообщение удалено администратором».
-                    "deletedByAdmin" to deletedByAdmin,
-                    "imageBase64" to FieldValue.delete(),
-                    "fileBase64" to FieldValue.delete(),
-                    "fileName" to FieldValue.delete(),
-                    "fileMimeType" to FieldValue.delete(),
-                    "fileSizeBytes" to FieldValue.delete(),
-                    "locationLat" to FieldValue.delete(),
-                    "locationLng" to FieldValue.delete()
-                )).await()
+            // НОВОЕ (история удалённых сообщений): сохраняем копию сообщения в
+            // архив (deletedMessages) ДО мягкого удаления — иначе текст и медиа
+            // будут уже стёрты и восстановить их из веб-панели не получится.
+            val snapshot = messageRef.get().await()
+            if (snapshot.exists()) {
+                archiveDeletedMessage(
+                    chatId, messageId, snapshot,
+                    reason = if (deletedByAdmin) "RULES" else "OTHER",
+                    archiveSource = "ANDROID"
+                )
+            }
+            messageRef.update(softDeleteFields(deletedByAdmin)).await()
             // ИСПРАВЛЕНО (превью в списке чатов «врёт» после удаления): раньше удаление
             // чистило только сам документ сообщения, а chats/{chatId}.lastMessage — то, что
             // реально читает список чатов под именем собеседника, — не трогалось вообще.
@@ -778,22 +785,26 @@ class MessageRepositoryImpl @Inject constructor(
             val refs = messageIds.map { id ->
                 firestore.collection("chats").document(chatId).collection("messages").document(id)
             }
+            // НОВОЕ (история удалённых сообщений): архивируем каждое сообщение
+            // перед мягким удалением (best-effort — сбой архива не ломает удаление).
+            refs.chunked(100).forEach { chunk ->
+                val snapshots = try {
+                    firestore.getAll(*chunk.toTypedArray()).await()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                snapshots.filter { it.exists() }.forEach { snap ->
+                    archiveDeletedMessage(
+                        chatId, snap.id, snap,
+                        reason = if (deletedByAdmin) "RULES" else "OTHER",
+                        archiveSource = "ANDROID"
+                    )
+                }
+            }
             refs.chunked(500).forEach { chunk ->
                 val batch = firestore.batch()
                 chunk.forEach { ref ->
-                    batch.update(ref, mapOf(
-                        "isDeleted" to true,
-                        "text" to "",
-                        // НОВОЕ (баг 10): как и в deleteMessage — флаг административного удаления.
-                        "deletedByAdmin" to deletedByAdmin,
-                        "imageBase64" to FieldValue.delete(),
-                        "fileBase64" to FieldValue.delete(),
-                        "fileName" to FieldValue.delete(),
-                        "fileMimeType" to FieldValue.delete(),
-                        "fileSizeBytes" to FieldValue.delete(),
-                        "locationLat" to FieldValue.delete(),
-                        "locationLng" to FieldValue.delete()
-                    ))
+                    batch.update(ref, softDeleteFields(deletedByAdmin))
                 }
                 batch.commit().await()
             }
@@ -802,6 +813,154 @@ class MessageRepositoryImpl @Inject constructor(
             refreshLastMessagePreviewIfNeeded(chatId, messageIds)
             SendMessageResult.Success()
         } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось удалить сообщения")) }
+    }
+
+    // НОВОЕ (причины удаления + автофильтр): поля «мягкого» удаления. Один и тот
+    // же набор используют точечное, массовое и автоматическое удаление — 1:1 с
+    // web/admin.js softDeletePayload. deletedByAdmin=true в чате показывается как
+    // «Сообщение удалено администратором» (НОВОЕ, баг 10).
+    private fun softDeleteFields(deletedByAdmin: Boolean): Map<String, Any?> = mapOf(
+        "isDeleted" to true,
+        "text" to "",
+        "deletedByAdmin" to deletedByAdmin,
+        "imageBase64" to FieldValue.delete(),
+        "fileBase64" to FieldValue.delete(),
+        "fileName" to FieldValue.delete(),
+        "fileMimeType" to FieldValue.delete(),
+        "fileSizeBytes" to FieldValue.delete(),
+        "locationLat" to FieldValue.delete(),
+        "locationLng" to FieldValue.delete()
+    )
+
+    /**
+     * НОВОЕ (история удалённых сообщений): сохраняет копию сообщения в корневую
+     * коллекцию deletedMessages ПЕРЕД мягким удалением, чтобы админ мог
+     * восстановить его из веб-панели в течение 30 дней. Формат 1:1 с
+     * web/admin.js (deletedEntry / pickOriginalFields): preview, originalText,
+     * media{...}, reason, reasonText, source, deletedBy, deletedAt, restored.
+     * Best-effort: сбой архива не должен превращать уже совершённое удаление в ошибку.
+     */
+    private suspend fun archiveDeletedMessage(
+        chatId: String,
+        messageId: String,
+        snapshot: DocumentSnapshot,
+        reason: String,
+        archiveSource: String
+    ) {
+        try {
+            val uid = firebaseAuth.currentUser?.uid ?: return
+            val m = snapshot.data ?: return
+            val preview = when {
+                m["encrypted"] == true -> "🔒 Сообщение"
+                (m["text"] as? String)?.isNotBlank() == true -> m["text"] as String
+                m["voiceBase64"] != null -> "🎤 Голосовое сообщение"
+                m["isViewOnce"] == true -> "📷 Фото (один просмотр)"
+                m["imagesBase64"] != null -> "📷 Фото (${(m["imagesBase64"] as? List<*>)?.size ?: 1})"
+                m["imageBase64"] != null -> "📷 Фото"
+                m["locationLat"] != null -> "📍 Геопозиция"
+                m["fileBase64"] != null -> "📎 ${m["fileName"] ?: "Файл"}"
+                else -> ""
+            }
+            val media = mutableMapOf<String, Any?>()
+            listOf(
+                "imageBase64", "fileBase64", "fileName", "fileMimeType",
+                "fileSizeBytes", "locationLat", "locationLng"
+            ).forEach { key -> m[key]?.let { media[key] = it } }
+            val entry = mutableMapOf<String, Any?>(
+                "chatId" to chatId,
+                "messageId" to messageId,
+                "senderId" to (m["senderId"] ?: ""),
+                "preview" to preview,
+                "originalText" to ((m["text"] as? String) ?: ""),
+                "reason" to reason,
+                "reasonText" to "",
+                "source" to archiveSource,
+                "deletedBy" to uid,
+                "deletedAt" to System.currentTimeMillis(),
+                "restored" to false
+            )
+            // Медиа (base64) может не уместиться в лимит документа Firestore (~1 МиБ):
+            // тогда сохраняем только текст, а факт пропуска помечаем mediaSkipped.
+            if (media.isNotEmpty()) {
+                val weight = media.values.sumOf { if (it is String) it.length else 16 }
+                if (weight < 700_000) entry["media"] = media else entry["mediaSkipped"] = true
+            }
+            firestore.collection("deletedMessages").add(entry).await()
+        } catch (e: Exception) {
+            android.util.Log.w("MessageRepositoryImpl", "archiveDeletedMessage failed", e)
+        }
+    }
+
+    // НОВОЕ (автофильтр сообщений): правила из config/autoModeration, кэш ~1 минута,
+    // чтобы не читать документ при каждой отправке.
+    private data class AutoFilterRule(val type: String, val pattern: String, val reason: String)
+    private data class AutoFilterConfig(val enabled: Boolean, val rules: List<AutoFilterRule>)
+
+    @Volatile private var autoFilterCache: AutoFilterConfig? = null
+    @Volatile private var autoFilterCacheAt: Long = 0L
+
+    private suspend fun loadAutoFilterConfig(): AutoFilterConfig {
+        val now = System.currentTimeMillis()
+        autoFilterCache?.let { if (now - autoFilterCacheAt < 60_000) return it }
+        return try {
+            val snap = firestore.collection("config").document("autoModeration").get().await()
+            val raw = snap.get("rules") as? List<*> ?: emptyList<Any?>()
+            val rules = raw.mapNotNull { item ->
+                val map = item as? Map<*, *> ?: return@mapNotNull null
+                if (map["enabled"] == false) return@mapNotNull null
+                val pattern = (map["pattern"] as? String)?.takeIf { it.isNotBlank() }
+                    ?: return@mapNotNull null
+                AutoFilterRule(
+                    type = (map["type"] as? String) ?: "LINK",
+                    pattern = pattern,
+                    reason = (map["reason"] as? String) ?: "RULES"
+                )
+            }
+            AutoFilterConfig(snap.getBoolean("enabled") == true, rules)
+                .also { autoFilterCache = it; autoFilterCacheAt = now }
+        } catch (e: Exception) {
+            autoFilterCache ?: AutoFilterConfig(false, emptyList())
+        }
+    }
+
+    /** Семантика совпадения 1:1 с web/admin.js ruleMatches. */
+    private fun ruleMatches(rule: AutoFilterRule, text: String): Boolean = try {
+        when (rule.type.uppercase()) {
+            "REGEX" -> Regex(rule.pattern, RegexOption.IGNORE_CASE).containsMatchIn(text)
+            "DOMAIN" -> {
+                val hosts = Regex("(?:https?://)?([a-z0-9-]+(?:\\.[a-z0-9-]+)+)", RegexOption.IGNORE_CASE)
+                    .findAll(text).map { it.groupValues[1].lowercase() }
+                val pattern = rule.pattern.lowercase()
+                hosts.any { it == pattern || it.endsWith(".$pattern") || it.contains(pattern) }
+            }
+            else -> text.contains(rule.pattern, ignoreCase = true)
+        }
+    } catch (e: Exception) { false }
+
+    /**
+     * НОВОЕ (автофильтр сообщений): если включён config/autoModeration и только что
+     * отправленный текст совпал с правилом — тут же мягко удаляем это сообщение и
+     * пишем запись в историю удалённых (source = AUTO). Работает на клиенте
+     * отправителя, поэтому фильтруются и личные (E2EE) чаты: проверяем открытый
+     * текст до шифрования. Удалять чужие сообщения нельзя — только своё.
+     */
+    private suspend fun applyAutoFilter(chatId: String, messageId: String?, text: String) {
+        if (messageId.isNullOrBlank() || text.isBlank()) return
+        try {
+            val config = loadAutoFilterConfig()
+            if (!config.enabled || config.rules.isEmpty()) return
+            val rule = config.rules.firstOrNull { ruleMatches(it, text) } ?: return
+            val messageRef = firestore.collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+            val snapshot = messageRef.get().await()
+            if (snapshot.exists()) {
+                archiveDeletedMessage(chatId, messageId, snapshot, reason = rule.reason, archiveSource = "AUTO")
+            }
+            messageRef.update(softDeleteFields(deletedByAdmin = false)).await()
+            refreshLastMessagePreviewIfNeeded(chatId, listOf(messageId))
+        } catch (e: Exception) {
+            android.util.Log.w("MessageRepositoryImpl", "applyAutoFilter failed", e)
+        }
     }
 
     /**

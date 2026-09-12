@@ -376,6 +376,54 @@
           <p class="card-hint" id="bulk-del-status"></p>
           <div id="bulk-del-preview" class="item-list"></div>
         </div>
+
+        <!-- НОВОЕ (причины удаления): единый стандартный набор причин, который
+             предлагается при удалении сообщения (из жалобы, массово, автофильтром). -->
+        <div class="card">
+          <h2>Причины удаления</h2>
+          <p class="card-hint">Стандартный набор причин, который предлагается при любом удалении сообщения. Выбранная причина сохраняется в «Истории удалённых сообщений» и в журнале аудита.</p>
+          <div id="reason-list" class="item-list"></div>
+        </div>
+
+        <!-- НОВОЕ (автофильтр): паттерны автоудаления (небезопасные сайты, реклама). -->
+        <div class="card">
+          <h2>Автофильтр сообщений</h2>
+          <p class="card-hint">Паттерны для автоудаления сообщений (например, домены небезопасных сайтов или рекламные ссылки). Приложение проверяет текст при отправке, а панель умеет проверить уже отправленные сообщения. Личные чаты со сквозным шифрованием фильтруются только на устройстве отправителя — в панели их текст не виден.</p>
+          <label class="toggle-row">
+            <input type="checkbox" id="autofilter-enabled">
+            <span>Включить автофильтр</span>
+          </label>
+          <form id="form-autofilter-rule" class="form-col">
+            <div class="form-row">
+              <select id="autofilter-type">
+                <option value="LINK">Ссылка / подстрока</option>
+                <option value="DOMAIN">Домен</option>
+                <option value="TEXT">Слово / фраза</option>
+                <option value="REGEX">Регулярное выражение</option>
+              </select>
+              <select id="autofilter-reason"></select>
+            </div>
+            <input type="text" id="autofilter-pattern" placeholder="Например: bit.ly или http://bad-site.com" autocomplete="off" required>
+            <button type="submit" class="btn-primary">Добавить правило</button>
+          </form>
+          <div id="autofilter-rules" class="item-list"></div>
+          <div class="form-row">
+            <button type="button" class="btn-secondary" id="btn-autofilter-scan">Проверить последние 200 сообщений</button>
+            <button type="button" class="btn-danger" id="btn-autofilter-apply" disabled>Удалить найденные</button>
+          </div>
+          <p class="card-hint" id="autofilter-status"></p>
+          <div id="autofilter-preview" class="item-list"></div>
+        </div>
+
+        <!-- НОВОЕ (история удалённых): архив мягко удалённых с восстановлением на 30 дней. -->
+        <div class="card">
+          <div class="card-head">
+            <h2>История удалённых сообщений</h2>
+            <button type="button" class="btn-secondary" id="btn-deleted-cleanup">Очистить старше 30 дней</button>
+          </div>
+          <p class="card-hint">Мягко удалённые сообщения, включая удаления модераторов из приложения. Восстановить можно в течение 30 дней (показаны 200 последних записей). Медиа восстанавливается, если оно уместилось в лимит документа Firestore.</p>
+          <div id="deleted-list" class="item-list"></div>
+        </div>
       </section>
 
       <!-- СЕКЦИЯ: Поддержка (обращения и мягкие ограничения) -->
@@ -573,6 +621,20 @@
       </div>
       <p class="card-hint" id="report-context-sub"></p>
       <div id="report-context-messages" class="ctx-messages"></div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: причина удаления сообщения (стандартный набор причин) -->
+  <div id="delete-reason-overlay" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h2>Причина удаления</h2>
+      <p class="card-hint" id="delete-reason-sub"></p>
+      <div id="delete-reason-options" class="reason-options"></div>
+      <input type="text" id="delete-reason-text" placeholder="Свой текст причины (для «Другое»)" autocomplete="off" class="hidden">
+      <div class="modal-actions">
+        <button type="button" class="btn-link" id="btn-delete-reason-cancel">Отмена</button>
+        <button type="button" class="btn-danger" id="btn-delete-reason-ok">Удалить</button>
+      </div>
     </div>
   </div>
 

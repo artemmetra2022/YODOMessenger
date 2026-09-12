@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Poll
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
@@ -130,6 +131,12 @@ private fun iconFor(type: GlobalAdminActionType): ImageVector = when (type) {
     GlobalAdminActionType.SCHOOL_NEWS_DRAFT_SAVED -> Icons.Filled.Edit
     GlobalAdminActionType.SCHOOL_POLL_CLOSED -> Icons.Filled.Poll
     GlobalAdminActionType.SCHOOL_PUSH_RESENT -> Icons.Filled.Send
+    // НОВОЕ (причины удаления, автофильтр, история удалённых веб-админки).
+    GlobalAdminActionType.MESSAGE_DELETED_WITH_REASON -> Icons.Filled.Delete
+    GlobalAdminActionType.MESSAGE_RESTORED -> Icons.Filled.Restore
+    GlobalAdminActionType.AUTO_FILTER_RULE_SAVED -> Icons.Filled.Edit
+    GlobalAdminActionType.AUTO_FILTER_MESSAGES_DELETED -> Icons.Filled.DeleteSweep
+    GlobalAdminActionType.DELETED_HISTORY_CLEANED -> Icons.Filled.DeleteSweep
     // ИСПРАВЛЕНО (сборка APK): when по enum должен быть исчерпывающим — без
     // else добавление нового типа в GlobalAdminActionType ломало компиляцию.
     else -> Icons.Filled.Warning

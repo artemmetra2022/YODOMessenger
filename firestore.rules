@@ -39,6 +39,20 @@ service cloud.firestore {
       allow read: if isOfficialChannelAdmin();
     }
 
+    // НОВОЕ (история удалённых сообщений): корневая коллекция deletedMessages —
+    // архив мягко удалённых сообщений с возможностью восстановления в течение
+    // 30 дней (раздел «Жалобы» веб-админки). Запись создаёт КЛИЕНТ, который
+    // удаляет: админ из веб-панели либо модератор/автор из Android-приложения
+    // (MessageRepositoryImpl.archiveDeletedMessage), поэтому create разрешён
+    // любому авторизованному — но строго с deletedBy == своему uid, чтобы нельзя
+    // было подделать авторство удаления. Читать, помечать restored и чистить
+    // архив (записи старше 30 дней) могут только два главных админа.
+    match /deletedMessages/{entryId} {
+      allow read, update, delete: if isOfficialChannelAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.deletedBy == request.auth.uid;
+    }
+
     // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
     // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
     // сразу после полноэкранного просмотра — иначе фото так и останется читаемым на
@@ -214,6 +228,16 @@ service cloud.firestore {
     // документ и при пустом/недоступном значении остаётся на встроенном наборе.
     match /config/supportFaq {
       allow read: if true;
+      allow write: if isOfficialChannelAdmin();
+    }
+
+    // НОВОЕ (автофильтр сообщений): паттерны автоудаления (домены небезопасных
+    // сайтов, рекламные ссылки и т.п.). Читать должен каждый авторизованный
+    // клиент — Android проверяет текст при отправке (MessageRepositoryImpl.
+    // applyAutoFilter), а веб-админка управляет правилами и умеет сканировать
+    // уже отправленные сообщения. Меняют правила только два доверенных админа.
+    match /config/autoModeration {
+      allow read: if isSignedIn();
       allow write: if isOfficialChannelAdmin();
     }
 
