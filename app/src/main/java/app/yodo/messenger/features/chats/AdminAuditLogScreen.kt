@@ -17,8 +17,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Poll
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -115,6 +122,17 @@ private fun iconFor(type: GlobalAdminActionType): ImageVector = when (type) {
     GlobalAdminActionType.USER_GLOBALLY_BLOCKED -> Icons.Filled.Block
     GlobalAdminActionType.USER_GLOBALLY_UNBLOCKED -> Icons.Filled.PersonAdd
     GlobalAdminActionType.REQUIRE_EMAIL_VERIFICATION_CHANGED -> Icons.Filled.MarkEmailRead
+    GlobalAdminActionType.REPORT_RESOLVED_MESSAGE_DELETED -> Icons.Filled.Delete
+    GlobalAdminActionType.REPORT_RESOLVED_USER_BANNED -> Icons.Filled.Block
+    GlobalAdminActionType.REPORT_DISMISSED -> Icons.Filled.Close
+    GlobalAdminActionType.REPORT_BULK_MESSAGES_DELETED -> Icons.Filled.DeleteSweep
+    GlobalAdminActionType.SCHOOL_NEWS_PUBLISHED -> Icons.Filled.Send
+    GlobalAdminActionType.SCHOOL_NEWS_DRAFT_SAVED -> Icons.Filled.Edit
+    GlobalAdminActionType.SCHOOL_POLL_CLOSED -> Icons.Filled.Poll
+    GlobalAdminActionType.SCHOOL_PUSH_RESENT -> Icons.Filled.Send
+    // ИСПРАВЛЕНО (сборка APK): when по enum должен быть исчерпывающим — без
+    // else добавление нового типа в GlobalAdminActionType ломало компиляцию.
+    else -> Icons.Filled.Warning
 }
 
 @Composable

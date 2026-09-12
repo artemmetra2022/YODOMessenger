@@ -19,7 +19,10 @@ enum class GlobalAdminActionType(val label: String) {
     SCHOOL_NEWS_PUBLISHED("Публикация черновика новости"),
     SCHOOL_NEWS_DRAFT_SAVED("Сохранён черновик новости"),
     SCHOOL_POLL_CLOSED("Закрытие/открытие опроса"),
-    SCHOOL_PUSH_RESENT("Ручная отправка push")
+    SCHOOL_PUSH_RESENT("Ручная отправка push"),
+    // НОВОЕ (расширенная модерация веб-админки): массовое удаление сообщений
+    // нарушителя по периоду из раздела «Жалобы».
+    REPORT_BULK_MESSAGES_DELETED("Массовое удаление сообщений")
 }
 
 /**
