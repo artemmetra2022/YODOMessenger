@@ -508,6 +508,56 @@ h1 { font-size: 24px; margin-bottom: 20px; }
   padding: 10px 12px;
 }
 
+/* ===== Жалобы: диаграмма распределения по типам ===== */
+
+.report-chart:empty { display: none; }
+.report-chart-title { color: var(--text-dim); font-size: 13px; margin-bottom: 8px; }
+.report-chart-list { display: flex; flex-direction: column; gap: 6px; }
+
+.report-chart-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 180px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px 6px;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.report-chart-row:hover { background: var(--bg-input); }
+.report-chart-row.active { border-color: var(--accent); background: var(--bg-input); }
+.report-chart-row.active .chart-label { font-weight: 600; }
+
+.chart-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-track { background: var(--bg-input); border-radius: 6px; height: 14px; overflow: hidden; }
+.report-chart-row.active .chart-track { background: var(--bg-panel-2); }
+.chart-fill { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.report-chart-row.active .chart-fill { background: var(--accent-dark); }
+.chart-value { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ===== Массовое удаление сообщений и контекст жалобы ===== */
+
+.form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.form-label input { color: var(--text); }
+
+.ctx-messages { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.ctx-msg { background: var(--bg-input); border-left: 3px solid transparent; border-radius: 8px; padding: 8px 10px; }
+.ctx-msg-target { border-left-color: var(--warn); background: rgba(232, 177, 63, 0.08); }
+.ctx-msg-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ctx-msg-name { font-weight: 600; word-break: break-word; }
+.ctx-msg .item-date { margin-left: auto; }
+
 /* ===== Карточка пользователя ===== */
 
 .user-card-row {

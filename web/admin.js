@@ -189,6 +189,7 @@ const AUDIT_LABELS = {
   CHANNEL_POST_PINNED: "Закрепление/открепление поста",
   CHANNEL_POST_DELETED: "Удаление поста в официальном канале",
   ADMIN_BROADCAST_QUEUED: "Рассылка из Push-центра",
+  REPORT_BULK_MESSAGES_DELETED: "Массовое удаление сообщений",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -1578,6 +1579,8 @@ const REPORT_REASONS = {
   VIOLENCE: "Насилие или угрозы",
   ILLEGAL_CONTENT: "Запрещённый контент",
   FRAUD: "Мошенничество",
+  NSFW: "Неприемлемый контент (NSFW)",
+  ADVERTISING: "Реклама",
   OTHER: "Другое",
   APPEAL: "Обжалование блокировки",
 };
@@ -1590,12 +1593,15 @@ const REPORT_STATUS_LABELS = {
 let reportsCache = []; // снапшот последнего запроса для CSV
 let reportsLimit = 200; // НОВОЕ (пагинация): размер окна ленты жалоб
 let reportsFilter = "PENDING";
+// НОВОЕ (расширенная модерация): независимый от статуса фильтр по типу жалобы.
+let reportsReasonFilter = "ALL";
 let reportsUnsub = null;
 
 // Мягкое удаление сообщения — поля 1:1 с MessageRepositoryImpl.deleteMessage
 // (deletedByAdmin=true показывает в чате «Сообщение удалено администратором»).
-async function softDeleteMessage(chatId, messageId) {
-  await updateDoc(doc(db, "chats", chatId, "messages", messageId), {
+// Один и тот же набор полей используется точечным и массовым удалением.
+function softDeletePayload() {
+  return {
     isDeleted: true,
     text: "",
     deletedByAdmin: true,
@@ -1606,7 +1612,24 @@ async function softDeleteMessage(chatId, messageId) {
     fileSizeBytes: deleteField(),
     locationLat: deleteField(),
     locationLng: deleteField(),
-  });
+  };
+}
+
+async function softDeleteMessage(chatId, messageId) {
+  await updateDoc(doc(db, "chats", chatId, "messages", messageId), softDeletePayload());
+}
+
+/** Текст-превью сообщения для списков админки (та же логика, что в превью чата). */
+function messagePreviewText(m) {
+  return m.encrypted ? "🔒 Сообщение"
+    : m.text ? m.text
+    : m.voiceBase64 ? "🎤 Голосовое сообщение"
+    : m.isViewOnce ? "📷 Фото (один просмотр)"
+    : m.imagesBase64 ? "📷 Фото (" + (m.imagesBase64.length || 1) + ")"
+    : m.imageBase64 ? "📷 Фото"
+    : m.locationLat != null ? "📍 Геопозиция"
+    : m.fileBase64 ? "📎 " + (m.fileName || "Файл")
+    : "";
 }
 
 // Пересчёт превью списка чатов, если удалили последнее сообщение —
@@ -1633,16 +1656,7 @@ async function refreshChatPreviewAfterDelete(chatId, messageId) {
     return;
   }
   const r = remaining.data();
-  const previewText =
-    r.encrypted ? "🔒 Сообщение"
-    : r.text ? r.text
-    : r.voiceBase64 ? "🎤 Голосовое сообщение"
-    : r.isViewOnce ? "📷 Фото (один просмотр)"
-    : r.imagesBase64 ? "📷 Фото (" + (r.imagesBase64.length || 1) + ")"
-    : r.imageBase64 ? "📷 Фото"
-    : r.locationLat != null ? "📍 Геопозиция"
-    : r.fileBase64 ? "📎 " + (r.fileName || "Файл")
-    : "";
+  const previewText = messagePreviewText(r);
   await updateDoc(chatRef, {
     lastMessage: previewText,
     lastMessageTimestamp: r.timestamp || 0,
@@ -1694,10 +1708,10 @@ function reportItem(docSnap) {
              ${r.resolution ? " · " + esc(r.resolution) : ""}${r.reviewerComment ? "<br>" + esc(r.reviewerComment) : ""}</div>`
         : ""
     }`;
-  if (isPending) {
-    const actions = document.createElement("div");
-    actions.className = "item-actions";
-    if (r.targetType === "MESSAGE" && r.targetMessageId) {
+  const actions = document.createElement("div");
+  actions.className = "item-actions";
+  if (r.targetType === "MESSAGE" && r.targetMessageId) {
+    if (isPending) {
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.className = "btn-danger";
@@ -1705,6 +1719,16 @@ function reportItem(docSnap) {
       deleteBtn.addEventListener("click", () => resolveReportAction(docSnap, "deleteMessage"));
       actions.appendChild(deleteBtn);
     }
+    // НОВОЕ (расширенная модерация): контекст сообщения доступен и по закрытым
+    // жалобам — чтобы понимать, почему решение было принято.
+    const ctxBtn = document.createElement("button");
+    ctxBtn.type = "button";
+    ctxBtn.className = "btn-secondary";
+    ctxBtn.textContent = "Контекст";
+    ctxBtn.addEventListener("click", () => openReportContext(docSnap));
+    actions.appendChild(ctxBtn);
+  }
+  if (isPending) {
     if (!r.isAppeal) {
       const blockBtn = document.createElement("button");
       blockBtn.type = "button";
@@ -1719,8 +1743,8 @@ function reportItem(docSnap) {
     dismissBtn.textContent = "Отклонить";
     dismissBtn.addEventListener("click", () => resolveReportAction(docSnap, "dismiss"));
     actions.appendChild(dismissBtn);
-    el.appendChild(actions);
   }
+  if (actions.children.length) el.appendChild(actions);
   return el;
 }
 
@@ -1769,6 +1793,265 @@ async function finalizeReport(docSnap, status, resolution, comment) {
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* Контекст жалобы: сообщения до и после нарушителя                     */
+/* ------------------------------------------------------------------ */
+
+const CONTEXT_WINDOW = 3; // по 3 сообщения с каждой стороны + само сообщение
+const contextUserNames = new Map();
+
+/** Имя автора сообщения для контекста (кэш на сессию страницы). */
+async function resolveUserName(uid, fallback = "") {
+  if (!uid) return fallback || "—";
+  if (uid === "support_system") return "Поддержка";
+  if (contextUserNames.has(uid)) return contextUserNames.get(uid);
+  let name = fallback;
+  if (!name) {
+    try {
+      const snap = await getDoc(doc(db, "users", uid));
+      name = snap.exists() ? snap.data().displayName || snap.data().username || "" : "";
+    } catch (e) { /* best-effort */ }
+  }
+  name = name || "UID " + uid.slice(0, 10) + "…";
+  contextUserNames.set(uid, name);
+  return name;
+}
+
+function closeReportContext() {
+  $("report-context-overlay").classList.add("hidden");
+}
+
+async function openReportContext(docSnap) {
+  const r = docSnap.data();
+  const chatId = docSnap.ref.parent.parent.id;
+  const box = $("report-context-messages");
+  $("report-context-sub").textContent =
+    `Чат ${chatId} · жалоба от ${r.reporterName || "—"} · причина: ${REPORT_REASONS[r.reason] || r.reason || "?"}`;
+  box.innerHTML = '<p class="empty-note">Загрузка…</p>';
+  $("report-context-overlay").classList.remove("hidden");
+  try {
+    const targetId = r.targetMessageId;
+    const targetSnap = await getDoc(doc(db, "chats", chatId, "messages", targetId));
+    if (!targetSnap.exists()) {
+      box.innerHTML =
+        '<p class="empty-note">Сообщение уже удалено — доступен только текст из жалобы.</p>' +
+        (r.targetMessagePreview
+          ? `<div class="ctx-msg ctx-msg-target"><div class="item-text">${esc(r.targetMessagePreview)}</div></div>`
+          : "");
+      return;
+    }
+    const ts = targetSnap.get("timestamp") || 0;
+    const msgs = collection(db, "chats", chatId, "messages");
+    const [beforeSnap, afterSnap] = await Promise.all([
+      getDocs(query(msgs, where("timestamp", "<=", ts), orderBy("timestamp", "desc"), limit(CONTEXT_WINDOW + 1))),
+      getDocs(query(msgs, where("timestamp", ">=", ts), orderBy("timestamp", "asc"), limit(CONTEXT_WINDOW + 1))),
+    ]);
+    const seen = new Set();
+    const ordered = [];
+    beforeSnap.docs
+      .slice()
+      .reverse()
+      .concat(afterSnap.docs)
+      .forEach((d) => {
+        if (seen.has(d.id)) return;
+        seen.add(d.id);
+        ordered.push(d);
+      });
+    const names = await Promise.all(
+      ordered.map((d) =>
+        resolveUserName(
+          d.get("senderId") || "",
+          d.get("senderId") === r.targetUserId ? r.targetUserName || "" : ""
+        )
+      )
+    );
+    box.innerHTML = "";
+    ordered.forEach((d, i) => {
+      const m = d.data();
+      const isTarget = d.id === targetId;
+      const text =
+        m.isDeleted === true
+          ? m.deletedByAdmin
+            ? "Сообщение удалено администратором"
+            : "Сообщение удалено"
+          : messagePreviewText(m);
+      const el = document.createElement("div");
+      el.className = "ctx-msg" + (isTarget ? " ctx-msg-target" : "");
+      el.innerHTML = `
+        <div class="ctx-msg-head">
+          <span class="ctx-msg-name">${esc(names[i])}</span>
+          ${isTarget ? '<span class="badge badge-yellow">жалоба</span>' : ""}
+          <span class="item-date">${fmtDate(m.timestamp)}</span>
+        </div>
+        <div class="item-text">${esc(text || "(без текста)")}</div>`;
+      box.appendChild(el);
+    });
+  } catch (err) {
+    box.innerHTML = "";
+    handleErr("Не удалось загрузить контекст (проверьте правила Firestore)")(err);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Массовое удаление сообщений нарушителя по периоду                    */
+/* ------------------------------------------------------------------ */
+
+// Сквозной поиск по всем чатам: требует collection-group индекса
+// messages(senderId, timestamp) и сквозного чтения messages админам.
+const BULK_DELETE_LIMIT = 500;
+const BULK_DELETE_BATCH = 400;
+let bulkDeleteMatches = [];
+
+function datetimeLocalToMs(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+async function bulkDeleteFind() {
+  const uid = $("bulk-del-uid").value.trim();
+  const statusEl = $("bulk-del-status");
+  const previewEl = $("bulk-del-preview");
+  if (!uid) {
+    toast("Укажите UID пользователя", false);
+    return;
+  }
+  const from = datetimeLocalToMs($("bulk-del-from").value);
+  const to = datetimeLocalToMs($("bulk-del-to").value);
+  if (from != null && to != null && from > to) {
+    toast("Дата «С» позже даты «По»", false);
+    return;
+  }
+  bulkDeleteMatches = [];
+  $("btn-bulk-del-run").disabled = true;
+  statusEl.textContent = "";
+  setLoading(previewEl);
+  try {
+    const conds = [where("senderId", "==", uid)];
+    if (from != null) conds.push(where("timestamp", ">=", from));
+    if (to != null) conds.push(where("timestamp", "<=", to));
+    const snap = await getDocs(
+      query(
+        collectionGroup(db, "messages"),
+        ...conds,
+        orderBy("timestamp", "asc"),
+        limit(BULK_DELETE_LIMIT)
+      )
+    );
+    // Уже удалённые не трогаем; у старых сообщений поля isDeleted может не быть.
+    const docs = snap.docs.filter((d) => d.get("isDeleted") !== true);
+    bulkDeleteMatches = docs.map((d) => ({
+      ref: d.ref,
+      id: d.id,
+      chatId: d.ref.parent.parent.id,
+      timestamp: d.get("timestamp") || 0,
+      preview: messagePreviewText(d.data()),
+    }));
+    const chatCount = new Set(bulkDeleteMatches.map((m) => m.chatId)).size;
+    const limited =
+      snap.size >= BULK_DELETE_LIMIT ? " Окно поиска ограничено 500 сообщениями — сузьте период." : "";
+    statusEl.textContent = bulkDeleteMatches.length
+      ? `Найдено сообщений: ${bulkDeleteMatches.length} в ${chatCount} чатах.${limited}`
+      : `Сообщений не найдено.${limited}`;
+    renderBulkDeletePreview();
+    $("btn-bulk-del-run").disabled = !bulkDeleteMatches.length;
+  } catch (err) {
+    previewEl.innerHTML = "";
+    handleErr("Не удалось найти сообщения (проверьте, что правила и индекс Firestore задеплоены)")(err);
+  }
+}
+
+function renderBulkDeletePreview() {
+  const el = $("bulk-del-preview");
+  if (!bulkDeleteMatches.length) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = "";
+  bulkDeleteMatches.slice(0, 50).forEach((m) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `
+      <div class="item-head">
+        <span class="item-title">${esc(m.preview || "(без текста)")}</span>
+        <span class="item-date">${fmtDate(m.timestamp)}</span>
+      </div>
+      <div class="item-sub">чат ${esc(m.chatId)} · сообщение ${esc(m.id)}</div>`;
+    el.appendChild(item);
+  });
+  if (bulkDeleteMatches.length > 50) {
+    const note = document.createElement("p");
+    note.className = "empty-note";
+    note.textContent = `…и ещё ${bulkDeleteMatches.length - 50} сообщений (в списке первые 50).`;
+    el.appendChild(note);
+  }
+}
+
+async function bulkDeleteRun() {
+  if (!bulkDeleteMatches.length) {
+    toast("Сначала найдите сообщения", false);
+    return;
+  }
+  const matches = bulkDeleteMatches;
+  const chatCount = new Set(matches.map((m) => m.chatId)).size;
+  if (
+    !confirm(
+      `Удалить ${matches.length} сообщений в ${chatCount} чатах? Отменить это нельзя: в переписке появится «Сообщение удалено администратором».`
+    )
+  ) {
+    return;
+  }
+  const uid = $("bulk-del-uid").value.trim();
+  const statusEl = $("bulk-del-status");
+  $("btn-bulk-del-run").disabled = true;
+  $("btn-bulk-del-find").disabled = true;
+  let deleted = 0;
+  try {
+    for (let i = 0; i < matches.length; i += BULK_DELETE_BATCH) {
+      const batch = writeBatch(db);
+      matches
+        .slice(i, i + BULK_DELETE_BATCH)
+        .forEach((m) => batch.update(m.ref, softDeletePayload()));
+      await batch.commit();
+      deleted += Math.min(BULK_DELETE_BATCH, matches.length - i);
+      statusEl.textContent = `Удалено ${deleted} из ${matches.length}…`;
+    }
+    // Пересчёт превью списка чата нужен только там, где удалили последнее
+    // сообщение, поэтому на чат достаточно самого свежего удалённого.
+    const newestPerChat = new Map();
+    matches.forEach((m) => {
+      const cur = newestPerChat.get(m.chatId);
+      if (!cur || m.timestamp > cur.timestamp) newestPerChat.set(m.chatId, m);
+    });
+    let staleChats = 0;
+    for (const [chatId, m] of newestPerChat) {
+      try {
+        await refreshChatPreviewAfterDelete(chatId, m.id);
+      } catch (e) {
+        staleChats += 1;
+      }
+    }
+    logAdminAction(
+      "REPORT_BULK_MESSAGES_DELETED",
+      `Массовое удаление: ${deleted} сообщений в ${chatCount} чатах`,
+      uid,
+      await resolveUserName(uid, "")
+    );
+    toast(`Удалено сообщений: ${deleted}`);
+    statusEl.textContent =
+      `Готово: удалено ${deleted} сообщений в ${chatCount} чатах.` +
+      (staleChats
+        ? ` Превью ${staleChats} чатов не обновлено (админ не участник) — обновится при следующем сообщении.`
+        : "");
+    bulkDeleteMatches = [];
+    $("bulk-del-preview").innerHTML = "";
+  } catch (err) {
+    handleErr("Не удалось удалить сообщения")(err);
+  } finally {
+    $("btn-bulk-del-find").disabled = false;
+  }
+}
+
 // Количество висящих жалоб для бейджа — тот же запрос, что и лента.
 function updateReportsBadge(docs) {
   const pending = docs.filter((d) => (d.data().status || "PENDING") === "PENDING");
@@ -1782,13 +2065,114 @@ function renderReports(snap) {
   updateReportsBadge(snap.docs);
   // НОВОЕ (пагинация): «Показать ещё», пока запрос вернул полное окно.
   $("btn-reports-more").classList.toggle("hidden", snap.size < reportsLimit);
+  renderReportsView();
+}
+
+/** Жалобы, прошедшие фильтр статуса (без учёта фильтра по типу). */
+function statusFilteredReports() {
+  return reportsCache.filter(
+    (d) => reportsFilter === "ALL" || (d.data().status || "PENDING") === reportsFilter
+  );
+}
+
+/** Жалобы, прошедшие оба фильтра — статус и тип. */
+function filteredReports() {
+  return statusFilteredReports().filter(
+    (d) => reportsReasonFilter === "ALL" || (d.data().reason || "") === reportsReasonFilter
+  );
+}
+
+function setReasonFilter(reason) {
+  reportsReasonFilter = reason;
+  renderReportsView();
+}
+
+/** Число жалоб по типу в текущем статусе — база диаграммы и чипов. */
+function reportReasonCounts() {
+  const counts = new Map();
+  statusFilteredReports().forEach((d) => {
+    const key = d.data().reason || "";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+}
+
+/**
+ * Диаграмма «жалобы по типам» — горизонтальные полосы по убыванию.
+ * Серия одна («число жалоб»), поэтому цвет один (--accent), а не
+ * категориальная палитра; значения продублированы числами и процентами,
+ * так что смысл не зависит от цвета. Клик по полосе включает фильтр типа.
+ */
+function renderReportsChart(counts) {
+  const el = $("reports-chart");
+  const base = statusFilteredReports();
+  if (!base.length) {
+    el.innerHTML = "";
+    return;
+  }
+  const rows = Object.keys(REPORT_REASONS)
+    .map((key) => ({ key, label: REPORT_REASONS[key], count: counts.get(key) || 0 }))
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const max = rows[0].count;
+  const statusLabel =
+    reportsFilter === "ALL"
+      ? "все статусы"
+      : (REPORT_STATUS_LABELS[reportsFilter] || reportsFilter).toLowerCase();
+  el.innerHTML =
+    `<div class="report-chart-title">Жалобы по типам (${esc(statusLabel)}, всего ${base.length})</div>` +
+    '<div class="report-chart-list"></div>';
+  const list = el.querySelector(".report-chart-list");
+  rows.forEach((row) => {
+    const pct = Math.round((row.count / base.length) * 100);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "report-chart-row" + (reportsReasonFilter === row.key ? " active" : "");
+    btn.title = `${row.label}: ${row.count} из ${base.length} (${pct}%)`;
+    btn.innerHTML = `
+      <span class="chart-label">${esc(row.label)}</span>
+      <span class="chart-track"><span class="chart-fill" style="width:${Math.max(4, Math.round((row.count / max) * 100))}%"></span></span>
+      <span class="chart-value">${row.count} · ${pct}%</span>`;
+    btn.addEventListener("click", () => setReasonFilter(row.key));
+    list.appendChild(btn);
+  });
+}
+
+/** Чипы фильтра по типу — только те типы, что реально есть в текущем статусе. */
+function renderReasonFilters(counts) {
+  const el = $("reports-reason-filters");
+  const items = [{ key: "ALL", label: "Все типы" }].concat(
+    Object.keys(REPORT_REASONS)
+      .filter((key) => counts.get(key))
+      .map((key) => ({ key, label: REPORT_REASONS[key] }))
+  );
+  el.innerHTML = "";
+  items.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "filter-btn" + (reportsReasonFilter === item.key ? " active" : "");
+    btn.dataset.reason = item.key;
+    btn.textContent =
+      item.key === "ALL" ? item.label : `${item.label} · ${counts.get(item.key)}`;
+    btn.addEventListener("click", () => setReasonFilter(item.key));
+    el.appendChild(btn);
+  });
+}
+
+function renderReportsView() {
+  const counts = reportReasonCounts();
+  // Выбранный тип мог исчезнуть из текущего статуса (или из окна ленты) —
+  // иначе список выглядел бы пустым без единого активного чипа.
+  if (reportsReasonFilter !== "ALL" && !counts.get(reportsReasonFilter)) {
+    reportsReasonFilter = "ALL";
+  }
+  renderReasonFilters(counts);
+  renderReportsChart(counts);
   const listEl = $("reports-list");
-  const status = reportsFilter;
-  const docs = status === "ALL"
-    ? snap.docs
-    : snap.docs.filter((d) => (d.data().status || "PENDING") === status);
+  const docs = filteredReports();
   if (!docs.length) {
-    listEl.innerHTML = `<p class="empty-note">${status === "PENDING" ? "Новых жалоб нет — всё чисто! ✅" : "Жалоб с этим статусом нет."}</p>`;
+    const nothingNew = reportsFilter === "PENDING" && reportsReasonFilter === "ALL";
+    listEl.innerHTML = `<p class="empty-note">${nothingNew ? "Новых жалоб нет — всё чисто! ✅" : "Жалоб с такими фильтрами нет."}</p>`;
     return;
   }
   listEl.innerHTML = "";
@@ -1803,7 +2187,7 @@ function startReports() {
       $("reports-filters").querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       reportsFilter = btn.dataset.filter;
-      renderReports({ docs: reportsCache });
+      renderReportsView();
     });
   });
   setLoading($("reports-list"));
@@ -1846,6 +2230,21 @@ function startReports() {
     );
     toast("CSV жалоб скачан (" + reportsCache.length + ")");
   });
+
+  // НОВОЕ (расширенная модерация): модалка контекста жалобы.
+  $("btn-close-report-context").addEventListener("click", closeReportContext);
+  $("report-context-overlay").addEventListener("click", (e) => {
+    if (e.target === $("report-context-overlay")) closeReportContext();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("report-context-overlay").classList.contains("hidden")) {
+      closeReportContext();
+    }
+  });
+
+  // НОВОЕ (расширенная модерация): массовое удаление сообщений по периоду.
+  $("btn-bulk-del-find").addEventListener("click", bulkDeleteFind);
+  $("btn-bulk-del-run").addEventListener("click", bulkDeleteRun);
 }
 
 /* ------------------------------------------------------------------ */

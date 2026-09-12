@@ -355,8 +355,26 @@
             <button type="button" class="filter-btn" data-filter="DISMISSED">Отклонённые</button>
             <button type="button" class="filter-btn" data-filter="ALL">Все</button>
           </div>
+          <div class="filter-row" id="reports-reason-filters"></div>
+          <div id="reports-chart" class="report-chart"></div>
           <div id="reports-list" class="item-list"></div>
           <button type="button" class="btn-secondary hidden" id="btn-reports-more">Показать ещё</button>
+        </div>
+
+        <div class="card">
+          <h2>Массовое удаление сообщений</h2>
+          <p class="card-hint">Мягко удаляет все сообщения указанного пользователя за период во всех чатах: в переписке вместо них останется «Сообщение удалено администратором». Сначала найдите сообщения и проверьте список, затем подтвердите удаление.</p>
+          <input type="text" id="bulk-del-uid" placeholder="UID нарушителя (например, из раздела «Пользователи»)" autocomplete="off">
+          <div class="form-row">
+            <label class="form-label">С <input type="datetime-local" id="bulk-del-from"></label>
+            <label class="form-label">По <input type="datetime-local" id="bulk-del-to"></label>
+          </div>
+          <div class="form-row">
+            <button type="button" class="btn-secondary" id="btn-bulk-del-find">Найти сообщения</button>
+            <button type="button" class="btn-danger" id="btn-bulk-del-run" disabled>Удалить найденные</button>
+          </div>
+          <p class="card-hint" id="bulk-del-status"></p>
+          <div id="bulk-del-preview" class="item-list"></div>
         </div>
       </section>
 
@@ -543,6 +561,18 @@
           <button type="button" class="btn-secondary hidden" id="btn-support-unrestrict-thread">Снять ограничение</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: контекст жалобы (сообщения до и после нарушителя) -->
+  <div id="report-context-overlay" class="modal-overlay hidden">
+    <div class="modal-card modal-card-wide">
+      <div class="card-head">
+        <h2>Контекст жалобы</h2>
+        <button type="button" class="btn-link" id="btn-close-report-context">Закрыть</button>
+      </div>
+      <p class="card-hint" id="report-context-sub"></p>
+      <div id="report-context-messages" class="ctx-messages"></div>
     </div>
   </div>
 
