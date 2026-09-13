@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.Lock
@@ -78,6 +79,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -105,7 +108,11 @@ import app.yodo.messenger.domain.model.ChatPreview
 import app.yodo.messenger.domain.model.ChatType
 import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.ui.components.UserAvatar
+import app.yodo.messenger.ui.components.glassTint
+import app.yodo.messenger.ui.components.liquidGlass
 import app.yodo.messenger.ui.theme.LocalColorTheme
+import app.yodo.messenger.ui.theme.LocalInterfaceStyle
+import app.yodo.messenger.data.local.InterfaceStyle
 import app.yodo.messenger.ui.theme.YodoMotion
 import app.yodo.messenger.ui.theme.YodoOnline
 import com.google.firebase.auth.FirebaseAuth
@@ -160,6 +167,8 @@ fun ChatListScreen(
     // НОВОЕ: настройка "скрывать статус-бар на списке чатов" (переключается в настройках).
     val hideStatusBarOnChatList by viewModel.hideStatusBarOnChatList.collectAsState()
     val colorTheme = LocalColorTheme.current
+    val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val glassDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     var showFabMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     // БАГ-ФИКС (действия меню): снекбар с ошибкой операции (пин/мьют/архив/удаление).
@@ -234,12 +243,19 @@ fun ChatListScreen(
                     // "Yodo Messenger" сделано противоположным тому, что было раньше.
                     // Когда статус-бар ВКЛЮЧЁН (виден) — отступ должен быть МЕНЬШЕ, чем
                     // штатный полный statusBarsPadding() (он ощущался слишком большим):
-                    // берём реальную высоту статус-бара и вычитаем часть отступа, но не
+                    // бер��м реальную высоту статус-бара и вычитаем часть отступа, но не
                     // уходим ниже нуля на случай нулевого инсета (жест-навигация/edge-to-edge
                     // без видимого статус-бара). Когда статус-бар ВЫКЛЮЧЕН (скрыт
                     // настройкой) — отступ, наоборот, УВЕЛИЧЕН (раньше был мелкий
                     // фиксированный 4.dp, из-за чего заголовок оказывался слишком
                     // близко к самому верху экрана).
+                    .liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp),
+                        tint = glassTint(glassDark),
+                        dark = glassDark,
+                        elevation = 10
+                    )
                     .then(
                         if (hideStatusBarOnChatList) {
                             Modifier.padding(top = 20.dp)
@@ -268,7 +284,7 @@ fun ChatListScreen(
                     val headerText = when {
                         !isNetworkAvailable -> "Нет сети…"
                         isInitialLoading || isRefreshing -> "Обновление…"
-                        else -> "Yodo Messenger"
+                        else -> if (experimentalInterface) "YODO" else "Yodo Messenger"
                     }
                     val headerColor = if (!isNetworkAvailable || isInitialLoading || isRefreshing) {
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
@@ -330,9 +346,20 @@ fun ChatListScreen(
             Box {
                 FloatingActionButton(
                     onClick = { showFabMenu = true },
-                    containerColor = colorTheme.primary
+                    modifier = Modifier.liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = CircleShape,
+                        tint = colorTheme.primary,
+                        dark = glassDark,
+                        elevation = 14
+                    ),
+                    containerColor = if (experimentalInterface) colorTheme.primary.copy(alpha = 0.68f) else colorTheme.primary
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.chat_create_cd), tint = Color.White)
+                    Icon(
+                        if (experimentalInterface) Icons.Filled.Edit else Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.chat_create_cd),
+                        tint = Color.White
+                    )
                 }
                 DropdownMenu(
                     expanded = showFabMenu,
@@ -374,7 +401,24 @@ fun ChatListScreen(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .then(
+                    if (experimentalInterface) {
+                        Modifier.background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    colorTheme.primary.copy(alpha = if (glassDark) 0.18f else 0.10f),
+                                    MaterialTheme.colorScheme.background,
+                                    colorTheme.secondary.copy(alpha = if (glassDark) 0.12f else 0.07f)
+                                )
+                            )
+                        )
+                    } else Modifier
+                )
+        ) {
             when (val state = uiState) {
                 is ChatListUiState.Loading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -480,6 +524,13 @@ fun ChatListScreen(
                                         YodoMotion.emphasized(YodoMotion.DURATION_MEDIUM)
                                     )
                                 )
+                                if (experimentalInterface) {
+                                    androidx.compose.material3.HorizontalDivider(
+                                        modifier = Modifier.padding(start = 84.dp),
+                                        thickness = 0.5.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -714,15 +765,25 @@ private fun FilterChip(
     onLongClick: (() -> Unit)? = null
 ) {
     val colorTheme = LocalColorTheme.current
+    val experimental = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val bgColor = if (isActive) colorTheme.primary else colorTheme.primary.copy(alpha = 0.12f)
     val textColor = if (isActive) Color.White else colorTheme.primary
+    val glassModifier = Modifier.liquidGlass(
+        enabled = experimental,
+        shape = RoundedCornerShape(20.dp),
+        tint = if (isActive) colorTheme.primary else glassTint(dark),
+        dark = dark,
+        elevation = if (isActive) 7 else 3
+    )
+    val clickableModifier = if (onLongClick != null) {
+        glassModifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else glassModifier.clickable { onClick() }
 
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = bgColor,
-        modifier = if (onLongClick != null)
-            Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
-        else Modifier.clickable { onClick() }
+        color = if (experimental) Color.Transparent else bgColor,
+        modifier = clickableModifier
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
@@ -759,11 +820,21 @@ private fun FilterChip(
 @Composable
 private fun AddFolderChip(onClick: () -> Unit) {
     val colorTheme = LocalColorTheme.current
+    val experimental = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = colorTheme.primary.copy(alpha = 0.12f),
-        modifier = Modifier.clickable { onClick() }
+        color = if (experimental) Color.Transparent else colorTheme.primary.copy(alpha = 0.12f),
+        modifier = Modifier
+            .liquidGlass(
+                enabled = experimental,
+                shape = RoundedCornerShape(20.dp),
+                tint = glassTint(dark),
+                dark = dark,
+                elevation = 3
+            )
+            .clickable { onClick() }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
@@ -1139,6 +1210,9 @@ private fun ChatListItem(
     val isSupportChat = chat.chatId.startsWith("support_")
     val isSavedChat = !isSupportChat && chat.type == ChatType.PRIVATE && chat.otherUserId == null
     val isChannel = chat.type == ChatType.CHANNEL
+    val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val avatarSize = if (experimentalInterface) 54.dp else 56.dp
+    val glassDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     // НОВОЕ (иерархия): единственный флаг, который решает "жирность" всей строки.
     // Непрочитанный чат должен читаться с одного взгляда — не только по бейджу
@@ -1163,7 +1237,7 @@ private fun ChatListItem(
         label = "chatRowPressScale"
     )
     val rowBackground by androidx.compose.animation.animateColorAsState(
-        targetValue = if (hasUnread) {
+        targetValue = if (!experimentalInterface && hasUnread) {
             colorTheme.primary.copy(alpha = 0.05f)
         } else {
             Color.Transparent
@@ -1174,8 +1248,16 @@ private fun ChatListItem(
 
     Row(
         modifier = Modifier.fillMaxWidth()
+            .then(if (experimentalInterface) Modifier.padding(horizontal = 8.dp, vertical = 3.dp) else Modifier)
             .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .background(rowBackground)
+            .liquidGlass(
+                enabled = experimentalInterface,
+                shape = RoundedCornerShape(18.dp),
+                tint = glassTint(glassDark).copy(alpha = 0.72f),
+                dark = glassDark,
+                elevation = 3
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = androidx.compose.foundation.LocalIndication.current,
@@ -1187,14 +1269,14 @@ private fun ChatListItem(
             // который раньше давал заметный разброс высоты между строками
             // с разным количеством значков в заголовке.
             .heightIn(min = 72.dp)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = if (experimentalInterface) 12.dp else 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Аватар
         if (isSupportChat) {
             // НОВОЕ (логотип поддержки): фирменный знак поддержки вместо закладки.
             Box(
-                modifier = Modifier.size(56.dp).clip(CircleShape)
+                modifier = Modifier.size(avatarSize).clip(CircleShape)
                     .background(colorTheme.primary),
                 contentAlignment = Alignment.Center
             ) {
@@ -1207,7 +1289,7 @@ private fun ChatListItem(
             }
         } else if (isSavedChat) {
             Box(
-                modifier = Modifier.size(56.dp).clip(CircleShape)
+                modifier = Modifier.size(avatarSize).clip(CircleShape)
                     .background(colorTheme.primary.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -1220,18 +1302,18 @@ private fun ChatListItem(
                     displayName = chat.title,
                     photoUrl = null,
                     avatarBase64 = chat.avatarBase64,
-                    size = 56.dp,
+                    size = avatarSize,
                     userId = chat.chatId
                 )
             } else if (chat.isVerified) {
                 // Официальный канал — фирменный аватар вместо буквы «Y»
-                OfficialChannelAvatar(size = 56.dp)
+                OfficialChannelAvatar(size = avatarSize)
             } else {
                 UserAvatar(
                     displayName = chat.title,
                     photoUrl = null,
                     avatarBase64 = null,
-                    size = 56.dp,
+                    size = avatarSize,
                     userId = chat.chatId
                 )
             }
@@ -1241,7 +1323,7 @@ private fun ChatListItem(
                     displayName = chat.title,
                     photoUrl = chat.avatarUrl,
                     avatarBase64 = chat.avatarBase64,
-                    size = 56.dp,
+                    size = avatarSize,
                     userId = chat.otherUserId ?: chat.chatId
                 )
                 if (chat.isOnline) {

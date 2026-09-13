@@ -21,6 +21,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.data.local.ScreenTransitionStyle
 
 /**
  * НОВОЕ (AM): единые скругления для всего приложения.
@@ -40,6 +42,11 @@ private val YodoShapes = Shapes(
 )
 
 val LocalColorTheme = compositionLocalOf { BlueTheme }
+val LocalInterfaceStyle = compositionLocalOf { InterfaceStyle.CLASSIC }
+val LocalGlassIntensity = compositionLocalOf { 55 }
+val LocalScreenTransitionDuration = compositionLocalOf { 140 }
+val LocalScreenTransitionStyle = compositionLocalOf { ScreenTransitionStyle.SLIDE }
+val LocalScreenTransitionAmplitude = compositionLocalOf { 35 }
 
 @Composable
 fun YodoMessengerTheme(
@@ -47,6 +54,11 @@ fun YodoMessengerTheme(
     colorTheme: ColorTheme = BlueTheme,
     dynamicColor: Boolean = false,
     fontScale: Float = 1f,
+    interfaceStyle: InterfaceStyle = InterfaceStyle.CLASSIC,
+    glassIntensity: Int = 55,
+    screenTransitionDurationMs: Int = 140,
+    screenTransitionStyle: ScreenTransitionStyle = ScreenTransitionStyle.SLIDE,
+    screenTransitionAmplitude: Int = 35,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -87,7 +99,14 @@ fun YodoMessengerTheme(
 
     val typography = remember(fontScale) { scaledTypography(fontScale) }
 
-    CompositionLocalProvider(LocalColorTheme provides colorTheme) {
+    CompositionLocalProvider(
+        LocalColorTheme provides colorTheme,
+        LocalInterfaceStyle provides interfaceStyle,
+        LocalGlassIntensity provides glassIntensity.coerceIn(0, 100),
+        LocalScreenTransitionDuration provides screenTransitionDurationMs.coerceIn(0, 400),
+        LocalScreenTransitionStyle provides screenTransitionStyle,
+        LocalScreenTransitionAmplitude provides screenTransitionAmplitude.coerceIn(0, 100)
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = typography,

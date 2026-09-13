@@ -151,7 +151,8 @@ interface ChatRepository {
         const val OFFICIAL_CHANNEL_ID = "yodo_official_channel"
         val ADMIN_EMAILS = listOf(
             "artemmetra2022spb@gmail.com",
-            "artemmelnik2@yandex.ru"
+            "artemmelnik2@yandex.ru",
+            "artemmelnik2022spb+1@gmail.com"
         )
         // НОВОЕ (чат поддержки): id беседы поддержки детерминирован по uid.
         const val SUPPORT_CHAT_PREFIX = "support_"

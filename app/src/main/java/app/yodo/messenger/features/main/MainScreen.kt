@@ -2,6 +2,7 @@ package app.yodo.messenger.features.main
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Chat
@@ -13,17 +14,25 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatListScreen
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.ui.theme.LocalInterfaceStyle
+import app.yodo.messenger.ui.components.glassTint
+import app.yodo.messenger.ui.components.liquidGlass
 
 @Composable
 fun MainScreen(
@@ -51,10 +60,24 @@ fun MainScreen(
     // экран Админки, только чтобы узнать isAppAdmin — без лишнего дублирования
     // проверки ADMIN_EMAILS.
     val isAppAdmin = hiltViewModel<AdminHomeViewModel>().isAppAdmin
+    val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+            NavigationBar(
+                modifier = Modifier
+                    .then(if (experimentalInterface) Modifier.padding(horizontal = 10.dp, vertical = 6.dp) else Modifier)
+                    .liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = RoundedCornerShape(28.dp),
+                        tint = glassTint(isDark),
+                        dark = isDark,
+                        elevation = 12
+                    ),
+                containerColor = if (experimentalInterface) Color.Transparent else MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = if (experimentalInterface) 0.dp else 3.dp
+            ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },

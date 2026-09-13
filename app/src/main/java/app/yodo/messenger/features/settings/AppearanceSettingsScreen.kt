@@ -20,15 +20,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.DashboardCustomize
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -51,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.data.local.FontSize
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.data.local.ScreenTransitionStyle
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.allColorThemes
 import kotlin.math.roundToInt
@@ -71,6 +77,11 @@ fun AppearanceSettingsScreen(
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val colorThemeName by viewModel.colorThemeName.collectAsState()
     val fontSize by viewModel.fontSize.collectAsState()
+    val interfaceStyle by viewModel.interfaceStyle.collectAsState()
+    val glassIntensity by viewModel.glassIntensity.collectAsState()
+    val screenTransitionDurationMs by viewModel.screenTransitionDurationMs.collectAsState()
+    val screenTransitionStyle by viewModel.screenTransitionStyle.collectAsState()
+    val screenTransitionAmplitude by viewModel.screenTransitionAmplitude.collectAsState()
     val colorTheme = LocalColorTheme.current
 
     val listState = rememberLazyListState()
@@ -113,6 +124,309 @@ fun AppearanceSettingsScreen(
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
+            item {
+                SettingsSectionHeader(
+                    icon = Icons.Filled.DashboardCustomize,
+                    title = "Интерфейс",
+                    colorTheme = colorTheme
+                )
+            }
+            item {
+                SettingsCard {
+                    Column {
+                        InterfaceStyle.entries.forEach { style ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.setInterfaceStyle(style) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = interfaceStyle == style,
+                                    onClick = { viewModel.setInterfaceStyle(style) }
+                                )
+                                Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
+                                    Text(
+                                        text = style.displayName,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = style.description,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        if (interfaceStyle == InterfaceStyle.EXPERIMENTAL) {
+                            var glassSlider by remember(glassIntensity) {
+                                mutableFloatStateOf(glassIntensity.toFloat())
+                            }
+                            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Матовость стекла",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = "${glassSlider.roundToInt()}%",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colorTheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = "0% — максимально прозрачное, 100% — почти полностью матовое",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                                Slider(
+                                    value = glassSlider,
+                                    onValueChange = {
+                                        glassSlider = it
+                                        viewModel.setGlassIntensity(it.roundToInt())
+                                    },
+                                    onValueChangeFinished = {
+                                        viewModel.setGlassIntensity(glassSlider.roundToInt())
+                                    },
+                                    valueRange = 0f..100f,
+                                    steps = 19,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Прозрачное", style = MaterialTheme.typography.labelSmall)
+                                    Text("Матовое", style = MaterialTheme.typography.labelSmall)
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(
+                                        "Кристалл" to 0,
+                                        "Чистое" to 25,
+                                        "Баланс" to 55,
+                                        "Иней" to 80,
+                                        "Мат" to 100
+                                    ).forEach { (label, value) ->
+                                        val selected = glassSlider.roundToInt() == value
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(
+                                                    if (selected) colorTheme.primary.copy(alpha = 0.16f)
+                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                                )
+                                                .border(
+                                                    width = if (selected) 1.dp else 0.5.dp,
+                                                    color = if (selected) colorTheme.primary
+                                                    else MaterialTheme.colorScheme.outlineVariant,
+                                                    shape = RoundedCornerShape(16.dp)
+                                                )
+                                                .clickable {
+                                                    glassSlider = value.toFloat()
+                                                    viewModel.setGlassIntensity(value)
+                                                }
+                                                .padding(horizontal = 11.dp, vertical = 7.dp)
+                                        ) {
+                                            Text(
+                                                "$label $value%",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = if (selected) colorTheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsSectionHeader(
+                    icon = Icons.Filled.Speed,
+                    title = "Переходы между экранами",
+                    colorTheme = colorTheme
+                )
+            }
+            item {
+                SettingsCard {
+                    var transitionSlider by remember(screenTransitionDurationMs) {
+                        mutableFloatStateOf(screenTransitionDurationMs.toFloat())
+                    }
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Text(
+                            text = "Стиль перехода",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ScreenTransitionStyle.entries.forEach { style ->
+                                val selected = screenTransitionStyle == style
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (selected) colorTheme.primary.copy(alpha = 0.16f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                        )
+                                        .border(
+                                            if (selected) 1.dp else 0.5.dp,
+                                            if (selected) colorTheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                            RoundedCornerShape(16.dp)
+                                        )
+                                        .clickable { viewModel.setScreenTransitionStyle(style) }
+                                        .padding(horizontal = 11.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        style.displayName,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (selected) colorTheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Продолжительность",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = if (transitionSlider.roundToInt() == 0) "Выкл."
+                                else "${transitionSlider.roundToInt()} мс",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colorTheme.primary
+                            )
+                        }
+                        Text(
+                            text = "Меньше — быстрее. 0 мс полностью отключает анимацию перехода.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 3.dp)
+                        )
+                        Slider(
+                            value = transitionSlider,
+                            onValueChange = { transitionSlider = it },
+                            onValueChangeFinished = {
+                                val snapped = (transitionSlider / 20f).roundToInt() * 20
+                                transitionSlider = snapped.toFloat()
+                                viewModel.setScreenTransitionDurationMs(snapped)
+                            },
+                            valueRange = 0f..400f,
+                            steps = 19,
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                        )
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                "Без анимации" to 0,
+                                "Очень быстро" to 80,
+                                "Быстро" to 140,
+                                "Плавно" to 240,
+                                "Медленно" to 400
+                            ).forEach { (label, value) ->
+                                val selected = screenTransitionDurationMs == value
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (selected) colorTheme.primary.copy(alpha = 0.16f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                        )
+                                        .border(
+                                            if (selected) 1.dp else 0.5.dp,
+                                            if (selected) colorTheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                            RoundedCornerShape(16.dp)
+                                        )
+                                        .clickable {
+                                            transitionSlider = value.toFloat()
+                                            viewModel.setScreenTransitionDurationMs(value)
+                                        }
+                                        .padding(horizontal = 11.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (selected) colorTheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        if (screenTransitionStyle != ScreenTransitionStyle.FADE &&
+                            screenTransitionStyle != ScreenTransitionStyle.NONE
+                        ) {
+                            var amplitudeSlider by remember(screenTransitionAmplitude) {
+                                mutableFloatStateOf(screenTransitionAmplitude.toFloat())
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Амплитуда движения",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${amplitudeSlider.roundToInt()}%",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colorTheme.primary
+                                )
+                            }
+                            Slider(
+                                value = amplitudeSlider,
+                                onValueChange = { amplitudeSlider = it },
+                                onValueChangeFinished = {
+                                    val snapped = (amplitudeSlider / 5f).roundToInt() * 5
+                                    amplitudeSlider = snapped.toFloat()
+                                    viewModel.setScreenTransitionAmplitude(snapped)
+                                },
+                                valueRange = 0f..100f,
+                                steps = 19,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                text = "На Android 13+ системный жест «Назад» интерактивно следует за пальцем.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
                 SettingsSectionHeader(
                     icon = Icons.Filled.ColorLens,

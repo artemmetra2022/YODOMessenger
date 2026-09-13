@@ -11,32 +11,32 @@ import javax.inject.Singleton
  */
 @Singleton
 class PendingForwardHolder @Inject constructor() {
-    private var message: Message? = null
+    data class Item(val message: Message, val originSenderName: String)
+
+    private var items: List<Item> = emptyList()
     // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
     // раньше при пересылке всегда подставлялось имя ТЕКУЩЕГО пользователя
     // (того, кто нажал «Переслать»), а не автора исходного сообщения. Теперь
     // вместе с сообщением сохраняем и настоящее имя источника — например,
     // название канала, если сообщение было постом канала.
-    private var originSenderName: String? = null
-
     fun set(message: Message, originSenderName: String) {
-        this.message = message
-        this.originSenderName = originSenderName
+        set(listOf(Item(message, originSenderName)))
     }
 
-    /**
-     * п.36: посмотреть сообщение, которое будет переслано, БЕЗ очистки holder'а.
-     * Нужно, чтобы экран пересылки мог показать превью ("Вы пересылаете: ...")
-     * ещё до того, как пользователь выберет чат-получатель.
-     */
-    fun peek(): Message? = message
+    fun set(items: List<Item>) {
+        this.items = items.toList()
+    }
 
-    fun peekOriginSenderName(): String? = originSenderName
+    /** Сообщения остаются в holder до успешной отправки всей пачки. */
+    fun peekAll(): List<Item> = items
+    fun peek(): Message? = items.firstOrNull()?.message
+    fun peekOriginSenderName(): String? = items.firstOrNull()?.originSenderName
 
-    fun takeAndClear(): Message? {
-        val result = message
-        message = null
-        originSenderName = null
+    fun takeAllAndClear(): List<Item> {
+        val result = items
+        items = emptyList()
         return result
     }
+
+    fun takeAndClear(): Message? = takeAllAndClear().firstOrNull()?.message
 }

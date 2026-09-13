@@ -71,7 +71,7 @@ const db = getFirestore(app);
 /* ------------------------------------------------------------------ */
 
 const OFFICIAL_CHANNEL_ID = "yodo_official_channel";
-const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru"];
+const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru", "artemmelnik2022spb+1@gmail.com"];
 const SUPPORT_CHAT_PREFIX = "support_";
 const SUPPORT_TITLE = "Поддержка YodoMessenger";
 const supportChatIdFor = (uid) => SUPPORT_CHAT_PREFIX + uid;

@@ -84,7 +84,7 @@ data class ChatUiState(
     val scheduledMessages: List<app.yodo.messenger.domain.model.ScheduledMessage> = emptyList(),
     // п.2: id только что пересланного в этот чат сообщения — показываем плашку
     // "Сообщение переслано" с окном отмены на 5 секунд. null = плашка скрыта.
-    val justForwardedMessageId: String? = null,
+    val justForwardedMessageIds: List<String> = emptyList(),
     // НОВОЕ (п.1): кому переслали (для текста плашки и перехода в профиль по клику),
     // и обратный отсчёт секунд до автоскрытия плашки (5,4,3,2,1).
     val justForwardedTargetName: String? = null,
@@ -148,22 +148,28 @@ class ChatViewModel @Inject constructor(
         return true
     }
 
-    fun prepareForward(message: Message) {
-        // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
-        // источник для подписи "Переслано от.." определяем в таком порядке:
-        // 1) если сообщение уже было переслано ранее — сохраняем исходный источник
-        //    (например, название канала), а не имя того, кто пересылает сейчас;
-        // 2) если это пост в канале — берём название канала, а не имя автора поста;
-        // 3) иначе — имя автора сообщения в этом чате.
-        val originSenderName = message.forwardedFromSenderName
-            ?: if (_uiState.value.chatType == "CHANNEL") {
-                _uiState.value.chatTitle
-            } else if (message.senderId == currentUserId) {
-                "Вы"
-            } else {
-                _uiState.value.chatTitle
+    fun prepareForward(message: Message) = prepareForward(listOf(message))
+
+    fun prepareForward(messages: List<Message>) {
+        val items = messages
+            .filterNot { it.isViewOnce }
+            .sortedBy { it.timestamp }
+            .map { message ->
+                val originSenderName = message.forwardedFromSenderName
+                    ?: if (_uiState.value.chatType == "CHANNEL") {
+                        _uiState.value.chatTitle
+                    } else if (message.senderId == currentUserId) {
+                        "Вы"
+                    } else {
+                        _uiState.value.authorNames[message.senderId] ?: _uiState.value.chatTitle
+                    }
+                PendingForwardHolder.Item(message, originSenderName)
             }
-        pendingForwardHolder.set(message, originSenderName)
+        if (items.isEmpty()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Выбранные сообщения нельзя переслать")
+            return
+        }
+        pendingForwardHolder.set(items)
     }
 
     private var forwardUndoTimerJob: Job? = null
@@ -270,7 +276,7 @@ class ChatViewModel @Inject constructor(
         // НОВОЕ (п.1): имя получателя — предпочитаем @username, иначе отображаемое имя.
         val displayTarget = pending.targetUsername?.let { "@$it" } ?: pending.targetName
         _uiState.value = _uiState.value.copy(
-            justForwardedMessageId = pending.messageId,
+            justForwardedMessageIds = pending.messageIds,
             justForwardedTargetName = displayTarget,
             justForwardedTargetUserId = pending.targetUserId,
             forwardUndoSecondsLeft = 5
@@ -284,7 +290,7 @@ class ChatViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(forwardUndoSecondsLeft = secondsLeft)
             }
             _uiState.value = _uiState.value.copy(
-                justForwardedMessageId = null,
+                justForwardedMessageIds = emptyList(),
                 justForwardedTargetName = null,
                 justForwardedTargetUserId = null,
                 forwardUndoSecondsLeft = 0
@@ -295,15 +301,16 @@ class ChatViewModel @Inject constructor(
     /** Пользователь нажал "Отменить" в плашке — удаляем пересланное сообщение и скрываем плашку. */
     fun undoForward() {
         forwardUndoTimerJob?.cancel()
-        val messageId = _uiState.value.justForwardedMessageId ?: return
+        val messageIds = _uiState.value.justForwardedMessageIds
+        if (messageIds.isEmpty()) return
         _uiState.value = _uiState.value.copy(
-            justForwardedMessageId = null,
+            justForwardedMessageIds = emptyList(),
             justForwardedTargetName = null,
             justForwardedTargetUserId = null,
             forwardUndoSecondsLeft = 0
         )
         viewModelScope.launch {
-            messageRepository.deleteMessage(chatId, messageId)
+            messageRepository.deleteMessages(chatId, messageIds)
         }
     }
 
@@ -954,6 +961,30 @@ class ChatViewModel @Inject constructor(
                 messageRepository.forwardMessage(savedChatId, message, originSenderName, myUid)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(errorMessage = "Не удалось сохранить в Избранное")
+            }
+        }
+    }
+
+    fun saveToFavorite(messages: List<Message>) {
+        val ordered = messages.filterNot { it.isViewOnce }.sortedBy { it.timestamp }
+        if (ordered.isEmpty()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Выбранные сообщения нельзя сохранить")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val savedChatId = chatRepository.getOrCreateSavedChat()
+                val myUid = currentUserId ?: return@launch
+                for (message in ordered) {
+                    val originSenderName = message.forwardedFromSenderName
+                        ?: if (_uiState.value.chatType == "CHANNEL") _uiState.value.chatTitle
+                        else if (message.senderId == currentUserId) "Вы"
+                        else _uiState.value.authorNames[message.senderId] ?: _uiState.value.chatTitle
+                    val result = messageRepository.forwardMessage(savedChatId, message, originSenderName, myUid)
+                    if (result is SendMessageResult.Error) throw IllegalStateException(result.message)
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = "Не удалось сохранить выбранные сообщения")
             }
         }
     }

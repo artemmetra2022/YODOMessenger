@@ -9,6 +9,8 @@ import app.yodo.messenger.data.local.AppLanguage
 import app.yodo.messenger.data.local.ChatBackgroundType
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.FontSize
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.data.local.ScreenTransitionStyle
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinCheckResult
 import app.yodo.messenger.data.local.PinRequirement
@@ -52,6 +54,16 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppLanguage.SYSTEM)
     val isDarkTheme: StateFlow<Boolean> = themePreferences.isDarkTheme.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val colorThemeName: StateFlow<String> = themePreferences.colorThemeName.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "BLUE")
+    val interfaceStyle: StateFlow<InterfaceStyle> = userSettingsPreferences.interfaceStyle
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), InterfaceStyle.CLASSIC)
+    val glassIntensity: StateFlow<Int> = userSettingsPreferences.glassIntensity
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 55)
+    val screenTransitionStyle: StateFlow<ScreenTransitionStyle> = userSettingsPreferences.screenTransitionStyle
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScreenTransitionStyle.SLIDE)
+    val screenTransitionAmplitude: StateFlow<Int> = userSettingsPreferences.screenTransitionAmplitude
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 35)
+    val screenTransitionDurationMs: StateFlow<Int> = userSettingsPreferences.screenTransitionDurationMs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 140)
     val sendOnEnter: StateFlow<Boolean> = userSettingsPreferences.sendOnEnter.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val fontSize: StateFlow<FontSize> = userSettingsPreferences.fontSize.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FontSize.MEDIUM)
     val showOnlineStatus: StateFlow<Boolean> = userSettingsPreferences.showOnlineStatus.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -154,6 +166,21 @@ class SettingsViewModel @Inject constructor(
     fun setLanguage(language: AppLanguage) { viewModelScope.launch { languagePreferences.setLanguage(language) } }
     fun setDarkTheme(enabled: Boolean) { viewModelScope.launch { themePreferences.setDarkTheme(enabled) } }
     fun setColorTheme(name: String) { viewModelScope.launch { themePreferences.setColorTheme(name) } }
+    fun setInterfaceStyle(style: InterfaceStyle) {
+        viewModelScope.launch { userSettingsPreferences.setInterfaceStyle(style) }
+    }
+    fun setGlassIntensity(percent: Int) {
+        viewModelScope.launch { userSettingsPreferences.setGlassIntensity(percent) }
+    }
+    fun setScreenTransitionStyle(style: ScreenTransitionStyle) {
+        viewModelScope.launch { userSettingsPreferences.setScreenTransitionStyle(style) }
+    }
+    fun setScreenTransitionAmplitude(percent: Int) {
+        viewModelScope.launch { userSettingsPreferences.setScreenTransitionAmplitude(percent) }
+    }
+    fun setScreenTransitionDurationMs(durationMs: Int) {
+        viewModelScope.launch { userSettingsPreferences.setScreenTransitionDurationMs(durationMs) }
+    }
     fun setSendOnEnter(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setSendOnEnter(enabled) } }
     fun setFontSize(size: FontSize) { viewModelScope.launch { userSettingsPreferences.setFontSize(size) } }
     fun setShowOnlineStatus(enabled: Boolean) {

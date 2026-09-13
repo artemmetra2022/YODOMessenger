@@ -120,7 +120,11 @@ fun ForwardMessageScreen(
                     }
                 )
                 viewModel.messageToForward?.let { message ->
-                    ForwardPreviewCard(message = message, colorTheme = colorTheme)
+                    ForwardPreviewCard(
+                        message = message,
+                        messageCount = viewModel.messagesToForward.size,
+                        colorTheme = colorTheme
+                    )
                 }
                 OutlinedTextField(
                     value = searchQuery,
@@ -196,7 +200,7 @@ fun ForwardMessageScreen(
 
 /** Компактная карточка "что пересылаем" в шапке экрана. */
 @Composable
-private fun ForwardPreviewCard(message: Message, colorTheme: ColorTheme) {
+private fun ForwardPreviewCard(message: Message, messageCount: Int, colorTheme: ColorTheme) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -217,7 +221,7 @@ private fun ForwardPreviewCard(message: Message, colorTheme: ColorTheme) {
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                stringResource(R.string.forward_forwarded_msg),
+                if (messageCount > 1) "Выбрано сообщений: $messageCount" else stringResource(R.string.forward_forwarded_msg),
                 style = MaterialTheme.typography.labelSmall,
                 color = colorTheme.primary,
                 fontWeight = FontWeight.Bold

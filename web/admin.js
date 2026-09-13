@@ -68,7 +68,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru"];
+const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru", "artemmelnik2022spb+1@gmail.com"];
 // Официальный канал — id 1:1 с ChatRepository.OFFICIAL_CHANNEL_ID и app.js.
 const OFFICIAL_CHANNEL_ID = "yodo_official_channel";
 
@@ -142,9 +142,13 @@ function handleErr(prefix) {
   return (err) => {
     console.error(prefix, err);
     const forbidden = (err?.code || "").includes("permission-denied");
+    const email = auth.currentUser?.email || "";
+    const knownAdmin = isAdminEmail(email) || (typeof roleOfEmail === "function" && !!roleOfEmail(email));
     toast(
       forbidden
-        ? "Нет прав: войдите под аккаунтом администратора"
+        ? knownAdmin
+          ? "Доступ отклонён правилами Firestore. Опубликуйте актуальный firestore.rules."
+          : "Нет прав для аккаунта " + (email || "без email")
         : prefix + ": " + (err?.message || "ошибка"),
       false
     );

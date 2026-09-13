@@ -51,7 +51,8 @@ class ForwardMessageViewModel @Inject constructor(
     // Сообщение, которое пересылаем: берём через peek(), чтобы можно было
     // показать превью в шапке экрана; из holder'а забираем (takeAndClear)
     // только после того, как пересылка реально состоялась.
-    val messageToForward: Message? = pendingForwardHolder.peek()
+    val messagesToForward: List<Message> = pendingForwardHolder.peekAll().map { it.message }
+    val messageToForward: Message? = messagesToForward.firstOrNull()
 
     init {
         viewModelScope.launch {
@@ -82,56 +83,51 @@ class ForwardMessageViewModel @Inject constructor(
     }
 
     fun forwardTo(targetChatId: String) {
-        val message = messageToForward ?: return
-        if (_isForwarding.value) return
-        // ИСПРАВЛЕНИЕ (баг «в Переслано от.. пишется имя человека, а не канала»):
-        // используем настоящий источник сообщения (например, название канала),
-        // сохранённый в holder'е при вызове prepareForward(), а не имя текущего
-        // пользователя, который выполняет пересылку.
-        val originSenderName = pendingForwardHolder.peekOriginSenderName()
-            ?: firebaseAuth.currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Пользователь"
+        val pendingItems = pendingForwardHolder.peekAll()
+        if (pendingItems.isEmpty() || _isForwarding.value) return
         val myUid = firebaseAuth.currentUser?.uid ?: return
         _isForwarding.value = true
         _errorMessage.value = null
         viewModelScope.launch {
-            val sourceUser = message.forwardedFromSenderId?.let { userRepository.getUserById(it) }
-                ?: userRepository.getUserById(message.senderId)
-            val sourcePhotoUrl = message.forwardedFromSenderPhotoUrl ?: sourceUser?.photoUrl
-            val sourceAvatarBase64 = message.forwardedFromSenderAvatarBase64 ?: sourceUser?.avatarBase64
-            when (val result = messageRepository.forwardMessage(
-                targetChatId = targetChatId,
-                originalMessage = message,
-                fromSenderName = originSenderName,
-                fromSenderId = message.forwardedFromSenderId ?: message.senderId,
-                fromSenderPhotoUrl = sourcePhotoUrl,
-                fromSenderAvatarBase64 = sourceAvatarBase64
-            )) {
-                is SendMessageResult.Success -> {
-                    pendingForwardHolder.takeAndClear()
-                    // п.2: кладём id пересланного сообщения в holder — ChatScreen того чата,
-                    // куда пользователя сейчас перекинет навигация, заберёт его и покажет
-                    // плашку "Сообщение переслано" с 5-секундным окном отмены.
-                    if (result.messageId != null) {
-                        // НОВОЕ (п.1): передаём данные получателя, чтобы плашка могла
-                        // написать "Сообщение переслано пользователю ..." с переходом в профиль.
-                        val targetChat = _allChats.value.find { it.chatId == targetChatId }
-                        pendingForwardUndoHolder.set(
-                            PendingForwardUndo(
-                                targetChatId = targetChatId,
-                                messageId = result.messageId,
-                                targetName = targetChat?.title,
-                                targetUsername = targetChat?.username,
-                                targetUserId = targetChat?.otherUserId
-                            )
-                        )
+            val createdIds = mutableListOf<String>()
+            for (item in pendingItems) {
+                val message = item.message
+                val sourceUser = message.forwardedFromSenderId?.let { userRepository.getUserById(it) }
+                    ?: userRepository.getUserById(message.senderId)
+                val result = messageRepository.forwardMessage(
+                    targetChatId = targetChatId,
+                    originalMessage = message,
+                    fromSenderName = item.originSenderName,
+                    fromSenderId = message.forwardedFromSenderId ?: message.senderId,
+                    fromSenderPhotoUrl = message.forwardedFromSenderPhotoUrl ?: sourceUser?.photoUrl,
+                    fromSenderAvatarBase64 = message.forwardedFromSenderAvatarBase64 ?: sourceUser?.avatarBase64
+                )
+                if (result is SendMessageResult.Error) {
+                    if (createdIds.isNotEmpty()) {
+                        messageRepository.deleteMessages(targetChatId, createdIds)
                     }
-                    _forwardedToChatId.value = targetChatId
-                }
-                is SendMessageResult.Error -> {
                     _isForwarding.value = false
                     _errorMessage.value = result.message
+                    return@launch
+                }
+                if (result is SendMessageResult.Success && result.messageId != null) {
+                    createdIds += result.messageId
                 }
             }
+            pendingForwardHolder.takeAllAndClear()
+            if (createdIds.isNotEmpty()) {
+                val targetChat = _allChats.value.find { it.chatId == targetChatId }
+                pendingForwardUndoHolder.set(
+                    PendingForwardUndo(
+                        targetChatId = targetChatId,
+                        messageIds = createdIds,
+                        targetName = targetChat?.title,
+                        targetUsername = targetChat?.username,
+                        targetUserId = targetChat?.otherUserId
+                    )
+                )
+            }
+            _forwardedToChatId.value = targetChatId
         }
     }
 }

@@ -20,6 +20,19 @@ import javax.inject.Singleton
 
 private val Context.settingsDataStore by preferencesDataStore(name = "yodo_user_settings")
 
+enum class ScreenTransitionStyle(val displayName: String) {
+    SLIDE("Сдвиг"),
+    FADE("Затухание"),
+    SCALE("Масштаб"),
+    GLASS("Жидкое стекло"),
+    NONE("Без эффекта")
+}
+
+enum class InterfaceStyle(val displayName: String, val description: String) {
+    CLASSIC("Текущий", "Привычный интерфейс YODO"),
+    EXPERIMENTAL("Экспериментальный", "Жидкое стекло: прозрачные панели, блики и глубина")
+}
+
 enum class FontSize(val scale: Float, val displayName: String) {
     EXTRA_SMALL(0.8f, "XS"),
     SMALL(0.9f, "S"),
@@ -63,6 +76,11 @@ class UserSettingsPreferences @Inject constructor(
 ) {
     private val sendOnEnterKey = booleanPreferencesKey("send_on_enter")
     private val fontSizeKey = stringPreferencesKey("font_size")
+    private val interfaceStyleKey = stringPreferencesKey("interface_style")
+    private val glassIntensityKey = intPreferencesKey("glass_intensity_percent")
+    private val screenTransitionDurationKey = intPreferencesKey("screen_transition_duration_ms")
+    private val screenTransitionStyleKey = stringPreferencesKey("screen_transition_style")
+    private val screenTransitionAmplitudeKey = intPreferencesKey("screen_transition_amplitude_percent")
     private val showOnlineStatusKey = booleanPreferencesKey("show_online_status")
     private val showReadReceiptsKey = booleanPreferencesKey("show_read_receipts")
     private val autoDownloadImagesKey = booleanPreferencesKey("auto_download_images")
@@ -112,6 +130,24 @@ class UserSettingsPreferences @Inject constructor(
     // НОВОЕ: скрывать системный статус-бар (время/батарея) на экране списка чатов.
     private val hideStatusBarOnChatListKey = booleanPreferencesKey("hide_status_bar_on_chat_list")
 
+    val interfaceStyle: Flow<InterfaceStyle> = context.settingsDataStore.data.map { prefs ->
+        prefs[interfaceStyleKey]?.let { raw -> runCatching { InterfaceStyle.valueOf(raw) }.getOrNull() }
+            ?: InterfaceStyle.CLASSIC
+    }
+    val glassIntensity: Flow<Int> = context.settingsDataStore.data.map {
+        (it[glassIntensityKey] ?: 55).coerceIn(0, 100)
+    }
+    val screenTransitionStyle: Flow<ScreenTransitionStyle> = context.settingsDataStore.data.map { prefs ->
+        prefs[screenTransitionStyleKey]?.let { raw ->
+            runCatching { ScreenTransitionStyle.valueOf(raw) }.getOrNull()
+        } ?: ScreenTransitionStyle.SLIDE
+    }
+    val screenTransitionAmplitude: Flow<Int> = context.settingsDataStore.data.map {
+        (it[screenTransitionAmplitudeKey] ?: 35).coerceIn(0, 100)
+    }
+    val screenTransitionDurationMs: Flow<Int> = context.settingsDataStore.data.map {
+        (it[screenTransitionDurationKey] ?: 140).coerceIn(0, 400)
+    }
     val sendOnEnter: Flow<Boolean> = context.settingsDataStore.data.map { it[sendOnEnterKey] ?: true }
     val fontSize: Flow<FontSize> = context.settingsDataStore.data.map { prefs ->
         prefs[fontSizeKey]?.let { raw -> runCatching { FontSize.valueOf(raw) }.getOrNull() } ?: FontSize.MEDIUM
@@ -201,6 +237,23 @@ class UserSettingsPreferences @Inject constructor(
     }
     suspend fun clearNotificationSnooze() {
         context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = 0L }
+    }
+    suspend fun setInterfaceStyle(style: InterfaceStyle) {
+        context.settingsDataStore.edit { it[interfaceStyleKey] = style.name }
+    }
+    suspend fun setGlassIntensity(percent: Int) {
+        context.settingsDataStore.edit { it[glassIntensityKey] = percent.coerceIn(0, 100) }
+    }
+    suspend fun setScreenTransitionStyle(style: ScreenTransitionStyle) {
+        context.settingsDataStore.edit { it[screenTransitionStyleKey] = style.name }
+    }
+    suspend fun setScreenTransitionAmplitude(percent: Int) {
+        context.settingsDataStore.edit { it[screenTransitionAmplitudeKey] = percent.coerceIn(0, 100) }
+    }
+    suspend fun setScreenTransitionDurationMs(durationMs: Int) {
+        context.settingsDataStore.edit {
+            it[screenTransitionDurationKey] = durationMs.coerceIn(0, 400)
+        }
     }
     suspend fun setSendOnEnter(enabled: Boolean) { context.settingsDataStore.edit { it[sendOnEnterKey] = enabled } }
     suspend fun setFontSize(size: FontSize) { context.settingsDataStore.edit { it[fontSizeKey] = size.name } }

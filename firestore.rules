@@ -74,7 +74,7 @@ service cloud.firestore {
       // могут писать в официальный канал рассылок.
       return isSignedIn() &&
         request.auth.token.email.lower() in
-          ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru'];
+          ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru', 'artemmelnik2022spb+1@gmail.com'];
     }
 
     // НОВОЕ (модерация групп/каналов): владелец чата, назначенный админ, либо

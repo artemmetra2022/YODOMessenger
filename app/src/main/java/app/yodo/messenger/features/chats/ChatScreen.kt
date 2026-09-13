@@ -2,6 +2,11 @@ package app.yodo.messenger.features.chats
 
 import app.yodo.messenger.ui.components.FullscreenDialog
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.ui.theme.LocalInterfaceStyle
+import app.yodo.messenger.ui.theme.LocalGlassIntensity
+import app.yodo.messenger.ui.components.glassTint
+import app.yodo.messenger.ui.components.liquidGlass
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -156,6 +161,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -244,12 +250,14 @@ fun ChatScreen(
     val chatBackgroundType by viewModel.chatBackgroundType.collectAsState()
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val colorTheme = LocalColorTheme.current
+    val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
     var inputText by remember { mutableStateOf("") }
     // НОВОЕ (система жало): сообщени, на которое сейчас ткрыт диалог "Пожаловаться".
     var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -281,14 +289,14 @@ fun ChatScreen(
     // (особенно с картинками/медиа) до вызова animateScrollToItem. Теперь:
     // 1) триггер — id последнего сообщения, а не размер списка, поэтому реагирует и на
     //    обновления контента последнего сообщения;
-    // 2) делаем немедленный (без анимации) scrollToItem, а затем ещё раз после того, как
+    // 2) делаем немедленный (без анимации) scrollToItem, а затем ещё раз после то��о, как
     //    Compose пересчитает layout — на случай, если высота последнего айтема изменилась
-    //    уже после первого скролла (догрузилась картинка и т.п.).
+    //    у��е после первого скролла (д��грузилась картинка и т.п.).
     LaunchedEffect(uiState.messages.lastOrNull()?.id, uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
             val lastIndex = uiState.messages.size - 1
             listState.scrollToItem(lastIndex)
-            // Даём Compose кадр на пересчёт реальных высот (картинки/медиа догружаются
+            // Даём Compose кадр на пересчёт реальных высот (��артинки/медиа догружаются
             // асинхронно), затем ещё раз докручиваем — теперь уже с анимацией.
             kotlinx.coroutines.delay(50L)
             val currentLastIndex = uiState.messages.size - 1
@@ -460,6 +468,9 @@ fun ChatScreen(
     }
     val selectedMessages = displayedMessages.filter { it.id in selectedMessageIds.value }
     val isChannel = uiState.chatType == "CHANNEL"
+    val canDeleteSelected = selectedMessages.any { it.senderId == viewModel.currentUserId } ||
+        uiState.myPermissions?.has(app.yodo.messenger.domain.model.Permission.DELETE_MESSAGES) == true
+    val forwardableSelected = selectedMessages.filterNot { it.isViewOnce }
     // НОВОЕ (FAQ-бот поддержки): бот показывается только пользователю, не оператору,
     // который отвечает в этом же чате из своего аккаунта поддержки.
     val isSupportAdmin = viewModel.isSupportAdmin
@@ -506,28 +517,75 @@ fun ChatScreen(
                     }
                 }
                 if (isSelectionMode) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { selectedMessageIds.value = emptySet() }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Отменить выбор")
-                        }
-                        Text("Выбрано: ${selectedMessages.size}", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                        IconButton(
-                            onClick = { viewModel.deleteMessages(selectedMessages); selectedMessageIds.value = emptySet() },
-                            enabled = selectedMessages.any { it.senderId == viewModel.currentUserId }
-                        ) { Icon(Icons.Filled.Delete, contentDescription = "Удалить выбранные") }
-                        IconButton(
-                            onClick = {
-                                selectedMessages.forEach { viewModel.togglePinMessage(it.id) }
-                                selectedMessageIds.value = emptySet()
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { selectedMessageIds.value = emptySet() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Отменить выбор")
                             }
-                        ) { Icon(Icons.Filled.PushPin, contentDescription = "Закрепить выбранные") }
+                            Text(
+                                "Выбрано: ${selectedMessages.size}",
+                                modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    val text = selectedMessages.sortedBy { it.timestamp }
+                                        .map { it.text.trim() }
+                                        .filter { it.isNotEmpty() }
+                                        .joinToString("\n\n")
+                                    if (text.isNotEmpty()) clipboardManager.setText(AnnotatedString(text))
+                                    selectedMessageIds.value = emptySet()
+                                },
+                                enabled = selectedMessages.any { it.text.isNotBlank() }
+                            ) { Icon(Icons.Filled.ContentCopy, contentDescription = "Копировать выбранные") }
+                            IconButton(
+                                onClick = {
+                                    viewModel.saveToFavorite(forwardableSelected)
+                                    selectedMessageIds.value = emptySet()
+                                },
+                                enabled = forwardableSelected.isNotEmpty()
+                            ) { Icon(Icons.Filled.Bookmark, contentDescription = "Сохранить выбранные") }
+                            IconButton(
+                                onClick = {
+                                    viewModel.prepareForward(forwardableSelected)
+                                    selectedMessageIds.value = emptySet()
+                                    onForwardMessage()
+                                },
+                                enabled = forwardableSelected.isNotEmpty()
+                            ) { Icon(Icons.Filled.Forward, contentDescription = "Переслать выбранные") }
+                            IconButton(
+                                onClick = { viewModel.deleteMessages(selectedMessages); selectedMessageIds.value = emptySet() },
+                                enabled = canDeleteSelected
+                            ) { Icon(Icons.Filled.Delete, contentDescription = "Удалить выбранные") }
+                            IconButton(
+                                onClick = {
+                                    selectedMessages.forEach { viewModel.togglePinMessage(it.id) }
+                                    selectedMessageIds.value = emptySet()
+                                }
+                            ) { Icon(Icons.Filled.PushPin, contentDescription = "Закрепить выбранные") }
+                        }
                     }
                 }
 
                 TopAppBar(
+                    modifier = Modifier.liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+                        tint = glassTint(isDarkTheme),
+                        dark = isDarkTheme,
+                        elevation = 10
+                    ),
                     title = {
                         if (uiState.isSearchActive) {
                             OutlinedTextField(
@@ -583,7 +641,13 @@ fun ChatScreen(
                                 }
                                 Column {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = uiState.chatTitle, style = MaterialTheme.typography.titleLarge)
+                                        Text(
+                                            text = uiState.chatTitle,
+                                            style = if (experimentalInterface) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+                                            fontWeight = if (experimentalInterface) FontWeight.SemiBold else FontWeight.Normal,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                         if (uiState.isVerified) {
                                             var showVerifiedInfo by remember { mutableStateOf(false) }
                                             Box(modifier = Modifier.padding(start = 6.dp)) {
@@ -732,7 +796,7 @@ fun ChatScreen(
                                                 coroutineScope.launch { snackbarHostState.showSnackbar("Не удалось сделать скриншот") }
                                             } else {
                                                 // ИСПРАВЛЕНО (баг 8): снимаем ВЕСЬ экран чата — от верхнего края окна
-                                                // (статус-бар + шапка с контактом) до нижней границы области сообщений,
+                                                // (статус-бар + шапка с контактом) до нижней границы о��ласти сообщений,
                                                 // которая заканчивается ровно над полем ввода. Поле ввода в кадр не попадает.
                                                 val screenBounds = android.graphics.Rect(0, 0, contentBounds.right, contentBounds.bottom)
                                                 coroutineScope.launch {
@@ -781,8 +845,8 @@ fun ChatScreen(
                         }
                     },
                     colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                        containerColor = telegramBar,
-                        scrolledContainerColor = telegramBar,
+                        containerColor = if (experimentalInterface) Color.Transparent else telegramBar,
+                        scrolledContainerColor = if (experimentalInterface) Color.Transparent else telegramBar,
                         titleContentColor = MaterialTheme.colorScheme.onSurface,
                         navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
                         actionIconContentColor = MaterialTheme.colorScheme.onSurface
@@ -890,7 +954,7 @@ fun ChatScreen(
                         onDismiss = { showScheduledList = false }
                     )
                 }
-                if (uiState.justForwardedMessageId != null) {
+                if (uiState.justForwardedMessageIds.isNotEmpty()) {
                     Row(
                         modifier = Modifier.fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surfaceVariant)
@@ -1131,7 +1195,7 @@ fun ChatScreen(
                             )
                         }
                         // НОВОЕ (реальная блокировка): вместо поля ввода показываем плашку,
-                        // если собеседник заблокировал меня или я заблокировал его.
+                        // если собеседник заблоки��овал меня или я заблокировал его.
                         uiState.otherBlockedMe || uiState.iBlockedOther -> {
                             BlockedInputBanner(
                                 theyBlockedMe = uiState.otherBlockedMe,
@@ -1329,7 +1393,19 @@ fun ChatScreen(
                 .then(
                     if (chatBackgroundType != app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE) {
                         Modifier
-                            .background(telegramBackground)
+                            .then(
+                                if (experimentalInterface) {
+                                    Modifier.background(
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                colorTheme.primary.copy(alpha = if (isDarkTheme) 0.20f else 0.11f),
+                                                telegramBackground,
+                                                colorTheme.secondary.copy(alpha = if (isDarkTheme) 0.14f else 0.08f)
+                                            )
+                                        )
+                                    )
+                                } else Modifier.background(telegramBackground)
+                            )
                             .drawBehind {
                                 val patternColor = if (isDarkTheme) Color.White.copy(alpha = 0.018f) else Color(0xFF2F8243).copy(alpha = 0.035f)
                                 val step = 96.dp.toPx()
@@ -1553,7 +1629,7 @@ private fun ViewOnceImageOverlay(
     // НОВОЕ (защита от скриншотов, слой 1): FLAG_SECURE на окне Activity — стандартный
     // системный способ заблокировать скриншот/запись экрана для текущего окна (система
     // просто отдаёт чёрный кадр). Ставим при входе в оверлей и снимаем при выходе, а не
-    // на всё время работы приложения — иначе пользователь не смог бы делать скриншоты
+    // на всё время работы приложения — иначе пользователь не ��мог бы делать скриншоты
     // обычных сообщений, что не входит в задачу.
     DisposableEffect(Unit) {
         val activity = app.yodo.messenger.util.ChatScreenshotUtils.findActivity(context)
@@ -1627,6 +1703,8 @@ private fun ViewOnceImageOverlay(
 
 @Composable
 private fun DateSeparator(label: String) {
+    val experimental = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.Center
@@ -1636,8 +1714,19 @@ private fun DateSeparator(label: String) {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .liquidGlass(
+                    enabled = experimental,
+                    shape = RoundedCornerShape(12.dp),
+                    tint = glassTint(dark),
+                    dark = dark,
+                    elevation = 3
+                )
+                .then(
+                    if (!experimental) Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                    else Modifier
+                )
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         )
     }
@@ -1909,7 +1998,19 @@ private fun MessageBubble(
         if (isDarkTheme) TelegramColors.darkIncomingTime else TelegramColors.lightIncomingTime
     }
     val alignment = if (isOwnMessage) Alignment.CenterEnd else Alignment.CenterStart
-    val bubbleShape = telegramBubbleShape(isOwnMessage, groupPosition)
+    val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val glassFraction = LocalGlassIntensity.current.coerceIn(0, 100) / 100f
+    val bubbleGlassAlpha = (if (isDarkTheme) 0.08f else 0.05f) +
+        glassFraction * (if (isDarkTheme) 0.80f else 0.77f)
+    val renderedBubbleColor = if (experimentalInterface) {
+        bubbleColor.copy(alpha = bubbleGlassAlpha.coerceIn(0.05f, 0.90f))
+    } else bubbleColor
+    val bubbleShape = if (experimentalInterface) {
+        if (isOwnMessage) RoundedCornerShape(18.dp, 18.dp, 5.dp, 18.dp)
+        else RoundedCornerShape(18.dp, 18.dp, 18.dp, 5.dp)
+    } else {
+        telegramBubbleShape(isOwnMessage, groupPosition)
+    }
     val clipboardManager = LocalClipboardManager.current
     val sendAppearance = remember(message.id) { Animatable(if (isOwnMessage) 0.86f else 1f) }
     LaunchedEffect(message.id) {
@@ -2013,9 +2114,18 @@ private fun MessageBubble(
                             spotColor = Color.Black.copy(alpha = 0.06f)
                         )
                         .clip(bubbleShape)
-                        .background(bubbleColor)
+                        .background(renderedBubbleColor)
+                        .border(
+                            width = if (experimentalInterface) 0.8.dp else 0.dp,
+                            color = if (isDarkTheme) {
+                                Color.White.copy(alpha = 0.08f + glassFraction * 0.24f)
+                            } else {
+                                Color.White.copy(alpha = 0.28f + glassFraction * 0.66f)
+                            },
+                            shape = bubbleShape
+                        )
                         .then(if (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST) {
-                            Modifier.drawBehind { drawTelegramTail(bubbleColor, isOwnMessage) }
+                            Modifier.drawBehind { drawTelegramTail(renderedBubbleColor, isOwnMessage) }
                         } else Modifier)
                         .pointerInput(message.id, isSelectionMode) {
                             detectTapGestures(
@@ -2469,13 +2579,11 @@ private fun MessageBubble(
                             onClick = { showMenu = false; showReactionPicker = true }
                         )
                     }
-                    if (!isOfficialChannel) {
-                        DropdownMenuItem(
-                            text = { Text("Выбрать") },
-                            leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
-                            onClick = { showMenu = false; onSelectionToggle(message) }
-                        )
-                    }
+                    DropdownMenuItem(
+                        text = { Text("Выбрать") },
+                        leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
+                        onClick = { showMenu = false; onSelectionToggle(message) }
+                    )
                     if (!isOfficialChannel) {
                         DropdownMenuItem(
                             text = { Text("Информация о сообщении") },
@@ -2836,7 +2944,7 @@ private fun NewsFullscreenDialog(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
-                // НОВОЕ: кнопка «Скопировать» — копирует весь пост в буфер обмена.
+                // НОВОЕ: кнопка «Ск��пировать» — копирует весь пост в буфер обмена.
                 IconButton(onClick = {
                     clipboardManager.setText(AnnotatedString(body))
                     justCopied = true
@@ -3086,6 +3194,9 @@ private fun MessageInputBar(
     onToggleSilent: () -> Unit = {}
 ) {
     val canSend = !isSending && text.isNotBlank()
+    val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val glassFraction = LocalGlassIntensity.current.coerceIn(0, 100) / 100f
+    val inputGlassAlpha = (0.04f + glassFraction * 0.78f).coerceIn(0.04f, 0.84f)
     var showEmojiPicker by remember { mutableStateOf(false) }
     Surface(
         color = Color.Transparent,
@@ -3096,7 +3207,20 @@ private fun MessageInputBar(
                 EmojiPickerPanel(onEmojiSelected = { emoji -> onTextChange(text + emoji) })
             }
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (experimentalInterface) Modifier.padding(horizontal = 5.dp, vertical = 5.dp) else Modifier)
+                    .liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = RoundedCornerShape(30.dp),
+                        tint = glassTint(MaterialTheme.colorScheme.background.luminance() < 0.5f),
+                        dark = MaterialTheme.colorScheme.background.luminance() < 0.5f,
+                        elevation = 10
+                    )
+                    .padding(
+                        horizontal = if (experimentalInterface) 5.dp else 8.dp,
+                        vertical = if (experimentalInterface) 4.dp else 8.dp
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -3116,24 +3240,33 @@ private fun MessageInputBar(
                 Spacer(modifier = Modifier.width(4.dp))
                 Box(
                     modifier = Modifier
-                        .size(50.dp)
+                        .size(if (experimentalInterface) 42.dp else 50.dp)
                         .clip(CircleShape)
-                        .background(colorTheme.primary.copy(alpha = 0.12f))
+                        .background(if (experimentalInterface) Color.Transparent else colorTheme.primary.copy(alpha = 0.12f))
                         .clickable(onClick = onAttachClick),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Filled.AttachFile, contentDescription = "Прикрепить фото", tint = colorTheme.primary, modifier = Modifier.size(24.dp))
                 }
                 Surface(
-                    color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) TelegramColors.darkIncoming else Color(0xFFF0F0F0),
-                    shape = RoundedCornerShape(22.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 42.dp)
+                    color = if (experimentalInterface) {
+                        if (MaterialTheme.colorScheme.background.luminance() < 0.5f) {
+                            Color(0xFF202C33).copy(alpha = inputGlassAlpha)
+                        } else {
+                            Color.White.copy(alpha = inputGlassAlpha)
+                        }
+                    } else if (MaterialTheme.colorScheme.background.luminance() < 0.5f) TelegramColors.darkIncoming else Color(0xFFF0F0F0),
+                    shape = RoundedCornerShape(if (experimentalInterface) 24.dp else 22.dp),
+                    border = if (experimentalInterface) androidx.compose.foundation.BorderStroke(
+                        0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    ) else null,
+                    modifier = Modifier.weight(1f).heightIn(min = if (experimentalInterface) 46.dp else 42.dp)
                 ) {
                     OutlinedTextField(
                         value = text, onValueChange = onTextChange,
                         placeholder = { Text(placeholder, color = Color.Gray) },
                         modifier = Modifier.fillMaxWidth(), maxLines = 5,
-                        shape = RoundedCornerShape(22.dp),
+                        shape = RoundedCornerShape(if (experimentalInterface) 24.dp else 22.dp),
                         colors = androidx.compose.material3.TextFieldDefaults.colors(
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
@@ -3149,7 +3282,7 @@ private fun MessageInputBar(
                 if (text.isBlank() && !isSending) {
                     Box(
                         modifier = Modifier
-                            .size(50.dp)
+                            .size(if (experimentalInterface) 46.dp else 50.dp)
                             .clip(CircleShape)
                             .background(colorTheme.primary)
                             .pointerInput(Unit) {
@@ -3173,7 +3306,7 @@ private fun MessageInputBar(
                     Box {
                         Box(
                             modifier = Modifier
-                                .size(42.dp)
+                                .size(if (experimentalInterface) 46.dp else 42.dp)
                                 .clip(CircleShape)
                                 .background(if (canSend) colorTheme.primary else colorTheme.primary.copy(alpha = 0.3f))
                                 .combinedClickable(
@@ -3774,7 +3907,7 @@ private fun ScheduledMessagesDialog(
         title = { Text("Отложенные сообщения") },
         text = {
             if (items.isEmpty()) {
-                Text("Нет отложенных сообщений", style = MaterialTheme.typography.bodyMedium)
+                Text("Нет ��тложенных сообщений", style = MaterialTheme.typography.bodyMedium)
             } else {
                 Column {
                     items.forEach { item ->
@@ -3942,7 +4075,7 @@ private fun DisappearingMessagesDialog(
     val isCustomSelected = currentTtlSeconds != null && DISAPPEARING_TTL_OPTIONS.none { it.second == currentTtlSeconds }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (perMessage) "Тймер для этого сообщения" else "Исчезающие сообщения") },
+        title = { Text(if (perMessage) "Тймер для этого сообщени��" else "Исчезающие сообщения") },
         text = {
             Column {
                 Text(
@@ -4690,7 +4823,7 @@ private fun PollMessageBubble(
             val answeredRight = currentUserId?.let { poll.answeredCorrectly(it) } ?: false
             if (hasVoted) {
                 Text(
-                    if (answeredRight) "✓ Правильно!" else "✗ Неверно",
+                    if (answeredRight) "✓ Пра��ильно!" else "✗ Неверно",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = if (answeredRight) Color(0xFF2E7D32) else Color(0xFFC62828)
