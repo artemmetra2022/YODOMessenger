@@ -162,6 +162,30 @@ object SettingsSearchIndex {
             sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
+            id = "weather_card", anchorId = ANCHOR_CHATS,
+            title = "Погода", subtitle = "Показывать прогноз OpenWeatherMap на главном экране",
+            keywords = listOf("погода", "температура", "прогноз", "город", "openweather"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "chat_list_sort", anchorId = ANCHOR_CHATS,
+            title = "Сортировка чатов", subtitle = "По активности, непрочитанным или алфавиту",
+            keywords = listOf("сортировка", "порядок", "алфавит", "непрочитанные сначала", "активность"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "compact_chat_list", anchorId = ANCHOR_CHATS,
+            title = "Компактный список чатов", subtitle = "Показать больше диалогов на экране",
+            keywords = listOf("компактный", "плотность", "маленькие карточки", "больше чатов"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "hide_chat_previews", anchorId = ANCHOR_CHATS,
+            title = "Скрывать текст сообщений", subtitle = "Конфиденциальный список чатов без превью",
+            keywords = listOf("скрыть текст", "превью", "конфиденциальность", "последнее сообщение", "черновик"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
             id = "chat_background", anchorId = ANCHOR_CHAT_BACKGROUND,
             title = "Фон чата", subtitle = "Изменить фоновое изображение чатов",
             keywords = listOf("фон", "обои", "background", "картинка чата", "заднийфон"),

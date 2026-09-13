@@ -21,6 +21,7 @@ sealed class Routes(val route: String) {
         const val ARG_EMAIL = "email"
     }
     data object ChatList : Routes("chat_list")
+    data object Weather : Routes("weather")
     // НОВОЕ (каталог/рекомендации каналов): витрина каналов без поискового запроса.
     data object DiscoverChannels : Routes("discover_channels")
     data object Search : Routes("search")

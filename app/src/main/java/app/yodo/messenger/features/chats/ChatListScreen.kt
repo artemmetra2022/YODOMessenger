@@ -32,8 +32,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -87,6 +89,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
 import app.yodo.messenger.data.local.HiddenPinResult
+import app.yodo.messenger.data.local.ChatListSortOrder
 import app.yodo.messenger.features.settings.PinCellsInput
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -115,6 +118,8 @@ import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.LocalInterfaceStyle
 import app.yodo.messenger.data.local.InterfaceStyle
 import app.yodo.messenger.ui.theme.YodoMotion
+import app.yodo.messenger.features.weather.WeatherCompactCard
+import app.yodo.messenger.features.weather.WeatherViewModel
 import app.yodo.messenger.ui.theme.YodoOnline
 import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
@@ -144,6 +149,7 @@ fun ChatListScreen(
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
+    onWeatherClick: () -> Unit = {},
     // НОВОЕ (чат поддержки): открытие админ-панели поддержки.
     onOpenAdminPanel: () -> Unit = {},
     // НОВОЕ (расширение интерфейса каналов): открытие каталога/рекомендаций каналов.
@@ -151,11 +157,16 @@ fun ChatListScreen(
     // НОВОЕ (админ-функции групп): переход к экрану информации о группе по тапу
     // на бейдж заявок (для владельца/админа — сразу к заявкам, без захода в чат).
     onOpenGroupInfo: (String) -> Unit = {},
-    viewModel: ChatListViewModel = hiltViewModel()
+    viewModel: ChatListViewModel = hiltViewModel(),
+    weatherViewModel: WeatherViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val activeFilter by viewModel.activeFilter.collectAsState()
     val chatFolders by viewModel.chatFolders.collectAsState()
+    val compactChatList by viewModel.compactChatList.collectAsState()
+    val hideChatListPreviews by viewModel.hideChatListPreviews.collectAsState()
+    val weatherCardEnabled by weatherViewModel.weatherCardEnabled.collectAsState()
+    val chatListSortOrder by viewModel.chatListSortOrder.collectAsState()
     // НОВОЕ (скрытые чаты): множество ID скрытых чатов для подписей меню.
     val hiddenChatIds by viewModel.hiddenChatIds.collectAsState()
     // НОВОЕ (скрытые чаты): список скрытых чатов и признак PIN для шторки "потянуть вниз".
@@ -290,6 +301,8 @@ fun ChatListScreen(
                     }
                     val headerColor = if (!isNetworkAvailable || isInitialLoading || isRefreshing) {
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    } else if (experimentalInterface) {
+                        colorTheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     }
@@ -342,6 +355,12 @@ fun ChatListScreen(
                     // НОВОЕ (папки): долгое нажатие на папке — управление (переименовать/удалить/состав).
                     onFolderLongPress = { folderId -> manageFolderId = folderId }
                 )
+                if (weatherCardEnabled) {
+                    WeatherCompactCard(
+                        onClick = onWeatherClick,
+                        viewModel = weatherViewModel
+                    )
+                }
             }
         },
         floatingActionButton = {
@@ -419,22 +438,21 @@ fun ChatListScreen(
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
                 is ChatListUiState.Empty -> {
-                    Text(
-                        text = stringResource(R.string.chat_list_empty_all),
-                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyLarge
+                    EmptyChatsState(
+                        message = stringResource(R.string.chat_list_empty_all),
+                        experimental = experimentalInterface,
+                        colorTheme = colorTheme,
+                        modifier = Modifier.align(Alignment.Center)
                     )
                 }
                 is ChatListUiState.Content -> {
                     if (state.chats.isEmpty()) {
                         // Пустой результат фильтрации
-                        Text(
-                            text = emptyFilterMessage(activeFilter),
-                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        EmptyChatsState(
+                            message = emptyFilterMessage(activeFilter),
+                            experimental = experimentalInterface,
+                            colorTheme = colorTheme,
+                            modifier = Modifier.align(Alignment.Center)
                         )
                     } else {
                         LazyColumn(
@@ -500,7 +518,19 @@ fun ChatListScreen(
                             }
                             // НОВОЕ (п.16, оптимизация прокрутки): contentType помогает
                             // LazyColumn переиспользовать композиции однотипных строк.
-                            items(state.chats, key = { it.chatId }, contentType = { "chat_row" }) { chat ->
+                            val sortedChats = when (chatListSortOrder) {
+                                ChatListSortOrder.RECENT -> state.chats
+                                ChatListSortOrder.UNREAD_FIRST -> state.chats.sortedWith(
+                                    compareByDescending<ChatPreview> { it.isPinned }
+                                        .thenByDescending { it.unreadCount > 0 }
+                                        .thenByDescending { it.lastMessageTimestamp }
+                                )
+                                ChatListSortOrder.ALPHABETICAL -> state.chats.sortedWith(
+                                    compareByDescending<ChatPreview> { it.isPinned }
+                                        .thenBy { it.title.lowercase(Locale.getDefault()) }
+                                )
+                            }
+                            items(sortedChats, key = { it.chatId }, contentType = { "chat_row" }) { chat ->
                                 SwipeableChatListItem(
                                     chat = chat,
                                     colorTheme = colorTheme,
@@ -515,6 +545,8 @@ fun ChatListScreen(
                                     // НОВОЕ (админ-функции групп): тап по бейджу заявок —
                                     // сразу к экрану группы с заявками.
                                     onRequestsClick = { onOpenGroupInfo(chat.chatId) },
+                                    compact = compactChatList,
+                                    hidePreview = hideChatListPreviews,
                                     modifier = Modifier.animateItemPlacement(
                                         YodoMotion.emphasized(YodoMotion.DURATION_MEDIUM)
                                     )
@@ -546,6 +578,50 @@ fun ChatListScreen(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(28.dp),
                     strokeWidth = 3.dp
                 )
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = chatListState.firstVisibleItemIndex > 3,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
+                enter = androidx.compose.animation.fadeIn(YodoMotion.standard()) +
+                    androidx.compose.animation.scaleIn(YodoMotion.confirm(), initialScale = 0.75f),
+                exit = androidx.compose.animation.fadeOut(YodoMotion.exit()) +
+                    androidx.compose.animation.scaleOut(YodoMotion.exit(), targetScale = 0.75f)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = if (experimentalInterface) Color.Transparent else MaterialTheme.colorScheme.surfaceContainer,
+                    shadowElevation = if (experimentalInterface) 0.dp else 5.dp,
+                    modifier = Modifier
+                        .liquidGlass(
+                            enabled = experimentalInterface,
+                            shape = RoundedCornerShape(22.dp),
+                            tint = MaterialTheme.colorScheme.surface,
+                            dark = glassDark,
+                            elevation = 7
+                        )
+                        .clickable {
+                            scope.launch { chatListState.animateScrollToItem(0) }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.ArrowUpward,
+                            contentDescription = "Наверх",
+                            tint = colorTheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "Наверх",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colorTheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
         }
     }
@@ -762,12 +838,12 @@ private fun FilterChip(
     val colorTheme = LocalColorTheme.current
     val experimental = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val bgColor = if (isActive) colorTheme.primary else colorTheme.primary.copy(alpha = 0.12f)
-    val textColor = if (isActive) Color.White else colorTheme.primary
+    val bgColor = if (isActive) colorTheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     val glassModifier = Modifier.liquidGlass(
         enabled = experimental,
         shape = RoundedCornerShape(20.dp),
-        tint = if (isActive) colorTheme.primary else glassTint(dark),
+        tint = if (isActive) colorTheme.primary else MaterialTheme.colorScheme.surface,
         dark = dark,
         elevation = if (isActive) 7 else 3
     )
@@ -820,7 +896,7 @@ private fun AddFolderChip(onClick: () -> Unit) {
     
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = if (experimental) Color.Transparent else colorTheme.primary.copy(alpha = 0.12f),
+        color = if (experimental) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
             .liquidGlass(
                 enabled = experimental,
@@ -1062,6 +1138,61 @@ private fun ManageFolderDialog(
 }
 
 @Composable
+private fun EmptyChatsState(
+    message: String,
+    experimental: Boolean,
+    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
+    modifier: Modifier = Modifier
+) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    Column(
+        modifier = modifier
+            .padding(24.dp)
+            .liquidGlass(
+                enabled = experimental,
+                shape = RoundedCornerShape(26.dp),
+                tint = MaterialTheme.colorScheme.surface,
+                dark = dark,
+                elevation = 5
+            )
+            .clip(RoundedCornerShape(26.dp))
+            .background(if (experimental) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 28.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(colorTheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Filled.ChatBubbleOutline,
+                contentDescription = null,
+                tint = colorTheme.primary,
+                modifier = Modifier.size(30.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(5.dp))
+        Text(
+            text = "Новые диалоги появятся здесь",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
 private fun emptyFilterMessage(filter: ChatFilter): String = when (filter) {
     ChatFilter.ALL      -> stringResource(R.string.chat_list_empty_all)
     ChatFilter.PRIVATE  -> stringResource(R.string.chat_list_empty_private)
@@ -1089,6 +1220,8 @@ internal fun SwipeableChatListItem(
     onToggleHidden: () -> Unit = {},
     // НОВОЕ (админ-функции групп): тап по бейджу заявок на карточке группы.
     onRequestsClick: () -> Unit = {},
+    compact: Boolean = false,
+    hidePreview: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // НОВОЕ (motion): свайп теперь анимируется пружиной вместо мгновенного
@@ -1172,7 +1305,9 @@ internal fun SwipeableChatListItem(
                 chat = chat, colorTheme = colorTheme,
                 onClick = onClick, onLongClick = { showMenu = true },
                 onRequestsClick = onRequestsClick,
-                isHidden = isHidden
+                isHidden = isHidden,
+                compact = compact,
+                hidePreview = hidePreview
             )
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -1198,7 +1333,9 @@ private fun ChatListItem(
     onLongClick: () -> Unit,
     // НОВОЕ (админ-функции групп): тап по бейджу заявок открывает экран группы.
     onRequestsClick: () -> Unit = {},
-    isHidden: Boolean = false
+    isHidden: Boolean = false,
+    compact: Boolean = false,
+    hidePreview: Boolean = false
 ) {
     // ИСПРАВЛЕНО (логотип поддержки): чат поддержки (support_<uid>) раньше
     // попадал в ветку «Избранное» и показывал иконку-закладку. Теперь у него свой логотип.
@@ -1206,7 +1343,11 @@ private fun ChatListItem(
     val isSavedChat = !isSupportChat && chat.type == ChatType.PRIVATE && chat.otherUserId == null
     val isChannel = chat.type == ChatType.CHANNEL
     val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
-    val avatarSize = if (experimentalInterface) 54.dp else 56.dp
+    val avatarSize = when {
+        compact -> 46.dp
+        experimentalInterface -> 54.dp
+        else -> 56.dp
+    }
     val glassDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     // НОВОЕ (иерархия): единственный флаг, который решает "жирность" всей строки.
@@ -1232,8 +1373,8 @@ private fun ChatListItem(
         label = "chatRowPressScale"
     )
     val rowBackground by androidx.compose.animation.animateColorAsState(
-        targetValue = if (!experimentalInterface && hasUnread) {
-            colorTheme.primary.copy(alpha = 0.05f)
+        targetValue = if (hasUnread) {
+            colorTheme.primary.copy(alpha = if (experimentalInterface) 0.035f else 0.05f)
         } else {
             Color.Transparent
         },
@@ -1249,7 +1390,7 @@ private fun ChatListItem(
             .liquidGlass(
                 enabled = experimentalInterface,
                 shape = RoundedCornerShape(18.dp),
-                tint = glassTint(glassDark).copy(alpha = 0.72f),
+                tint = if (hasUnread) colorTheme.primary else glassTint(glassDark),
                 dark = glassDark,
                 elevation = 3
             )
@@ -1263,8 +1404,11 @@ private fun ChatListItem(
             // (56dp аватар + 8dp сверху/снизу) вместо "плавающего" padding,
             // который раньше давал заметный разброс высоты между строками
             // с разным количеством значков в заголовке.
-            .heightIn(min = 72.dp)
-            .padding(horizontal = if (experimentalInterface) 12.dp else 16.dp, vertical = 8.dp),
+            .heightIn(min = if (compact) 62.dp else 72.dp)
+            .padding(
+                horizontal = if (experimentalInterface) 12.dp else 16.dp,
+                vertical = if (compact) 5.dp else 8.dp
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Аватар
@@ -1377,14 +1521,12 @@ private fun ChatListItem(
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     if (chat.isVerified) {
-                        Box(
-                            modifier = Modifier.size(18.dp).padding(start = 4.dp)
-                                .clip(CircleShape).background(Color(0xFF22C55E)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Filled.Verified, contentDescription = "Верифицирован",
-                                tint = Color(0xFF1D9BF0), modifier = Modifier.size(12.dp))
-                        }
+                        Icon(
+                            Icons.Filled.Verified,
+                            contentDescription = "Верифицирован",
+                            tint = colorTheme.primary,
+                            modifier = Modifier.padding(start = 4.dp).size(17.dp)
+                        )
                     }
                     if (!chat.username.isNullOrBlank()) {
                         Text(
@@ -1427,8 +1569,10 @@ private fun ChatListItem(
                             withStyle(SpanStyle(color = Color.Red, fontWeight = FontWeight.Medium)) {
                                 append(stringResource(R.string.chat_list_draft_prefix))
                             }
-                            withStyle(SpanStyle(color = previewColor)) {
-                                append(chat.draftText)
+                            if (!hidePreview) {
+                                withStyle(SpanStyle(color = previewColor)) {
+                                    append(chat.draftText)
+                                }
                             }
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -1453,7 +1597,11 @@ private fun ChatListItem(
                             )
                         }
                         Text(
-                            chat.lastMessage.ifBlank { if (isChannel) stringResource(R.string.chat_list_channel_label) else "" },
+                            if (hidePreview) {
+                                if (chat.lastMessage.isBlank()) "" else "Сообщение скрыто"
+                            } else {
+                                chat.lastMessage.ifBlank { if (isChannel) stringResource(R.string.chat_list_channel_label) else "" }
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             // НОВОЕ (иерархия): превью последнего сообщения — вторичный текст.
                             // У непрочитанных чуть темнее (78% альфы), у прочитанных заметно

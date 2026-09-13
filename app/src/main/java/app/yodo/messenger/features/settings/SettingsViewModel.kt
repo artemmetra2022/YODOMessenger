@@ -7,6 +7,7 @@ import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.notifications.NotificationHelper
 import app.yodo.messenger.data.local.AppLanguage
 import app.yodo.messenger.data.local.ChatBackgroundType
+import app.yodo.messenger.data.local.ChatListSortOrder
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.FontSize
 import app.yodo.messenger.data.local.InterfaceStyle
@@ -85,6 +86,14 @@ class SettingsViewModel @Inject constructor(
     // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
     val showSettingsInGlobalSearch: StateFlow<Boolean> = userSettingsPreferences.showSettingsInGlobalSearch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val compactChatList: StateFlow<Boolean> = userSettingsPreferences.compactChatList.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val hideChatListPreviews: StateFlow<Boolean> = userSettingsPreferences.hideChatListPreviews.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val chatListSortOrder: StateFlow<ChatListSortOrder> = userSettingsPreferences.chatListSortOrder
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatListSortOrder.RECENT)
+    val weatherCity: StateFlow<String> = userSettingsPreferences.weatherCity
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Санкт-Петербург")
+    val weatherCardEnabled: StateFlow<Boolean> = userSettingsPreferences.weatherCardEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» в разделе «Аккаунт».
     val schoolSectionEnabled: StateFlow<Boolean> = schoolPreferences.sectionEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -216,6 +225,10 @@ class SettingsViewModel @Inject constructor(
     // НОВОЕ (поиск по настройкам): переключатель показа настроек в общем поиске.
     fun setShowSettingsInGlobalSearch(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setShowSettingsInGlobalSearch(enabled) } }
     fun setHideStatusBarOnChatList(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideStatusBarOnChatList(enabled) } }
+    fun setCompactChatList(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setCompactChatList(enabled) } }
+    fun setHideChatListPreviews(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideChatListPreviews(enabled) } }
+    fun setChatListSortOrder(order: ChatListSortOrder) { viewModelScope.launch { userSettingsPreferences.setChatListSortOrder(order) } }
+    fun setWeatherCardEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setWeatherCardEnabled(enabled) } }
 
     fun setPin(pin: String, requirement: PinRequirement = PinRequirement.ON_CLOSE) {
         viewModelScope.launch {

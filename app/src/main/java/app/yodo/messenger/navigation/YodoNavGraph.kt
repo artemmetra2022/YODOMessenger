@@ -308,6 +308,9 @@ fun YodoNavGraph(
                 onOpenArchive = {
                     navController.navigate(Routes.ArchivedChats.route)
                 },
+                onWeatherClick = {
+                    navController.navigate(Routes.Weather.route)
+                },
                 // НОВОЕ (чат поддержки): открытие админ-панели поддержки (только для админов).
                 onOpenAdminPanel = {
                     navController.navigate(Routes.AdminPanel.route)
@@ -325,6 +328,12 @@ fun YodoNavGraph(
                 onOpenAdminHome = {
                     navController.navigate(Routes.AdminHome.route)
                 }
+            )
+        }
+
+        composable(Routes.Weather.route) {
+            app.yodo.messenger.features.weather.WeatherScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
 

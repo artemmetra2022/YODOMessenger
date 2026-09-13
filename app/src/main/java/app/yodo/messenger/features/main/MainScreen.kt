@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatListScreen
 import app.yodo.messenger.data.local.InterfaceStyle
 import app.yodo.messenger.ui.theme.LocalInterfaceStyle
+import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.components.glassTint
 import app.yodo.messenger.ui.components.liquidGlass
 
@@ -48,6 +50,7 @@ fun MainScreen(
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
+    onWeatherClick: () -> Unit = {},
     onOpenAdminPanel: () -> Unit = {},
     // НОВОЕ (каталог/рекомендации каналов): открытие витрины каналов.
     onDiscoverChannels: () -> Unit = {},
@@ -63,6 +66,14 @@ fun MainScreen(
     // проверки ADMIN_EMAILS.
     val isAppAdmin = hiltViewModel<AdminHomeViewModel>().isAppAdmin
     val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val colorTheme = LocalColorTheme.current
+    val navItemColors = NavigationBarItemDefaults.colors(
+        selectedIconColor = colorTheme.primary,
+        selectedTextColor = colorTheme.primary,
+        indicatorColor = colorTheme.primary.copy(alpha = if (experimentalInterface) 0.13f else 0.16f),
+        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    )
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -85,26 +96,30 @@ fun MainScreen(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     icon = { Icon(Icons.Filled.Chat, contentDescription = stringResource(R.string.nav_chats_cd)) },
-                    label = { Text(stringResource(R.string.nav_chats)) }
+                    label = { Text(stringResource(R.string.nav_chats)) },
+                    colors = navItemColors
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { onNearbyClick() },
                     icon = { Icon(Icons.Filled.NearMe, contentDescription = stringResource(R.string.nav_nearby_cd)) },
-                    label = { Text(stringResource(R.string.nav_nearby)) }
+                    label = { Text(stringResource(R.string.nav_nearby)) },
+                    colors = navItemColors
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { onOfflineClick() },
                     icon = { Icon(Icons.Filled.WifiOff, contentDescription = stringResource(R.string.nav_offline_cd)) },
-                    label = { Text(stringResource(R.string.nav_offline)) }
+                    label = { Text(stringResource(R.string.nav_offline)) },
+                    colors = navItemColors
                 )
                 // ИСПРАВЛЕНО: "Настройки" → stringResource(R.string.settings_title)
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { onSettingsClick() },
                     icon = { Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_title)) },
-                    label = { Text(stringResource(R.string.settings_title)) }
+                    label = { Text(stringResource(R.string.settings_title)) },
+                    colors = navItemColors
                 )
                 // НОВОЕ (единая вкладка «Админка»): видна только двум доверенным
                 // аккаунтам — у остальных пользователей нижняя навигация из 4
@@ -114,7 +129,8 @@ fun MainScreen(
                         selected = false,
                         onClick = { onOpenAdminHome() },
                         icon = { Icon(Icons.Filled.AdminPanelSettings, contentDescription = "Админка") },
-                        label = { Text("Админка") }
+                        label = { Text("Админка") },
+                        colors = navItemColors
                     )
                 }
             }
@@ -135,6 +151,7 @@ fun MainScreen(
                 onCreateChannelClick = onCreateChannelClick,
                 onOpenContacts = onOpenContacts,
                 onOpenArchive = onOpenArchive,
+                onWeatherClick = onWeatherClick,
                 onOpenAdminPanel = onOpenAdminPanel,
                 onDiscoverChannels = onDiscoverChannels,
                 onOpenGroupInfo = onOpenGroupInfo

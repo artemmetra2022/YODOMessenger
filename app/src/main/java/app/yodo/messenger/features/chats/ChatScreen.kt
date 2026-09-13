@@ -3099,11 +3099,21 @@ private val COMMON_EMOJIS = listOf(
     "✅", "❌", "⭐", "💯", "😇", "🤝", "👀", "💔"
 )
 
+private val EMOJI_CATEGORIES = listOf(
+    "Частые" to COMMON_EMOJIS,
+    "Лица" to listOf("😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😍", "🥰", "😘", "😋", "😎", "🤔", "😴", "😭", "😡", "🥳", "🤯"),
+    "Жесты" to listOf("👍", "👎", "👌", "✌️", "🤞", "🤟", "🤘", "👏", "🙌", "👐", "🤲", "🙏", "✍️", "💪", "👀", "🤝", "👋", "☝️", "👇", "👉", "👈", "🫶"),
+    "Символы" to listOf("❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "❣️", "💕", "💯", "✅", "❌", "⭐", "🔥", "✨", "⚡", "💫", "🎵", "💬"),
+    "Праздник" to listOf("🎉", "🎊", "🎈", "🎁", "🎂", "🥳", "🏆", "🥇", "🎯", "🎮", "⚽", "🏀", "🚀", "🌟", "🍕", "🍔", "☕", "🍀", "🌈", "🌞", "🌙", "❄️")
+)
+
 @Composable
 private fun EmojiPickerPanel(onEmojiSelected: (String) -> Unit) {
     val experimental = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val colorTheme = LocalColorTheme.current
+    var selectedCategory by remember { mutableIntStateOf(0) }
+    val category = EMOJI_CATEGORIES[selectedCategory]
     val panelShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
     Column(
         modifier = Modifier
@@ -3147,10 +3157,38 @@ private fun EmojiPickerPanel(onEmojiSelected: (String) -> Unit) {
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                "Недавние",
+                category.first,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            EMOJI_CATEGORIES.forEachIndexed { index, item ->
+                val selected = selectedCategory == index
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (selected) colorTheme.primary.copy(alpha = 0.16f)
+                            else MaterialTheme.colorScheme.surface.copy(alpha = if (experimental) 0.22f else 0.52f)
+                        )
+                        .clickable { selectedCategory = index }
+                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        item.first,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) colorTheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
         }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 42.dp),
@@ -3159,7 +3197,7 @@ private fun EmojiPickerPanel(onEmojiSelected: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(5.dp),
             modifier = Modifier.fillMaxWidth().height(208.dp)
         ) {
-            gridItems(COMMON_EMOJIS) { emoji ->
+            gridItems(category.second) { emoji ->
                 Box(
                     modifier = Modifier
                         .size(42.dp)
@@ -3280,13 +3318,17 @@ private fun MessageInputBar(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
+                        .background(
+                            if (showEmojiPicker) colorTheme.primary.copy(alpha = 0.14f)
+                            else MaterialTheme.colorScheme.surface.copy(alpha = if (experimentalInterface) 0.24f else 0f)
+                        )
                         .clickable { showEmojiPicker = !showEmojiPicker },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Filled.EmojiEmotions,
                         contentDescription = "Смайлики",
-                        tint = if (showEmojiPicker) colorTheme.primary else Color.Gray,
+                        tint = if (showEmojiPicker) colorTheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp)
                     )
                 }
