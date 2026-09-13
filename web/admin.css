@@ -1066,3 +1066,89 @@ body.theme-light select:focus { background-color: #e3e9f0; }
 #templates-list .item-text {
   white-space: pre-wrap;
 }
+
+/* ===== НОВОЕ (вид): без системных полос прокрутки и без лишних отступов =====
+   Бело-чёрные ползунки справа у карточек/окон — это стандартные скроллбары
+   браузера. Скрываем их везде в панели, прокрутка при этом работает
+   (колёсо, тачпад, клавиши). */
+html, body, * {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* старый Edge/IE */
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+/* Списки внутри карточек больше не режем по высоте — страница прокручивается
+   целиком, без вложенных областей со своим скроллом. */
+.reason-options,
+.ctx-messages,
+.support-thread-messages {
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* Плотнее расстояния между пунктами и карточками. */
+.admin-content {
+  padding: 18px 22px 32px;
+}
+h1 {
+  font-size: 22px;
+  margin-bottom: 12px;
+}
+.card {
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.card h2 {
+  margin-bottom: 6px;
+}
+.card-hint {
+  margin-bottom: 8px;
+}
+.form-col,
+.form-row {
+  gap: 8px;
+}
+.item-list {
+  gap: 6px;
+}
+.item {
+  padding: 10px 12px;
+}
+.item-head {
+  gap: 8px;
+}
+.item-actions {
+  gap: 6px;
+  margin-top: 6px;
+}
+.question-answer {
+  margin-top: 6px;
+  padding: 8px 10px;
+}
+.filter-row,
+.reports-extra-filters,
+.bulk-bar {
+  margin-bottom: 8px;
+}
+.admin-nav {
+  gap: 2px;
+}
+.nav-btn {
+  padding: 8px 12px;
+}
+.admin-brand {
+  padding: 0 12px 12px;
+}
+.admin-sidebar {
+  padding: 14px 12px;
+}
+.user-search-results,
+.modal-actions {
+  margin-top: 10px;
+}
