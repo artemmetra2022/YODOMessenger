@@ -436,7 +436,10 @@ class UserRepositoryImpl @Inject constructor(
         reason = data["reason"] as? String ?: "",
         blockedBy = data["blockedBy"] as? String ?: "",
         blockedByName = data["blockedByName"] as? String ?: "",
-        blockedAt = (data["blockedAt"] as? Number)?.toLong() ?: 0L
+        blockedAt = (data["blockedAt"] as? Number)?.toLong() ?: 0L,
+        // НОВОЕ (санкции на срок): временные блокировки из веб-панели.
+        expiresAt = (data["expiresAt"] as? Number)?.toLong() ?: 0L,
+        durationMs = (data["durationMs"] as? Number)?.toLong() ?: 0L
     )
 
     // НОВОЕ (история блокировок): запись в корневую коллекцию blockHistory —
@@ -476,7 +479,10 @@ class UserRepositoryImpl @Inject constructor(
             if (snapshot != null && snapshot.exists()) {
                 @Suppress("UNCHECKED_CAST")
                 val data = snapshot.data as? Map<String, Any?> ?: emptyMap()
-                trySend(parseGlobalBlock(uid, data))
+                val block = parseGlobalBlock(uid, data)
+                // НОВОЕ (санкции на срок): блокировка с истёкшим expiresAt уже
+                // не действует, даже если документ ещё не дочищен панелью.
+                trySend(if (block.isExpired) null else block)
             } else {
                 trySend(null)
             }
@@ -606,7 +612,8 @@ class UserRepositoryImpl @Inject constructor(
             if (!doc.exists()) return null
             @Suppress("UNCHECKED_CAST")
             val data = doc.data as? Map<String, Any?> ?: return null
-            parseGlobalBlock(uid, data)
+            // НОВОЕ (санкции на срок): истёкшая блокировка равносильна её отсутствию.
+            parseGlobalBlock(uid, data).takeIf { !it.isExpired }
         } catch (e: Exception) { null }
     }
 

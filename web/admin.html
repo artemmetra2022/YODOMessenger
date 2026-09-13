@@ -50,6 +50,7 @@
         <button class="nav-btn" data-section="ideas">💡 Идеи</button>
         <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
         <button class="nav-btn" data-section="reports">🚩 Жалобы</button>
+        <button class="nav-btn" data-section="appeals">⚖️ Обжалования</button>
         <button class="nav-btn" data-section="support">🛎️ Поддержка</button>
         <button class="nav-btn" data-section="faq">❓ FAQ-бот</button>
         <button class="nav-btn" data-section="users">👤 Пользователи</button>
@@ -57,6 +58,9 @@
         <button class="nav-btn" data-section="audit">📜 Аудит</button>
       </nav>
       <div class="admin-sidebar-footer">
+        <button type="button" class="btn-ghost" id="btn-palette">🔍 Быстрый переход <kbd>Ctrl K</kbd></button>
+        <button type="button" class="btn-ghost" id="btn-theme">☀️ Светлая тема</button>
+        <div class="admin-email"><span id="admin-role" class="badge badge-blue"></span></div>
         <div id="admin-email" class="admin-email"></div>
         <button type="button" class="btn-link" id="btn-logout">Выйти</button>
       </div>
@@ -67,6 +71,18 @@
       <!-- СЕКЦИЯ: Обзор и настройки -->
       <section id="section-settings" class="admin-section active">
         <h1>Обзор</h1>
+
+        <!-- НОВОЕ (роли): разграничение доступа вместо плоского списка ADMIN_EMAILS -->
+        <div class="card" id="card-roles">
+          <h2>Админы и роли</h2>
+          <p class="card-hint">Владельцы из кода имеют все права всегда. Остальным можно выдать ограниченную роль: модератор видит только жалобы, блокировки и аудит, поддержка — обращения и FAQ, редактор — контент. Массовые удаления доступны только владельцу и администратору.</p>
+          <form id="form-role-grant" class="form-row">
+            <input type="email" id="role-grant-email" placeholder="email админа" autocomplete="off">
+            <select id="role-grant-role"></select>
+            <button type="submit" class="btn-primary">Выдать роль</button>
+          </form>
+          <div id="roles-list" class="item-list"></div>
+        </div>
 
         <div class="card">
           <h2>Сводка по разделу «Школа»</h2>
@@ -123,7 +139,7 @@
           </label>
         </div>
 
-        <!-- НОВОЕ (баннер): объявление вверху веб-версии мессенджера
+        <!-- НОВОЕ (баннер): объявление вверху веб-вер��ии мессенджера
              (техработы, важное объявление). Хранится в config/appSettings. -->
         <div class="card">
           <h2>Баннер для пользователей</h2>
@@ -367,6 +383,30 @@
             <button type="button" class="filter-btn" data-filter="ALL">Все</button>
           </div>
           <div class="filter-row" id="reports-reason-filters"></div>
+          <!-- НОВОЕ (очередь жалоб): период, сортировка, «только мои» -->
+          <div class="form-row reports-extra-filters">
+            <select id="reports-period">
+              <option value="0">За всё время</option>
+              <option value="1">За сутки</option>
+              <option value="7">За 7 дней</option>
+              <option value="30">За 30 дней</option>
+            </select>
+            <select id="reports-sort">
+              <option value="new">Сначала новые</option>
+              <option value="old">Сначала старые</option>
+              <option value="target">По числу жалоб на нарушителя</option>
+            </select>
+            <label class="check-inline"><input type="checkbox" id="reports-only-mine"> Только взятые мной</label>
+            <button type="button" class="btn-ghost" id="btn-reports-select-all">Выбрать все на рассмотрении</button>
+          </div>
+          <!-- НОВОЕ (массовые действия): появляется, когда выбраны жалобы -->
+          <div id="reports-bulk-bar" class="bulk-bar hidden">
+            <span id="reports-selected-count" class="badge badge-blue"></span>
+            <button type="button" class="btn-secondary" id="btn-bulk-dismiss">Отклонить</button>
+            <button type="button" class="btn-danger" id="btn-bulk-delete-msg">Удалить сообщения</button>
+            <button type="button" class="btn-danger" id="btn-bulk-block">Заблокировать авторов</button>
+            <button type="button" class="btn-ghost" id="btn-reports-clear-sel">Снять выбор</button>
+          </div>
           <div id="reports-chart" class="report-chart"></div>
           <div id="reports-list" class="item-list"></div>
           <button type="button" class="btn-secondary hidden" id="btn-reports-more">Показать ещё</button>
@@ -426,6 +466,71 @@
           <div id="autofilter-preview" class="item-list"></div>
         </div>
 
+        <!-- НОВОЕ (шаблоны причин): готовые тексты для санкций, отказов и удалений. -->
+        <div class="card">
+          <h2>Шаблоны причин</h2>
+          <p class="card-hint">Готовые тексты, чтобы не писать причину руками и чтобы решения были однотипными. Шаблоны санкций подставляются в форму мягких санкций, шаблоны отказа — в раздел «Обжалования».</p>
+          <form id="form-template" class="form-col">
+            <div class="form-row">
+              <select id="template-kind">
+                <option value="SANCTION">Санкция и блокировка</option>
+                <option value="APPEAL">Отказ по обжалованию</option>
+                <option value="DELETE">Удаление сообщения</option>
+              </select>
+              <input type="text" id="template-text" placeholder="Текст шаблона" autocomplete="off">
+            </div>
+            <button type="submit" class="btn-primary">Добавить шаблон</button>
+          </form>
+          <div id="templates-list" class="item-list"></div>
+        </div>
+
+        <!-- НОВОЕ (политика модерации): авто-эскалация и антиспам-лимиты. -->
+        <div class="card">
+          <h2>Политика модерации</h2>
+          <p class="card-hint">Пороги эскалации: панель сама предложит следующую меру, когда предупреждений или мутов стало слишком много (решение всё равно подтверждает админ). Антиспам-лимиты сохраняются в config/moderationPolicy — приложение читает их при отправке сообщений.</p>
+          <form id="form-policy" class="form-col">
+            <div class="form-row">
+              <label class="field">Предупреждений до мута
+                <input type="number" id="policy-warn-to-mute" min="1" max="20">
+              </label>
+              <label class="field">Мутов до бана
+                <input type="number" id="policy-mute-to-ban" min="1" max="20">
+              </label>
+              <label class="field">Срок мута при эскалации, ч
+                <input type="number" id="policy-mute-hours" min="1" max="720">
+              </label>
+            </div>
+            <label class="toggle-row">
+              <input type="checkbox" id="policy-antispam-enabled">
+              <span>Включить антиспам-лимиты</span>
+            </label>
+            <div class="form-row">
+              <label class="field">Сообщений в минуту
+                <input type="number" id="policy-msgs-per-minute" min="1" max="600">
+              </label>
+              <label class="field">Макс. длина сообщения
+                <input type="number" id="policy-max-length" min="100" max="20000">
+              </label>
+              <label class="field">Медленный режим, сек
+                <input type="number" id="policy-slow-mode" min="0" max="3600">
+              </label>
+            </div>
+            <label class="toggle-row">
+              <input type="checkbox" id="policy-block-links">
+              <span>Запретить ссылки новым аккаунтам</span>
+            </label>
+            <div class="form-row">
+              <label class="field">«Новый аккаунт» — первые, ч
+                <input type="number" id="policy-new-account-hours" min="1" max="720">
+              </label>
+            </div>
+            <div class="form-row">
+              <button type="submit" class="btn-primary">Сохранить политику</button>
+              <button type="button" class="btn-secondary" id="btn-policy-reset">Сбросить по умолчанию</button>
+            </div>
+          </form>
+        </div>
+
         <!-- НОВОЕ (история удалённых): архив мягко удалённых с восстановлением на 30 дней. -->
         <div class="card">
           <div class="card-head">
@@ -438,6 +543,21 @@
       </section>
 
       <!-- СЕКЦИЯ: Поддержка (обращения и мягкие ограничения) -->
+      <!-- СЕКЦИЯ: Обжалования блокиров��к -->
+      <section id="section-appeals" class="admin-section">
+        <h1>Обжалования <span id="appeals-count" class="badge badge-yellow hidden"></span></h1>
+        <div class="card">
+          <p class="card-hint">Заявления заблокированных пользователей. Рядом с каждым видно, активна ли ещё блокировка и за что она вынесена. «Снять блокировку» убирает бан, мут и теневой бан сразу; пользователь получает уведомление с решением.</p>
+          <div class="filter-row" id="appeals-filters">
+            <button type="button" class="filter-btn active" data-filter="PENDING">Ожидают решения</button>
+            <button type="button" class="filter-btn" data-filter="RESOLVED">Удовлетворённые</button>
+            <button type="button" class="filter-btn" data-filter="DISMISSED">Отклонённые</button>
+            <button type="button" class="filter-btn" data-filter="ALL">Все</button>
+          </div>
+          <div id="appeals-list" class="item-list"></div>
+        </div>
+      </section>
+
       <section id="section-support" class="admin-section">
         <h1>Поддержка <span id="support-waiting-badge" class="badge badge-yellow hidden"></span></h1>
 
@@ -547,6 +667,8 @@
             <input type="text" id="block-uid" placeholder="UID пользователя" autocomplete="off">
             <div class="form-row">
               <select id="block-reason-code"></select>
+              <!-- НОВОЕ (санкции на срок): мут/бан на время с автоснятием -->
+              <select id="block-duration"></select>
               <input type="text" id="block-reason" placeholder="Свой текст причины (для «Другое»)" autocomplete="off">
             </div>
             <button type="submit" class="btn-primary">Заблокировать</button>
@@ -556,13 +678,59 @@
           <h2>Заблокированные аккаунты</h2>
           <div id="blocks-list" class="item-list"></div>
         </div>
+
+        <!-- НОВОЕ (мягкие санкции): мут, теневой бан, предупреждение -->
+        <div class="card">
+          <h2>Мягкие санкции</h2>
+          <p class="card-hint">Меры мягче бана. Мут — человек не может писать сообщения (кроме чата поддержки, чтобы мог обжаловать). Теневой бан — сообщения видны только автору, без уведомления. Предупреждение — только уведомление и запись в историю. Срок снимается автоматически.</p>
+          <form id="form-sanction" class="form-col">
+            <input type="text" id="sanction-uid" placeholder="UID пользователя" autocomplete="off">
+            <div class="form-row">
+              <select id="sanction-type"></select>
+              <select id="sanction-reason-code"></select>
+              <select id="sanction-duration"></select>
+              <input type="text" id="sanction-reason" placeholder="Свой текст причины (для «Другое»)" autocomplete="off">
+            </div>
+            <!-- НОВОЕ (шаблоны причин): подстановка готового текста -->
+            <select id="sanction-template"></select>
+            <button type="submit" class="btn-primary">Применить санкцию</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Активные муты</h2>
+          <div id="mutes-list" class="item-list"></div>
+        </div>
+        <div class="card">
+          <h2>Теневые баны</h2>
+          <div id="shadow-list" class="item-list"></div>
+        </div>
+        <div class="card">
+          <h2>История предупреждений</h2>
+          <div id="warnings-list" class="item-list"></div>
+        </div>
       </section>
 
       <!-- СЕКЦИЯ: Аудит -->
       <section id="section-audit" class="admin-section">
-        <h1>Аудит</h1>
+        <h1>Аудит <span id="audit-count" class="badge badge-blue hidden"></span></h1>
         <div class="card">
-          <p class="card-hint">Журнал действий администраторов (adminAuditLog): блокировки, настройки и действия этой панели. Последние 50 записей.</p>
+          <p class="card-hint">Журнал действий администраторов (adminAuditLog): блокировки, настройки и действия этой панели.</p>
+          <div class="audit-filters">
+            <input type="search" id="audit-search" placeholder="Поиск: админ, пользователь, детали…">
+            <select id="audit-type"><option value="">Все действия</option></select>
+            <select id="audit-period">
+              <option value="0">За всё время</option>
+              <option value="1">За сутки</option>
+              <option value="7">За 7 дней</option>
+              <option value="30">За 30 дней</option>
+            </select>
+            <select id="audit-limit">
+              <option value="50">50 записей</option>
+              <option value="200">200 записей</option>
+              <option value="500">500 записей</option>
+            </select>
+            <button type="button" class="btn-secondary" id="btn-audit-csv">Экспорт CSV</button>
+          </div>
           <div id="audit-list" class="item-list"></div>
         </div>
       </section>
@@ -573,7 +741,7 @@
   <!-- МОДАЛКА: поиск пользователя для привязки учителя -->
   <div id="user-search-overlay" class="modal-overlay hidden">
     <div class="modal-card">
-      <h2>Привязка аккаунта учителя</h2>
+      <h2>Привязка аккаун��а учителя</h2>
       <p class="card-hint">Найдите аккаунт учителя по имени, @username или ID из профиля (YODO-…-…). Учитель должен быть зарегистрирован в мессенджере.</p>
       <input type="text" id="user-search-input" placeholder="Имя, @username или ID (YODO-…-…)" autocomplete="off">
       <div id="user-search-results" class="user-search-results"></div>
@@ -658,11 +826,23 @@
       <h2>Причина блокировки</h2>
       <p class="card-hint" id="block-reason-sub"></p>
       <div id="block-reason-options" class="reason-options"></div>
+      <label class="form-label">Срок блокировки
+        <select id="block-reason-duration"></select>
+      </label>
       <input type="text" id="block-reason-text" placeholder="Свой текст причины (для «Другое»)" autocomplete="off" class="hidden">
       <div class="modal-actions">
         <button type="button" class="btn-link" id="btn-block-reason-cancel">Отмена</button>
         <button type="button" class="btn-danger" id="btn-block-reason-ok">Заблокировать</button>
       </div>
+    </div>
+  </div>
+
+  <!-- НОВОЕ: палитра быстрых переходов и действий (Ctrl/Cmd+K) -->
+  <div id="palette-overlay" class="modal-overlay hidden">
+    <div class="palette-card">
+      <input type="text" id="palette-input" placeholder="Раздел или действие…" autocomplete="off">
+      <div id="palette-list" class="palette-list"></div>
+      <div class="palette-footer">↑↓ — выбор · Enter — открыть · Esc — закрыть · Alt+1…9 — разделы</div>
     </div>
   </div>
 
