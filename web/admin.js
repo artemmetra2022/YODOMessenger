@@ -5300,7 +5300,7 @@ function startPanel() {
     "audit-type", "audit-period", "audit-limit"]
     .forEach((id) => enhanceSelect($(id)));
 
-  // НОВОЕ: тема, палитра команд, горячие клавиши, бейджи в меню и
+  // Палитра команд, горячие клавиши, бейджи в меню и
   // восстановление последнего раздела из URL/localStorage.
   startUiExtras();
 
@@ -5309,41 +5309,21 @@ function startPanel() {
 }
 
 /* ------------------------------------------------------------------ */
-/* НОВОЕ: тема оформления, быстрый переход (Ctrl+K), горячие клавиши   */
+/* Быстрый переход (Ctrl+K), горячие клавиши                          */
 /* ------------------------------------------------------------------ */
-
-const THEME_KEY = "yodo_admin_theme";
-
-function applyTheme(theme) {
-  document.body.classList.toggle("theme-light", theme === "light");
-  const btn = $("btn-theme");
-  if (btn) {
-    btn.textContent = theme === "light" ? "🌙 Тёмная тема" : "☀️ Светлая тема";
-    btn.title = "Переключить тему оформления";
-  }
-}
-
-function initTheme() {
-  let saved = "";
-  try { saved = localStorage.getItem(THEME_KEY) || ""; } catch (e) { /* ignore */ }
-  applyTheme(saved === "light" ? "light" : "dark");
-  const btn = $("btn-theme");
-  if (!btn) return;
-  btn.addEventListener("click", () => {
-    const next = document.body.classList.contains("theme-light") ? "dark" : "light";
-    applyTheme(next);
-    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore */ }
-  });
-}
 
 /* --- Палитра команд: Ctrl/Cmd+K --------------------------------- */
 
 // Команды = разделы панели + частые действия. Фильтр по подстроке,
 // навигация стрелками, Enter — выполнить, Esc — закрыть.
 function commandList() {
-  const sections = Array.from(document.querySelectorAll(".nav-btn:not(.hidden):not(.area-hidden)")).map((btn) => ({
+  // Поиск охватывает оба контекста, даже если сейчас открыт только один.
+  // showSection сам переключит «Мессенджер / Школа» перед переходом.
+  const sections = Array.from(document.querySelectorAll(".nav-btn:not(.hidden)")).map((btn) => ({
     label: btn.textContent.trim(),
-    hint: "Раздел",
+    hint: btn.dataset.adminArea === "school"
+      ? "Школа"
+      : btn.dataset.adminArea === "messenger" ? "Мессенджер" : "Общий раздел",
     run: () => showSection(btn.dataset.section),
   }));
   const actions = [
@@ -5371,11 +5351,6 @@ function commandList() {
       label: "Обновить сводку",
       hint: "Действие",
       run: () => { showSection("settings"); refreshSummary(); },
-    },
-    {
-      label: document.body.classList.contains("theme-light") ? "Тёмная тема" : "Светлая тема",
-      hint: "Вид",
-      run: () => $("btn-theme").click(),
     },
     { label: "Выйти из панели", hint: "Аккаунт", run: () => doLogout() },
   ];
@@ -5527,7 +5502,6 @@ function initNavBadges() {
 }
 
 function startUiExtras() {
-  initTheme();
   initPalette();
   initShortcuts();
   initNavBadges();

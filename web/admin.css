@@ -1034,10 +1034,38 @@ body.theme-light select:focus { background-color: #e3e9f0; }
 }
 
 .reports-extra-filters {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.45fr) auto auto;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   margin-top: 8px;
+}
+.reports-extra-filters > .nice-select {
+  width: 100%;
+  min-width: 0;
+}
+.reports-extra-filters .nice-select-trigger {
+  min-height: 44px;
+}
+.reports-extra-filters .check-inline {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.reports-extra-filters > .btn-ghost {
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  white-space: nowrap;
+}
+@media (max-width: 1080px) {
+  .reports-extra-filters {
+    grid-template-columns: minmax(150px, 0.8fr) minmax(240px, 1.2fr);
+  }
+}
+@media (max-width: 620px) {
+  .reports-extra-filters { grid-template-columns: 1fr; }
+  .reports-extra-filters > .btn-ghost { width: 100%; }
+  .reports-extra-filters .check-inline { white-space: normal; }
 }
 
 /* Компактный чекбокс с подписью (выбор жалобы, «только мои»). */
