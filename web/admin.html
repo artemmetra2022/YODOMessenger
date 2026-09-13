@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YODO Admin — Школа</title>
+  <title>YODO Admin</title>
   <link rel="stylesheet" href="admin.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
   <div id="screen-login" class="auth-wrap">
     <div class="auth-card">
       <div class="auth-logo">YODO</div>
-      <div class="auth-subtitle">Админ-панель · Раздел «Школа»</div>
+      <div class="auth-subtitle">Админ-панель</div>
       <form id="form-login">
         <input type="email" id="login-email" placeholder="Email администратора" autocomplete="username">
         <input type="password" id="login-password" placeholder="Пароль" autocomplete="current-password">
@@ -39,23 +39,27 @@
   <div id="screen-admin" class="admin-wrap hidden">
     <aside class="admin-sidebar">
       <div class="admin-brand">YODO <span>Admin</span></div>
-      <nav class="admin-nav">
-        <button class="nav-btn active" data-section="settings">⚙️ Обзор</button>
-        <button class="nav-btn" data-section="news">📰 Новости</button>
-        <button class="nav-btn" data-section="polls">📊 Опросы</button>
-        <button class="nav-btn" data-section="channel">📣 Канал</button>
-        <button class="nav-btn" data-section="push">🔔 Push-центр</button>
-        <button class="nav-btn" data-section="inbox">📥 Вопросы</button>
-        <button class="nav-btn" data-section="teachers">👩‍🏫 Учителя</button>
-        <button class="nav-btn" data-section="ideas">💡 Идеи</button>
-        <button class="nav-btn" data-section="reviews">⭐ Отзывы</button>
-        <button class="nav-btn" data-section="reports">🚩 Жалобы</button>
-        <button class="nav-btn" data-section="appeals">⚖️ Обжалования</button>
-        <button class="nav-btn" data-section="support">🛎️ Поддержка</button>
-        <button class="nav-btn" data-section="faq">❓ FAQ-бот</button>
-        <button class="nav-btn" data-section="users">👤 Пользователи</button>
-        <button class="nav-btn" data-section="blocks">⛔ Блокировки</button>
-        <button class="nav-btn" data-section="audit">📜 Аудит</button>
+      <div class="admin-area-switcher" role="tablist" aria-label="Раздел админ-панели">
+        <button type="button" class="admin-area-btn active" data-admin-area="messenger" role="tab" aria-selected="true">Мессенджер</button>
+        <button type="button" class="admin-area-btn" data-admin-area="school" role="tab" aria-selected="false">Школа</button>
+      </div>
+      <nav class="admin-nav" aria-label="Функции выбранного раздела">
+        <button class="nav-btn active" data-section="settings" data-admin-area="all">⚙️ Обзор</button>
+        <button class="nav-btn" data-section="news" data-admin-area="school">📰 Новости</button>
+        <button class="nav-btn" data-section="polls" data-admin-area="school">📊 Опросы</button>
+        <button class="nav-btn" data-section="channel" data-admin-area="messenger">📣 Канал</button>
+        <button class="nav-btn" data-section="push" data-admin-area="messenger">🔔 Push-центр</button>
+        <button class="nav-btn" data-section="inbox" data-admin-area="school">📥 Вопросы</button>
+        <button class="nav-btn" data-section="teachers" data-admin-area="school">👩‍🏫 Учителя</button>
+        <button class="nav-btn" data-section="ideas" data-admin-area="school">💡 Идеи</button>
+        <button class="nav-btn" data-section="reviews" data-admin-area="school">⭐ Отзывы</button>
+        <button class="nav-btn" data-section="reports" data-admin-area="messenger">🚩 Жалобы</button>
+        <button class="nav-btn" data-section="appeals" data-admin-area="messenger">⚖️ Обжалования</button>
+        <button class="nav-btn" data-section="support" data-admin-area="messenger">🛎️ Поддержка</button>
+        <button class="nav-btn" data-section="faq" data-admin-area="messenger">❓ FAQ-бот</button>
+        <button class="nav-btn" data-section="users" data-admin-area="messenger">👤 Пользователи</button>
+        <button class="nav-btn" data-section="blocks" data-admin-area="messenger">⛔ Блокировки</button>
+        <button class="nav-btn" data-section="audit" data-admin-area="messenger">📜 Аудит</button>
       </nav>
       <div class="admin-sidebar-footer">
         <button type="button" class="btn-ghost" id="btn-palette">🔍 Быстрый переход <kbd>Ctrl K</kbd></button>
@@ -73,7 +77,7 @@
         <h1>Обзор</h1>
 
         <!-- НОВОЕ (роли): разграничение доступа вместо плоского списка ADMIN_EMAILS -->
-        <div class="card" id="card-roles">
+        <div class="card overview-card" id="card-roles" data-admin-area="messenger">
           <h2>Админы и роли</h2>
           <p class="card-hint">Владельцы из кода имеют все права всегда. Остальным можно выдать ограниченную роль: модератор видит только жалобы, блокировки и аудит, поддержка — обращения и FAQ, редактор — контент. Массовые удаления доступны только владельцу и администратору.</p>
           <form id="form-role-grant" class="form-row">
@@ -84,14 +88,20 @@
           <div id="roles-list" class="item-list"></div>
         </div>
 
-        <div class="card">
-          <h2>Сводка по разделу «Школа»</h2>
+        <div class="card overview-card" data-admin-area="messenger">
+          <h2>Сводка по мессенджеру</h2>
+          <div id="messenger-summary-grid" class="summary-grid"></div>
+          <button type="button" class="btn-secondary" id="btn-refresh-messenger-summary">Обновить сводку</button>
+        </div>
+
+        <div class="card overview-card" data-admin-area="school">
+          <h2>Сводка по школе</h2>
           <div id="summary-grid" class="summary-grid"></div>
           <button type="button" class="btn-secondary" id="btn-refresh-summary">Обновить сводку</button>
         </div>
 
         <!-- НОВОЕ (аналитика): активность приложения за последний месяц. -->
-        <div class="card">
+        <div class="card overview-card" data-admin-area="messenger">
           <div class="card-head">
             <h2>Аналитика активности (30 дней)</h2>
             <button type="button" class="btn-secondary" id="btn-activity-refresh">Обновить</button>
@@ -101,7 +111,7 @@
           <p class="card-hint" id="activity-summary"></p>
         </div>
 
-        <div class="card">
+        <div class="card overview-card" data-admin-area="school">
           <h2>Раздел «Школа»</h2>
           <p class="card-hint">Скрытие действует глобально для всех пользователей (кроме админов).</p>
           <label class="toggle-row">
@@ -110,7 +120,7 @@
           </label>
         </div>
 
-        <div class="card">
+        <div class="card overview-card" data-admin-area="school">
           <h2>Пометка актуальности расписания</h2>
           <p class="card-hint">Показывается на экране «Расписание и звонки» в приложении.</p>
           <form id="form-schedule" class="form-row">
@@ -122,7 +132,7 @@
           <p class="card-hint" id="schedule-updated-at"></p>
         </div>
 
-        <div class="card">
+        <div class="card overview-card" data-admin-area="school">
           <h2>Дата каникул</h2>
           <p class="card-hint">Дата начала каникул для отсчёта «До каникул» на экране «Расписание и звонки» в приложении. Пустое поле или «-» — используется зашитая дата из сборки.</p>
           <form id="form-holiday" class="form-row">
@@ -131,7 +141,7 @@
           </form>
         </div>
 
-        <div class="card">
+        <div class="card overview-card" data-admin-area="messenger">
           <h2>Безопасность входа</h2>
           <label class="toggle-row">
             <input type="checkbox" id="toggle-require-email-verification">
@@ -141,7 +151,7 @@
 
         <!-- НОВОЕ (баннер): объявление вверху веб-вер��ии мессенджера
              (техработы, важное объявление). Хранится в config/appSettings. -->
-        <div class="card">
+        <div class="card overview-card" data-admin-area="messenger">
           <h2>Баннер для пользователей</h2>
           <p class="card-hint">Показывается вверху веб-версии мессенджера. Пустые даты — показывать всегда, пока включено.</p>
           <form id="form-banner" class="form-col">

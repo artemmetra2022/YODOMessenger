@@ -26,7 +26,7 @@ body {
   min-height: 100vh;
 }
 
-.hidden { display: none !important; }
+.hidden, .area-hidden { display: none !important; }
 
 button { font-family: inherit; }
 input, textarea, select {
@@ -172,6 +172,37 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--a
 
 .admin-brand { font-size: 22px; font-weight: 800; letter-spacing: 2px; padding: 0 12px 18px; flex-shrink: 0; }
 .admin-brand span { color: var(--accent); font-size: 14px; letter-spacing: 0; }
+
+
+/* Переключатель контекста: функции мессенджера и школы не смешиваются. */
+.admin-area-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 4px 14px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--text-dim) 24%, transparent);
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+.admin-area-btn {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+.admin-area-btn:hover { color: var(--text); background: var(--bg-panel-2); }
+.admin-area-btn.active { color: #fff; background: var(--accent); }
+.admin-area-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* Список разделов прокручивается, если не влезает по высоте: «шапка» и
    футер остаются на месте, скроллится только сам список. Полоса прокрутки
@@ -838,6 +869,10 @@ h1 { font-size: 24px; margin-bottom: 20px; }
     flex-direction: row;
     overflow-x: auto;
     overflow-y: hidden;
+  }
+  .admin-area-switcher {
+    width: min(100%, 360px);
+    margin: 0 0 10px;
   }
   .nav-btn { white-space: nowrap; }
   .admin-sidebar-footer { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; border-top: none; padding-top: 4px; }

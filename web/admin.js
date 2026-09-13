@@ -253,13 +253,54 @@ function logAdminAction(actionType, details = "", targetUserId = null, targetUse
 // НОВОЕ (навигация): секция запоминается в адресной строке (#users) и в
 // localStorage — перезагрузка и ссылки открывают тот же раздел.
 const LAST_SECTION_KEY = "yodo_admin_last_section";
+const ADMIN_AREA_KEY = "yodo_admin_area";
+let activeAdminArea = "messenger";
+
+function setAdminArea(area, { ensureVisibleSection = true } = {}) {
+  activeAdminArea = area === "school" ? "school" : "messenger";
+  document.querySelectorAll(".admin-area-btn").forEach((btn) => {
+    const selected = btn.dataset.adminArea === activeAdminArea;
+    btn.classList.toggle("active", selected);
+    btn.setAttribute("aria-selected", String(selected));
+  });
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    const itemArea = btn.dataset.adminArea || "all";
+    btn.classList.toggle("area-hidden", itemArea !== "all" && itemArea !== activeAdminArea);
+  });
+  document.querySelectorAll(".overview-card").forEach((card) => {
+    card.classList.toggle("area-hidden", card.dataset.adminArea !== activeAdminArea);
+  });
+  try { localStorage.setItem(ADMIN_AREA_KEY, activeAdminArea); } catch (e) { /* приватный режим */ }
+
+  if (ensureVisibleSection) {
+    const active = document.querySelector(".nav-btn.active");
+    if (!active || active.classList.contains("hidden") || active.classList.contains("area-hidden")) {
+      showSection("settings", { updateHash: true, syncArea: false });
+    }
+  }
+}
+
+document.querySelectorAll(".admin-area-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setAdminArea(btn.dataset.adminArea));
+});
+
+function initAdminArea() {
+  let saved = "messenger";
+  try { saved = localStorage.getItem(ADMIN_AREA_KEY) || "messenger"; } catch (e) { /* ignore */ }
+  setAdminArea(saved, { ensureVisibleSection: false });
+}
 
 function sectionExists(name) {
   return !!name && !!$("section-" + name);
 }
 
-function showSection(name, { updateHash = true } = {}) {
+function showSection(name, { updateHash = true, syncArea = true } = {}) {
   if (!sectionExists(name)) return;
+  const targetButton = document.querySelector('.nav-btn[data-section="' + name + '"]');
+  const targetArea = targetButton?.dataset.adminArea;
+  if (syncArea && targetArea && targetArea !== "all" && targetArea !== activeAdminArea) {
+    setAdminArea(targetArea, { ensureVisibleSection: false });
+  }
   document.querySelectorAll(".nav-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.section === name);
   });
@@ -4521,7 +4562,9 @@ function startAudit() {
 
 async function refreshSummary() {
   const grid = $("summary-grid");
+  const messengerGrid = $("messenger-summary-grid");
   grid.innerHTML = '<p class="empty-note">Считаю…</p>';
+  messengerGrid.innerHTML = '<p class="empty-note">Считаю…</p>';
   try {
     // ИСПРАВЛЕНО: раньше одно недоступное чтение (например, список users или
     // globalBlocks, если правила Firestore не задеплоены) роняло Promise.all и
@@ -4629,32 +4672,38 @@ async function refreshSummary() {
       });
     }
 
-    if (!stats.length) {
-      grid.innerHTML =
-        '<p class="empty-note">Не удалось получить данные. Подробности — в консоли браузера (F12).</p>';
-      return;
-    }
-    grid.innerHTML = "";
-    for (const s of stats) {
-      const el = document.createElement("div");
-      el.className = "summary-stat";
-      el.innerHTML =
-        '<a href="#"><div class="stat-value">' + esc(String(s.value)) +
-        '</div><div class="stat-label">' + esc(s.label) + "</div></a>";
-      el.querySelector("a").addEventListener("click", (e) => {
-        e.preventDefault();
-        document.querySelector('.nav-btn[data-section="' + s.section + '"]').click();
-      });
-      grid.appendChild(el);
-    }
+    const schoolSections = new Set(["news", "polls", "inbox", "teachers", "ideas", "reviews"]);
+    const renderStats = (target, rows) => {
+      target.innerHTML = "";
+      if (!rows.length) {
+        target.innerHTML = '<p class="empty-note">Нет доступных данных для сводки.</p>';
+        return;
+      }
+      for (const stat of rows) {
+        const el = document.createElement("div");
+        el.className = "summary-stat";
+        el.innerHTML =
+          '<a href="#"><div class="stat-value">' + esc(String(stat.value)) +
+          '</div><div class="stat-label">' + esc(stat.label) + "</div></a>";
+        el.querySelector("a").addEventListener("click", (e) => {
+          e.preventDefault();
+          showSection(stat.section);
+        });
+        target.appendChild(el);
+      }
+    };
+    renderStats(grid, stats.filter((stat) => schoolSections.has(stat.section)));
+    renderStats(messengerGrid, stats.filter((stat) => !schoolSections.has(stat.section)));
   } catch (err) {
     grid.innerHTML = "";
+    messengerGrid.innerHTML = "";
     handleErr("Не удалось собрать сводку")(err);
   }
 }
 
 function startSummary() {
   $("btn-refresh-summary").addEventListener("click", refreshSummary);
+  $("btn-refresh-messenger-summary").addEventListener("click", refreshSummary);
   refreshSummary();
 }
 
@@ -5292,7 +5341,7 @@ function initTheme() {
 // Команды = разделы панели + частые действия. Фильтр по подстроке,
 // навигация стрелками, Enter — выполнить, Esc — закрыть.
 function commandList() {
-  const sections = Array.from(document.querySelectorAll(".nav-btn")).map((btn) => ({
+  const sections = Array.from(document.querySelectorAll(".nav-btn:not(.hidden):not(.area-hidden)")).map((btn) => ({
     label: btn.textContent.trim(),
     hint: "Раздел",
     run: () => showSection(btn.dataset.section),
@@ -5423,7 +5472,7 @@ function initShortcuts() {
       return;
     }
     if (e.altKey && /^[1-9]$/.test(e.key)) {
-      const btns = document.querySelectorAll(".nav-btn");
+      const btns = document.querySelectorAll(".nav-btn:not(.hidden):not(.area-hidden)");
       const target = btns[Number(e.key) - 1];
       if (target) {
         e.preventDefault();
@@ -5482,6 +5531,7 @@ function startUiExtras() {
   initPalette();
   initShortcuts();
   initNavBadges();
+  initAdminArea();
   restoreSection();
 }
 
@@ -5603,8 +5653,8 @@ function applyRolePermissions() {
   }
   // Если текущий раздел закрыт для роли — переключаемся на первый доступный.
   const active = document.querySelector(".nav-btn.active");
-  if (!active || active.classList.contains("hidden")) {
-    const first = document.querySelector(".nav-btn:not(.hidden)");
+  if (!active || active.classList.contains("hidden") || active.classList.contains("area-hidden")) {
+    const first = document.querySelector(".nav-btn:not(.hidden):not(.area-hidden)");
     if (first) showSection(first.dataset.section);
   }
 }

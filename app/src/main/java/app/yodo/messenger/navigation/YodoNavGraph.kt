@@ -293,6 +293,11 @@ fun YodoNavGraph(
                 // НОВОЕ (глобальный аудит-лог): переход к журналу действий Админки.
                 onOpenAuditLog = {
                     navController.navigate(Routes.AdminAuditLog.route)
+                },
+                onOpenSchoolAdmin = {
+                    navController.navigate(Routes.SchoolAdmin.route) {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
@@ -457,6 +462,14 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onOpenTeacherProfiles = {
                     navController.navigate(Routes.SchoolTeacherAdmin.route)
+                },
+                onOpenMessengerAdmin = {
+                    navController.navigate(Routes.AdminHome.route) {
+                        popUpTo(Routes.SchoolAdmin.route) {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
                 }
             )
         }

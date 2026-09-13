@@ -35,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.yodo.messenger.ui.components.AdminArea
+import app.yodo.messenger.ui.components.AdminAreaSwitcher
 import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
@@ -56,13 +58,21 @@ fun AdminHomeScreen(
     onOpenOfficialChannel: (chatId: String) -> Unit,
     // НОВОЕ (глобальный аудит-лог): переход к журналу действий Админки.
     onOpenAuditLog: () -> Unit,
+    onOpenSchoolAdmin: () -> Unit,
     viewModel: AdminHomeViewModel = hiltViewModel()
 ) {
     val requireEmailVerification by viewModel.requireEmailVerification.collectAsState(initial = true)
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Админка") })
+            Column {
+                TopAppBar(title = { Text("Админка") })
+                AdminAreaSwitcher(
+                    selectedArea = AdminArea.MESSENGER,
+                    onMessengerClick = {},
+                    onSchoolClick = onOpenSchoolAdmin
+                )
+            }
         }
     ) { padding ->
         Column(
