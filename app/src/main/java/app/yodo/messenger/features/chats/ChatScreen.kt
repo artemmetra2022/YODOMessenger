@@ -7,6 +7,7 @@ import app.yodo.messenger.ui.theme.LocalInterfaceStyle
 import app.yodo.messenger.ui.theme.LocalGlassIntensity
 import app.yodo.messenger.ui.components.glassTint
 import app.yodo.messenger.ui.components.liquidGlass
+import app.yodo.messenger.ui.components.softMessengerBackdrop
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -197,7 +198,6 @@ import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.components.swipeToGoBack
 import app.yodo.messenger.ui.theme.LocalColorTheme
-import app.yodo.messenger.ui.theme.TelegramColors
 import app.yodo.messenger.util.AudioUtils
 import app.yodo.messenger.util.ChatImageQuality
 import app.yodo.messenger.util.ChatScreenshotUtils
@@ -483,8 +483,8 @@ fun ChatScreen(
     // применена в MaterialTheme.colorScheme (см. YodoMessengerTheme) — используем её
     // фон, чтобы определить, тёмная сейчас тема ПРИЛОЖЕНИЯ или нет.
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val telegramBackground = if (isDarkTheme) TelegramColors.darkBackground else TelegramColors.lightBackground
-    val telegramBar = if (isDarkTheme) Color(0xFF17212B) else Color.White
+    val chatBackground = MaterialTheme.colorScheme.background
+    val chatBar = MaterialTheme.colorScheme.surface
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -499,7 +499,7 @@ fun ChatScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(telegramBar)
+                            .background(chatBar)
                             .padding(horizontal = 16.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -845,8 +845,8 @@ fun ChatScreen(
                         }
                     },
                     colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (experimentalInterface) Color.Transparent else telegramBar,
-                        scrolledContainerColor = if (experimentalInterface) Color.Transparent else telegramBar,
+                        containerColor = if (experimentalInterface) Color.Transparent else chatBar,
+                        scrolledContainerColor = if (experimentalInterface) Color.Transparent else chatBar,
                         titleContentColor = MaterialTheme.colorScheme.onSurface,
                         navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
                         actionIconContentColor = MaterialTheme.colorScheme.onSurface
@@ -1393,18 +1393,11 @@ fun ChatScreen(
                 .then(
                     if (chatBackgroundType != app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE) {
                         Modifier
-                            .then(
-                                if (experimentalInterface) {
-                                    Modifier.background(
-                                        Brush.linearGradient(
-                                            colors = listOf(
-                                                colorTheme.primary.copy(alpha = if (isDarkTheme) 0.20f else 0.11f),
-                                                telegramBackground,
-                                                colorTheme.secondary.copy(alpha = if (isDarkTheme) 0.14f else 0.08f)
-                                            )
-                                        )
-                                    )
-                                } else Modifier.background(telegramBackground)
+                            .softMessengerBackdrop(
+                                enabled = experimentalInterface,
+                                primary = colorTheme.primary,
+                                accent = colorTheme.accent,
+                                dark = isDarkTheme
                             )
                             .drawBehind {
                                 val patternColor = if (isDarkTheme) Color.White.copy(alpha = 0.018f) else Color(0xFF2F8243).copy(alpha = 0.035f)
@@ -1986,22 +1979,22 @@ private fun MessageBubble(
 ) {
     // ИСПРАВЛЕНО (баг 23): как и выше в ChatScreen — тема ПРИЛОЖЕНИЯ, а не системная.
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val bubbleColor = if (isOwnMessage) {
-        if (isDarkTheme) TelegramColors.darkOutgoing else TelegramColors.lightOutgoing
-    } else {
-        if (isDarkTheme) TelegramColors.darkIncoming else TelegramColors.lightIncoming
+    val bubbleColor = when {
+        isOwnMessage -> colorTheme.bubbleOwn
+        isDarkTheme -> colorTheme.bubbleOther
+        else -> MaterialTheme.colorScheme.surface
     }
-    val textColor = if (isDarkTheme) Color.White else Color(0xFF17212B)
-    val timeColor = if (isOwnMessage) {
-        if (isDarkTheme) TelegramColors.darkOutgoingTime else TelegramColors.lightOutgoingTime
-    } else {
-        if (isDarkTheme) TelegramColors.darkIncomingTime else TelegramColors.lightIncomingTime
+    val textColor = when {
+        isOwnMessage -> colorTheme.bubbleOwnText
+        isDarkTheme -> colorTheme.bubbleOtherText
+        else -> MaterialTheme.colorScheme.onSurface
     }
+    val timeColor = textColor.copy(alpha = 0.62f)
     val alignment = if (isOwnMessage) Alignment.CenterEnd else Alignment.CenterStart
     val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
     val glassFraction = LocalGlassIntensity.current.coerceIn(0, 100) / 100f
-    val bubbleGlassAlpha = (if (isDarkTheme) 0.08f else 0.05f) +
-        glassFraction * (if (isDarkTheme) 0.80f else 0.77f)
+    val bubbleGlassAlpha = (if (isDarkTheme) 0.16f else 0.12f) +
+        glassFraction * (if (isDarkTheme) 0.42f else 0.38f)
     val renderedBubbleColor = if (experimentalInterface) {
         bubbleColor.copy(alpha = bubbleGlassAlpha.coerceIn(0.05f, 0.90f))
     } else bubbleColor
@@ -2192,7 +2185,7 @@ private fun MessageBubble(
                                 .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
                                 .drawBehind {
                                     drawRect(
-                                        color = if (message.replyToSenderName == "Вы") TelegramColors.lightOutgoingLink else TelegramColors.lightIncomingLink,
+                                        color = colorTheme.primary,
                                         size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height)
                                     )
                                 }
@@ -3100,7 +3093,7 @@ private fun ReplyPreviewBar(message: Message, isOwn: Boolean, onCancel: () -> Un
 }
 
 private val COMMON_EMOJIS = listOf(
-    "😀", "😂", "", "", "😊", "😉", "😎", "🤔",
+    "😀", "😂", "😍", "🥰", "😊", "😉", "😎", "🤔",
     "😢", "😭", "😡", "🥳", "👍", "👎", "❤️", "🔥",
     "🎉", "🙏", "👏", "😴", "🤗", "😅", "😱", "🤷",
     "✅", "❌", "⭐", "💯", "😇", "🤝", "👀", "💔"
@@ -3108,19 +3101,79 @@ private val COMMON_EMOJIS = listOf(
 
 @Composable
 private fun EmojiPickerPanel(onEmojiSelected: (String) -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+    val experimental = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val colorTheme = LocalColorTheme.current
+    val panelShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (experimental) 6.dp else 0.dp, vertical = 4.dp)
+            .liquidGlass(
+                enabled = experimental,
+                shape = panelShape,
+                tint = MaterialTheme.colorScheme.surface,
+                dark = dark,
+                elevation = 8
+            )
+            .clip(panelShape)
+            .background(if (experimental) Color.Transparent else MaterialTheme.colorScheme.surfaceContainer)
+            .padding(top = 8.dp, bottom = 6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(36.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f))
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.EmojiEmotions,
+                contentDescription = null,
+                tint = colorTheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Эмодзи",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                "Недавние",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         LazyVerticalGrid(
-            columns = GridCells.Fixed(8),
-            modifier = Modifier.fillMaxWidth().height(180.dp).padding(8.dp)
+            columns = GridCells.Adaptive(minSize = 42.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.fillMaxWidth().height(208.dp)
         ) {
             gridItems(COMMON_EMOJIS) { emoji ->
                 Box(
                     modifier = Modifier
-                        .clickable { onEmojiSelected(emoji) }
-                        .padding(6.dp),
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = if (experimental) 0.30f else 0.60f))
+                        .border(
+                            0.5.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (experimental) 0.55f else 0.30f),
+                            RoundedCornerShape(14.dp)
+                        )
+                        .clickable { onEmojiSelected(emoji) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(emoji, style = MaterialTheme.typography.headlineSmall)
+                    Text(emoji, fontSize = 24.sp)
                 }
             }
         }
@@ -3255,7 +3308,7 @@ private fun MessageInputBar(
                         } else {
                             Color.White.copy(alpha = inputGlassAlpha)
                         }
-                    } else if (MaterialTheme.colorScheme.background.luminance() < 0.5f) TelegramColors.darkIncoming else Color(0xFFF0F0F0),
+                    } else MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(if (experimentalInterface) 24.dp else 22.dp),
                     border = if (experimentalInterface) androidx.compose.foundation.BorderStroke(
                         0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)

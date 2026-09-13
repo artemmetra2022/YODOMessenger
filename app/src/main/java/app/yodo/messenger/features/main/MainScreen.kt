@@ -1,7 +1,9 @@
 package app.yodo.messenger.features.main
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
@@ -63,6 +65,7 @@ fun MainScreen(
     val experimentalInterface = LocalInterfaceStyle.current == InterfaceStyle.EXPERIMENTAL
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
             NavigationBar(
@@ -117,7 +120,12 @@ fun MainScreen(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.padding(padding)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(padding)
+        ) {
             ChatListScreen(
                 onChatClick = onChatClick,
                 onProfileClick = onProfileClick,

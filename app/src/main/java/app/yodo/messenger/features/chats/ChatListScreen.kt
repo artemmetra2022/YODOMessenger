@@ -110,6 +110,7 @@ import app.yodo.messenger.domain.repository.PresenceRepository
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.components.glassTint
 import app.yodo.messenger.ui.components.liquidGlass
+import app.yodo.messenger.ui.components.softMessengerBackdrop
 import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.LocalInterfaceStyle
 import app.yodo.messenger.data.local.InterfaceStyle
@@ -232,6 +233,7 @@ fun ChatListScreen(
     }
 
     Scaffold(
+        containerColor = if (experimentalInterface) Color.Transparent else MaterialTheme.colorScheme.background,
         snackbarHost = {
             androidx.compose.material3.SnackbarHost(hostState = snackbarHostState)
         },
@@ -405,18 +407,11 @@ fun ChatListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .then(
-                    if (experimentalInterface) {
-                        Modifier.background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    colorTheme.primary.copy(alpha = if (glassDark) 0.18f else 0.10f),
-                                    MaterialTheme.colorScheme.background,
-                                    colorTheme.secondary.copy(alpha = if (glassDark) 0.12f else 0.07f)
-                                )
-                            )
-                        )
-                    } else Modifier
+                .softMessengerBackdrop(
+                    enabled = experimentalInterface,
+                    primary = colorTheme.primary,
+                    accent = colorTheme.accent,
+                    dark = glassDark
                 )
         ) {
             when (val state = uiState) {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -12,6 +13,7 @@ import app.yodo.messenger.ui.theme.LocalGlassIntensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -40,10 +42,10 @@ fun Modifier.liquidGlass(
     )
     // 0%: почти бесцветное настоящее стекло. 100%: плотное матовое стекло,
     // визуально близкое к сильному backdrop blur, но без размытия текста и иконок.
-    val bodyAlpha = (if (dark) 0.06f else 0.035f) + intensity * (if (dark) 0.82f else 0.78f)
-    val lowerAlpha = (if (dark) 0.035f else 0.02f) + intensity * (if (dark) 0.68f else 0.62f)
-    val highlightAlpha = (if (dark) 0.10f else 0.24f) + intensity * (if (dark) 0.22f else 0.68f)
-    val edgeAlpha = (if (dark) 0.18f else 0.40f) + intensity * (if (dark) 0.30f else 0.52f)
+    val bodyAlpha = (if (dark) 0.055f else 0.035f) + intensity * (if (dark) 0.46f else 0.42f)
+    val lowerAlpha = (if (dark) 0.035f else 0.02f) + intensity * (if (dark) 0.34f else 0.30f)
+    val highlightAlpha = (if (dark) 0.08f else 0.14f) + intensity * (if (dark) 0.12f else 0.20f)
+    val edgeAlpha = (if (dark) 0.14f else 0.24f) + intensity * (if (dark) 0.18f else 0.20f)
     val topHighlight = Color.White.copy(alpha = highlightAlpha.coerceIn(0f, 0.96f))
     val bodyTint = tint.copy(alpha = bodyAlpha.coerceIn(0f, 0.92f))
     val lowerTint = tint.copy(alpha = lowerAlpha.coerceIn(0f, 0.86f))
@@ -58,8 +60,8 @@ fun Modifier.liquidGlass(
         .shadow(
             elevation = elevation.dp,
             shape = shape,
-            ambientColor = Color.Black.copy(alpha = 0.04f + intensity * (if (dark) 0.24f else 0.11f)),
-            spotColor = Color.Black.copy(alpha = 0.05f + intensity * (if (dark) 0.28f else 0.13f))
+            ambientColor = Color.Black.copy(alpha = 0.025f + intensity * (if (dark) 0.11f else 0.06f)),
+            spotColor = Color.Black.copy(alpha = 0.035f + intensity * (if (dark) 0.14f else 0.07f))
         )
         .clip(shape)
         .background(
@@ -82,5 +84,41 @@ fun Modifier.liquidGlass(
 }
 
 @Composable
-fun glassTint(dark: Boolean): Color =
-    if (dark) Color(0xFF17212B) else Color(0xFFEAF4FC)
+fun glassTint(dark: Boolean): Color = MaterialTheme.colorScheme.surface
+
+/** Мягкий фон без резких полос: базовый цвет темы и два больших рассеянных пятна. */
+@Composable
+fun Modifier.softMessengerBackdrop(
+    enabled: Boolean,
+    primary: Color,
+    accent: Color,
+    dark: Boolean
+): Modifier {
+    val base = MaterialTheme.colorScheme.background
+    if (!enabled) return this.background(base)
+    return this.drawWithCache {
+        val radius = size.maxDimension * 1.05f
+        val firstGlow = Brush.radialGradient(
+            colors = listOf(
+                primary.copy(alpha = if (dark) 0.115f else 0.075f),
+                primary.copy(alpha = if (dark) 0.035f else 0.018f),
+                Color.Transparent
+            ),
+            center = Offset(size.width * 0.04f, size.height * 0.02f),
+            radius = radius
+        )
+        val secondGlow = Brush.radialGradient(
+            colors = listOf(
+                accent.copy(alpha = if (dark) 0.075f else 0.045f),
+                Color.Transparent
+            ),
+            center = Offset(size.width * 0.96f, size.height * 0.88f),
+            radius = radius * 0.92f
+        )
+        onDrawBehind {
+            drawRect(base)
+            drawRect(firstGlow)
+            drawRect(secondGlow)
+        }
+    }
+}
