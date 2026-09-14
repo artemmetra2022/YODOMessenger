@@ -74,7 +74,7 @@ service cloud.firestore {
       // могут писать в официальный канал рассылок.
       return isSignedIn() &&
         request.auth.token.email.lower() in
-          ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru'];
+          ['artemmetra2022spb@gmail.com', 'artemmelnik2@yandex.ru', 'artemmelnik2022spb+1@gmail.com'];
     }
 
     // НОВОЕ (модерация групп/каналов): владелец чата, назначенный админ, либо
@@ -250,6 +250,25 @@ service cloud.firestore {
     match /config/autoModeration {
       allow read: if isSignedIn();
       allow write: if isOfficialChannelAdmin();
+    }
+
+    // НОВОЕ (шаблоны причин): готовые тексты для санкций, отказов по
+    // обжалованиям и удалений сообщений. Читает любой авторизованный
+    // (текст виден в уведомлениях и так), меняет — только роль с правом
+    // settings (владелец/админ), чтобы модераторы не правили формулировки.
+    match /config/reasonTemplates {
+      allow read: if isSignedIn();
+      allow write: if hasPerm('settings');
+    }
+
+    // НОВОЕ (политика модерации): пороги авто-эскалации (сколько
+    // предупреждений до мута, сколько мутов до бана) и антиспам-лимиты
+    // (сообщений в минуту, макс. длина, медленный режим, запрет ссылок
+    // новичкам). Читать обязан каждый клиент — лимиты применяются на
+    // устройстве при отправке (rules сами частоту считать не умеют).
+    match /config/moderationPolicy {
+      allow read: if isSignedIn();
+      allow write: if hasPerm('settings');
     }
 
     // НОВОЕ (раздел «Школа»): динамический контент школьного справочника
@@ -808,7 +827,7 @@ service cloud.firestore {
           request.auth.uid == request.resource.data.reporterId &&
           (
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds ||
-            // НОВОЕ (AD): обжалование глобальной блокировки можно подать в очередь
+            // НОВОЕ (AD): обжалование глобальной блокиро��ки можно подать в очередь
             // официального канала даже не будучи его участником — на самого себя.
             (request.resource.data.reason == 'APPEAL' &&
              request.auth.uid == request.resource.data.targetUserId)

@@ -68,7 +68,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru"];
+const ADMIN_EMAILS = ["artemmetra2022spb@gmail.com", "artemmelnik2@yandex.ru", "artemmelnik2022spb+1@gmail.com"];
 // Официальный канал — id 1:1 с ChatRepository.OFFICIAL_CHANNEL_ID и app.js.
 const OFFICIAL_CHANNEL_ID = "yodo_official_channel";
 
@@ -142,9 +142,13 @@ function handleErr(prefix) {
   return (err) => {
     console.error(prefix, err);
     const forbidden = (err?.code || "").includes("permission-denied");
+    const email = auth.currentUser?.email || "";
+    const knownAdmin = isAdminEmail(email) || (typeof roleOfEmail === "function" && !!roleOfEmail(email));
     toast(
       forbidden
-        ? "Нет прав: войдите под аккаунтом администратора"
+        ? knownAdmin
+          ? "Доступ отклонён правилами Firestore. Опубликуйте актуальный firestore.rules."
+          : "Нет прав для аккаунта " + (email || "без email")
         : prefix + ": " + (err?.message || "ошибка"),
       false
     );
@@ -198,6 +202,26 @@ const AUDIT_LABELS = {
   AUTO_FILTER_RULE_SAVED: "Правка правил автофильтра",
   AUTO_FILTER_MESSAGES_DELETED: "Автоудаление сообщений по фильтру",
   DELETED_HISTORY_CLEANED: "Очистка истории удалённых (30 дней)",
+  // НОВОЕ (роли, санкции на срок, очередь жалоб).
+  ADMIN_ROLE_GRANTED: "Выдана роль админа",
+  ADMIN_ROLE_REVOKED: "Отозван доступ админа",
+  SANCTION_AUTO_EXPIRED: "Автоснятие блокировки по сроку",
+  REPORT_CLAIMED: "Жалоба взята в работу",
+  REPORT_RELEASED: "Жалоба возвращена в очередь",
+  // НОВОЕ (мягкие санкции, обжалования, массовые действия).
+  USER_MUTED: "Мут (запрет писать)",
+  USER_UNMUTED: "Мут снят",
+  USER_SHADOW_BANNED: "Теневой бан",
+  USER_SHADOW_UNBANNED: "Теневой бан снят",
+  USER_WARNED: "Предупреждение пользователю",
+  APPEAL_ACCEPTED: "Обжалование удовлетворено",
+  APPEAL_REJECTED: "Обжалование отклонено",
+  REPORTS_BULK_DISMISSED: "Массовое отклонение жалоб",
+  REPORTS_BULK_MESSAGES_DELETED: "Массовое удаление сообщений по жалобам",
+  REPORTS_BULK_USERS_BANNED: "Массовая блокировка по жалобам",
+  REASON_TEMPLATE_SAVED: "Шаблоны причин изменены",
+  MOD_POLICY_SAVED: "Политика модерации изменена",
+  SANCTION_ESCALATED: "Авто-эскалация санкции",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -230,16 +254,86 @@ function logAdminAction(actionType, details = "", targetUserId = null, targetUse
 /* Навигация по секциям                                                */
 /* ------------------------------------------------------------------ */
 
-document.querySelectorAll(".nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    document
-      .querySelectorAll(".admin-section")
-      .forEach((s) => s.classList.remove("active"));
-    $("section-" + btn.dataset.section).classList.add("active");
+// НОВОЕ (навигация): секция запоминается в адресной строке (#users) и в
+// localStorage — перезагрузка и ссылки открывают тот же раздел.
+const LAST_SECTION_KEY = "yodo_admin_last_section";
+const ADMIN_AREA_KEY = "yodo_admin_area";
+let activeAdminArea = "messenger";
+
+function setAdminArea(area, { ensureVisibleSection = true } = {}) {
+  activeAdminArea = area === "school" ? "school" : "messenger";
+  document.querySelectorAll(".admin-area-btn").forEach((btn) => {
+    const selected = btn.dataset.adminArea === activeAdminArea;
+    btn.classList.toggle("active", selected);
+    btn.setAttribute("aria-selected", String(selected));
   });
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    const itemArea = btn.dataset.adminArea || "all";
+    btn.classList.toggle("area-hidden", itemArea !== "all" && itemArea !== activeAdminArea);
+  });
+  document.querySelectorAll(".overview-card").forEach((card) => {
+    card.classList.toggle("area-hidden", card.dataset.adminArea !== activeAdminArea);
+  });
+  try { localStorage.setItem(ADMIN_AREA_KEY, activeAdminArea); } catch (e) { /* приватный режим */ }
+
+  if (ensureVisibleSection) {
+    const active = document.querySelector(".nav-btn.active");
+    if (!active || active.classList.contains("hidden") || active.classList.contains("area-hidden")) {
+      showSection("settings", { updateHash: true, syncArea: false });
+    }
+  }
+}
+
+document.querySelectorAll(".admin-area-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setAdminArea(btn.dataset.adminArea));
 });
+
+function initAdminArea() {
+  let saved = "messenger";
+  try { saved = localStorage.getItem(ADMIN_AREA_KEY) || "messenger"; } catch (e) { /* ignore */ }
+  setAdminArea(saved, { ensureVisibleSection: false });
+}
+
+function sectionExists(name) {
+  return !!name && !!$("section-" + name);
+}
+
+function showSection(name, { updateHash = true, syncArea = true } = {}) {
+  if (!sectionExists(name)) return;
+  const targetButton = document.querySelector('.nav-btn[data-section="' + name + '"]');
+  const targetArea = targetButton?.dataset.adminArea;
+  if (syncArea && targetArea && targetArea !== "all" && targetArea !== activeAdminArea) {
+    setAdminArea(targetArea, { ensureVisibleSection: false });
+  }
+  document.querySelectorAll(".nav-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.section === name);
+  });
+  document.querySelectorAll(".admin-section").forEach((s) => s.classList.remove("active"));
+  $("section-" + name).classList.add("active");
+  try { localStorage.setItem(LAST_SECTION_KEY, name); } catch (e) { /* приватный режим */ }
+  if (updateHash && location.hash.slice(1) !== name) {
+    history.replaceState(null, "", "#" + name);
+  }
+  const content = document.querySelector(".admin-content");
+  if (content) content.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+document.querySelectorAll(".nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => showSection(btn.dataset.section));
+});
+
+window.addEventListener("hashchange", () => {
+  const name = location.hash.slice(1);
+  if (sectionExists(name)) showSection(name, { updateHash: false });
+});
+
+function restoreSection() {
+  const fromHash = location.hash.slice(1);
+  let saved = "";
+  try { saved = localStorage.getItem(LAST_SECTION_KEY) || ""; } catch (e) { /* ignore */ }
+  const target = sectionExists(fromHash) ? fromHash : sectionExists(saved) ? saved : "settings";
+  showSection(target);
+}
 
 /* ------------------------------------------------------------------ */
 /* Авторизация                                                         */
@@ -284,11 +378,16 @@ onAuthStateChanged(auth, async (user) => {
   }
   // Email из аккаунта надёжнее, чем из auth-токена Firebase Admin,
   // если создатели удалены из Auth — панель пускает по списку ADMIN_EMAILS.
+  // НОВОЕ (роли): пускаем не только владельцев из ADMIN_EMAILS, но и тех,
+  // кому выдана роль в config/adminRoles — с ограниченным набором разделов.
   if (!isAdminEmail(user.email)) {
-    $("screen-admin").classList.add("hidden");
-    $("screen-login").classList.add("hidden");
-    $("screen-denied").classList.remove("hidden");
-    return;
+    await loadAdminRoles();
+    if (!roleOfEmail(user.email)) {
+      $("screen-admin").classList.add("hidden");
+      $("screen-login").classList.add("hidden");
+      $("screen-denied").classList.remove("hidden");
+      return;
+    }
   }
   $("screen-login").classList.add("hidden");
   $("screen-denied").classList.add("hidden");
@@ -537,7 +636,7 @@ function newsItem(docSnap) {
           toast("Новость опубликована — push уйдёт подписчикам автоматически");
           logAdminAction("SCHOOL_NEWS_PUBLISHED", (n.sender || "") + ": " + (n.text || "").slice(0, 100));
         })
-        .catch(handleErr("Не удалось опубликовать новость"));
+        .catch(handleErr("Не удалось о��убликовать новость"));
     });
   }
   // НОВОЕ (ручной push): сбрасываем notified — воркер разошлёт в течение ~5 минут.
@@ -1089,7 +1188,7 @@ function initUserSearchModal() {
       if (!$("file-modal-overlay").classList.contains("hidden")) closeFileModal();
     }
   });
-  // Fallback для случаев, когда учитель не находится поиском.
+  // Fallback для случае��, когда учитель не находится поиском.
   $("btn-manual-uid").addEventListener("click", () => {
     const link = pendingLink;
     if (!link) return;
@@ -1413,7 +1512,7 @@ function initCsvExport() {
     toast("CSV идей скачан (" + ideasCache.length + ")");
   });
   $("btn-export-reviews").addEventListener("click", () => {
-    if (!reviewsCache.length) return toast("Отзывов пока нет — выгружать нечего", false);
+    if (!reviewsCache.length) return toast("Отзывов пока н��т — выгружать нечего", false);
     downloadCsv(
       "yodo-school-reviews.csv",
       ["Автор", "Оценка", "Понравилось", "Не понравилось", "Дата"],
@@ -1480,7 +1579,7 @@ function initCsvExport() {
     btn.disabled = true;
     try {
       const snap = await getDocs(collection(db, "users"));
-      if (snap.empty) return toast("Пользователей нет — выгружать нечего", false);
+      if (snap.empty) return toast("Пользователей нет — выг��ужать нечего", false);
       const rows = snap.docs.map((d) => {
         const u = d.data();
         return [
@@ -1590,7 +1689,7 @@ const REPORT_REASONS = {
   NSFW: "Неприемлемый контент (NSFW)",
   ADVERTISING: "Реклама",
   OTHER: "Другое",
-  APPEAL: "Обжалование блокировки",
+  APPEAL: "Обжалование блокиров��и",
 };
 const REPORT_STATUS_LABELS = {
   PENDING: "На рассмотрении",
@@ -1676,7 +1775,11 @@ async function refreshChatPreviewAfterDelete(chatId, messageId) {
 
 // Блокировка аккаунта — формат 1:1 с UserRepositoryImpl.setGlobalBlock
 // (+ НОВОЕ: машиночитаемый код причины reasonCode и запись в историю блокировок).
-async function setGlobalBlock(uid, reason, reasonCode = "", reasonText = "") {
+async function setGlobalBlock(uid, reason, reasonCode = "", reasonText = "", durationMs = 0) {
+  // НОВОЕ (роли): баны только с правом users.block.
+  if (!can("users.block")) throw new Error("Нет прав на блокировку аккаунтов");
+  const ms = Number(durationMs || 0);
+  const expiresAt = ms > 0 ? Date.now() + ms : 0;
   await setDoc(doc(db, "globalBlocks", uid), {
     reason: reason || "",
     reasonCode: reasonCode || "",
@@ -1684,11 +1787,15 @@ async function setGlobalBlock(uid, reason, reasonCode = "", reasonText = "") {
     blockedBy: auth.currentUser.uid,
     blockedByName: adminActorName || auth.currentUser.email || "Админ",
     blockedAt: Date.now(),
+    // НОВОЕ (санкции на срок): 0 — бессрочно.
+    expiresAt,
+    durationMs: ms,
   });
   addDoc(collection(db, "moderationNotifications"), {
     userId: uid,
-    title: "Аккаунт заблокирован",
-    body: reason ? "Причина: " + reason.slice(0, 200) : "Ваш аккаунт заблокирован администрацией",
+    title: ms > 0 ? "Доступ ограничен временно" : "Аккаунт заблокирован",
+    body: (reason ? "Причина: " + reason.slice(0, 200) : "Ваш аккаунт заблокирован администрацией") +
+      (ms > 0 ? " · до " + fmtDate(expiresAt) : ""),
     notified: false,
     createdAt: Date.now(),
   }).catch(() => {});
@@ -1708,7 +1815,7 @@ function reportItem(docSnap) {
   el.innerHTML = `
     <div class="item-head">
       <span class="item-title">${r.isAppeal ? "🔔 Обжалование: " : ""}${esc(r.targetUserName || "Пользователь")}</span>
-      ${statusBadge}
+      ${statusBadge}${claimBadge(r)}
       <span class="item-date">${fmtDate(r.createdAt)}</span>
     </div>
     <div class="item-sub">Жалоба от ${esc(r.reporterName || "—")} · причина: ${esc(REPORT_REASONS[r.reason] || r.reason || "?")}</div>
@@ -1741,6 +1848,25 @@ function reportItem(docSnap) {
     actions.appendChild(ctxBtn);
   }
   if (isPending) {
+    // НОВОЕ (массовые действия): выбор жалобы галочкой.
+    const pick = document.createElement("label");
+    pick.className = "check-inline";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selectedReports.has(reportKey(docSnap));
+    cb.addEventListener("change", () => toggleReportSelection(docSnap, cb.checked));
+    pick.appendChild(cb);
+    pick.appendChild(document.createTextNode(" Выбрать"));
+    actions.appendChild(pick);
+    // НОВОЕ (очередь жалоб): взятие в работу, чтобы двое админов не
+    // разбирали одну жалобу одновременно.
+    const st = claimState(r);
+    const claimBtn = document.createElement("button");
+    claimBtn.type = "button";
+    claimBtn.className = st.mine ? "btn-link" : "btn-secondary";
+    claimBtn.textContent = st.mine ? "Вернуть в очередь" : st.active ? "Забрать себе" : "Взять в работу";
+    claimBtn.addEventListener("click", () => (st.mine ? releaseReport(docSnap) : claimReport(docSnap)));
+    actions.appendChild(claimBtn);
     if (!r.isAppeal) {
       const blockBtn = document.createElement("button");
       blockBtn.type = "button";
@@ -1764,6 +1890,10 @@ async function resolveReportAction(docSnap, action) {
   const r = docSnap.data();
   const chatId = docSnap.ref.parent.parent.id;
   const targetName = r.targetUserName || "пользователя";
+  // НОВОЕ: права и проверка захвата жалобы другим админом.
+  if (!requirePerm("moderation", "разбор жалоб")) return;
+  if (action === "blockUser" && !requirePerm("users.block", "блокировка аккаунтов")) return;
+  if (!confirmClaimConflict(r)) return;
   try {
     if (action === "deleteMessage") {
       // НОВОЕ (причины удаления): спрашиваем причину и сохраняем копию сообщения
@@ -1797,8 +1927,8 @@ async function resolveReportAction(docSnap, action) {
     if (!confirm(confirmText)) return;
     if (action === "blockUser") {
       const blockReason = "Нарушение правил по жалобе: " + (REPORT_REASONS[r.reason] || r.reason);
-      await setGlobalBlock(r.targetUserId, blockReason, "RULES", "");
-      await finalizeReport(docSnap, "RESOLVED", "USER_BANNED", "Аккаунт заблокирован администратором");
+      await setGlobalBlock(r.targetUserId, blockReason, "RULES", "", 0);
+      await finalizeReport(docSnap, "RESOLVED", "USER_BANNED", "Аккаунт заблокирова�� администратором");
       logAdminAction("REPORT_RESOLVED_USER_BANNED", "Жалоба " + chatId + "/" + docSnap.id, r.targetUserId, r.targetUserName);
       toast("Аккаунт заблокирован, жалоба закрыта");
     } else {
@@ -1943,7 +2073,7 @@ async function bulkDeleteFind() {
   const statusEl = $("bulk-del-status");
   const previewEl = $("bulk-del-preview");
   if (!uid) {
-    toast("Укажите UID пользователя", false);
+    toast("Укажите UID пользовател��", false);
     return;
   }
   const from = datetimeLocalToMs($("bulk-del-from").value);
@@ -2078,7 +2208,7 @@ async function bulkDeleteRun() {
     );
     toast(`Удалено сообщений: ${deleted}`);
     statusEl.textContent =
-      `Готово: удалено ${deleted} сообщений в ${chatCount} чатах.` +
+      `Готово: удалено ${deleted} сообще��ий в ${chatCount} чатах.` +
       (staleChats
         ? ` Превью ${staleChats} чатов не обновлено (админ не участник) — обновится при следующем сообщении.`
         : "");
@@ -2384,7 +2514,7 @@ async function autofilterScan() {
     const snap = await getDocs(
       query(collectionGroup(db, "messages"), orderBy("timestamp", "desc"), limit(AUTOFILTER_SCAN_LIMIT))
     );
-    // Уже удалённые не трогаем; в личных (E2EE) чатах текст пуст — они не видны.
+    // Уже удал����нные не трогаем; в личных (E2EE) чатах текст пуст — они не видны.
     const docs = snap.docs.filter((d) => d.get("isDeleted") !== true);
     docs.forEach((d) => {
       const m = d.data();
@@ -2408,7 +2538,7 @@ async function autofilterScan() {
     $("btn-autofilter-apply").disabled = !autofilterMatches.length;
   } catch (err) {
     previewEl.innerHTML = "";
-    handleErr("Не удалось проверить сообщения (нужен индекс messages.timestamp)")(err);
+    handleErr("Не удалось проверить соо��щ��ния (нужен индекс messages.timestamp)")(err);
   }
 }
 
@@ -2640,11 +2770,15 @@ function statusFilteredReports() {
   );
 }
 
-/** Жалобы, прошедшие оба фильтра — статус и тип. */
+/**
+ * Жалобы, прошедшие все фильтры: статус, тип, а также НОВОЕ —
+ * период, «только взятые мной» и сортировка (см. applyReportExtras).
+ */
 function filteredReports() {
-  return statusFilteredReports().filter(
+  const byReason = statusFilteredReports().filter(
     (d) => reportsReasonFilter === "ALL" || (d.data().reason || "") === reportsReasonFilter
   );
+  return typeof applyReportExtras === "function" ? applyReportExtras(byReason) : byReason;
 }
 
 function setReasonFilter(reason) {
@@ -2742,6 +2876,8 @@ function renderReportsView() {
   }
   listEl.innerHTML = "";
   docs.forEach((d) => listEl.appendChild(reportItem(d)));
+  // НОВОЕ (массовые действия): панель ��ыбора под текущим списком.
+  if (typeof renderBulkBar === "function") renderBulkBar();
 }
 
 function startReports() {
@@ -2813,6 +2949,9 @@ function startReports() {
 
   // НОВОЕ (расширенная модерация): причины удаления, автофильтр, история удалённых.
   startModerationExtras();
+
+  // НОВОЕ (5): доп. фильтры (период/сортировка/«только мои») и массовые действия.
+  startReportsBulk();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2922,7 +3061,7 @@ async function removeSupportRestriction(uid) {
   await deleteDoc(doc(db, "supportRestrictions", uid));
 }
 
-// Кнопка у обращения: не ограничивает сразу, а подставляет UID в форму, где
+// Кнопка у обра��ения: не ограничивает сразу, а подставляет UID в форму, где
 // админ выбирает причину и срок.
 function restrictSupportUser(uid, name) {
   $("support-restrict-uid").value = uid;
@@ -2952,7 +3091,7 @@ function supportConversationRow(c) {
   el.className = "item";
   el.innerHTML = `
     <div class="item-head">
-      <span class="item-title">${esc(c.supportUserName || "Пользователь")}${supportWaiting(c) ? ' <span class="badge badge-yellow">ждёт ответа</span>' : ""}${repeat ? ' <span class="badge badge-blue">повторный</span>' : ""}${restricted ? ' <span class="badge badge-dim">ограничен</span>' : ""}</span>
+      <span class="item-title">${esc(c.supportUserName || "Пользователь")}${supportWaiting(c) ? ' <span class="badge badge-yellow">ждёт ��т��ета</span>' : ""}${repeat ? ' <span class="badge badge-blue">повторный</span>' : ""}${restricted ? ' <span class="badge badge-dim">ограничен</span>' : ""}</span>
       <span class="item-date">${fmtDate(c.lastMessageTimestamp)}</span>
     </div>
     <div class="item-sub">${esc(c.supportUserEmail || "без email")}</div>
@@ -3524,7 +3663,7 @@ async function refreshFaqMeta() {
       const who = snap.get("updatedBy") ? " · " + snap.get("updatedBy") : "";
       el.textContent = "Изменено: " + fmtDate(snap.get("updatedAt")) + who;
     } else {
-      el.textContent = "Изменений нет — показывается встроенный список.";
+      el.textContent = "Изменений нет — пок��зывается встроенный список.";
     }
   } catch (e) {
     el.textContent = "";
@@ -3636,7 +3775,7 @@ async function openUserCard(uid) {
   try {
     const snap = await getDoc(doc(db, "users", uid));
     if (!snap.exists()) {
-      bodyEl.innerHTML = `<p class="empty-note">Профиль users/${esc(uid)} не найден. Блокировать по этому UID всё равно можно в разделе «Блокировки».</p>`;
+      bodyEl.innerHTML = `<p class="empty-note">Профиль users/${esc(uid)} не найден. Блокировать по этому UID всё равно мо��но в разделе «Блокировки».</p>`;
       return;
     }
     const u = snap.data();
@@ -3841,13 +3980,17 @@ function closeUserCard() {
 
 async function blockUserWithPrompt(uid, name) {
   // НОВОЕ (причины блокировок): выбираем причину из стандартного набора с описанием.
+  if (!requirePerm("users.block", "блокировка аккаунтов")) return;
   const pick = await askBlockReason("Блокировка: " + (name || "пользователь") + " · " + uid);
   if (!pick) return;
   const reason = blockReasonText(pick);
   try {
-    await setGlobalBlock(uid, reason, pick.code, pick.text);
-    logAdminAction("USER_GLOBALLY_BLOCKED", reason, uid, name);
-    toast("Аккаунт заблокирован — пользователь получит push");
+    await setGlobalBlock(uid, reason, pick.code, pick.text, pick.durationMs);
+    logAdminAction("USER_GLOBALLY_BLOCKED",
+      reason + " · срок: " + durationLabel(pick.durationMs), uid, name);
+    toast(pick.durationMs > 0
+      ? "Аккаунт заблокирован на " + durationLabel(pick.durationMs)
+      : "Аккаунт заблокирован — пользователь получит push");
   } catch (err) {
     handleErr("Не удалось заблокировать")(err);
   }
@@ -4013,7 +4156,7 @@ function startUsers() {
 // НОВОЕ (причины блокировок): стандартный набор причин с описаниями. Выбранная
 // причина пишется в globalBlocks/{uid}.reasonCode и в историю blockHistory.
 const BLOCK_REASONS = [
-  { code: "SPAM", label: "Спам и рассылки", description: "Массовые рассылки, навязчивая реклама, флуд" },
+  { code: "SPAM", label: "Спам и рассылки", description: "Массовые рассылки, навязчивая реклама, флу��" },
   { code: "INSULT", label: "Оскорбления и травля", description: "Оскорбления, угрозы, травля других пользователей" },
   { code: "NSFW", label: "Неприемлемый контент", description: "NSFW, жестокость, шок-контент" },
   { code: "FRAUD", label: "Мошенничество", description: "Обман, фишинг, выманивание данных или денег" },
@@ -4069,6 +4212,12 @@ function askBlockReason(subtitle) {
     $("block-reason-sub").textContent = subtitle || "";
     customText.value = "";
     customText.classList.add("hidden");
+    // НОВОЕ (санкции на срок): выбор длительности блокировки.
+    const durationSelect = $("block-reason-duration");
+    if (durationSelect && !durationSelect.options.length) {
+      populateDurationSelect(durationSelect);
+      enhanceSelect(durationSelect);
+    }
     let selected = "RULES";
     options.innerHTML = "";
     BLOCK_REASONS.forEach((r) => {
@@ -4095,6 +4244,7 @@ function askBlockReason(subtitle) {
         label: base.label,
         description: base.description,
         text: selected === "OTHER" ? customText.value.trim() : "",
+        durationMs: Number(($("block-reason-duration") || {}).value || 0),
       });
     };
     const onCancel = () => finish(null);
@@ -4209,19 +4359,23 @@ let blocksUnsub = null;
 function startBlocks() {
   // НОВОЕ (причины блокировок): выпадающий список стандартных причин.
   populateBlockReasonSelect($("block-reason-code"));
+  // НОВОЕ (санкции на срок): срок блокировки с автоснятием.
+  populateDurationSelect($("block-duration"));
   $("form-block-uid").addEventListener("submit", async (e) => {
     e.preventDefault();
     const uid = $("block-uid").value.trim();
     const code = $("block-reason-code").value;
     const text = $("block-reason").value.trim();
+    const durationMs = Number($("block-duration").value || 0);
     if (!uid) return toast("Укажите UID пользователя", false);
+    if (!requirePerm("users.block", "блокировка аккаунтов")) return;
     const base = blockReasonByCode(code);
     if (base.code === "OTHER" && !text) return toast("Укажите текст причины для «Другое»", false);
     const reason = blockReasonText({ code: base.code, label: base.label, description: base.description, text });
     try {
-      await setGlobalBlock(uid, reason, base.code, text);
-      logAdminAction("USER_GLOBALLY_BLOCKED", reason, uid);
-      toast("Аккаунт заблокирован");
+      await setGlobalBlock(uid, reason, base.code, text, durationMs);
+      logAdminAction("USER_GLOBALLY_BLOCKED", reason + " · срок: " + durationLabel(durationMs), uid);
+      toast(durationMs > 0 ? "Аккаунт заблокирован на " + durationLabel(durationMs) : "Аккаунт заблокирован");
       $("block-uid").value = "";
       $("block-reason").value = "";
     } catch (err) {
@@ -4253,7 +4407,7 @@ function startBlocks() {
             <span class="item-title">${esc(name || d.id)}</span>
             <span class="item-date">${fmtDate(b.blockedAt)}</span>
           </div>
-          <div class="item-sub">UID: ${esc(d.id)}${b.blockedByName ? " · заблокировал: " + esc(b.blockedByName) : ""}</div>
+          <div class="item-sub">UID: ${esc(d.id)}${b.blockedByName ? " · заблокировал: " + esc(b.blockedByName) : ""} · ${esc(blockExpiryText(b))}</div>
           ${b.reason ? `<div class="item-text">${esc(b.reason)}</div>` : ""}`;
         const actions = document.createElement("div");
         actions.className = "item-actions";
@@ -4309,33 +4463,101 @@ function startInbox() {
 /* Секция «Аудит» — журнал действий администраторов                    */
 /* ------------------------------------------------------------------ */
 
-function startAudit() {
+// НОВОЕ (аудит): поиск, фильтры по типу действия и периоду, выбор
+// глубины выгрузки и экспорт в CSV. Фильтрация на клиенте — не требует
+// составных индексов Firestore.
+let auditDocs = [];
+let auditUnsub = null;
+
+function auditFilteredDocs() {
+  const term = ($("audit-search").value || "").trim().toLowerCase();
+  const type = $("audit-type").value;
+  const days = Number($("audit-period").value || 0);
+  const since = days > 0 ? Date.now() - days * 86400000 : 0;
+  return auditDocs.filter((a) => {
+    if (type && a.actionType !== type) return false;
+    if (since && (a.timestamp || 0) < since) return false;
+    if (!term) return true;
+    const haystack = [
+      AUDIT_LABELS[a.actionType] || a.actionType || "",
+      a.actorName, a.actorId, a.targetUserName, a.targetUserId, a.details,
+    ].join(" ").toLowerCase();
+    return haystack.includes(term);
+  });
+}
+
+function renderAudit() {
   const listEl = $("audit-list");
+  const countEl = $("audit-count");
+  const rows = auditFilteredDocs();
+  countEl.textContent = rows.length ? rows.length + " из " + auditDocs.length : "";
+  countEl.classList.toggle("hidden", !rows.length);
+  if (!rows.length) {
+    listEl.innerHTML = '<p class="empty-note">Записей по заданным условиям нет.</p>';
+    return;
+  }
+  listEl.innerHTML = "";
+  rows.forEach((a) => {
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `
+      <div class="item-head">
+        <span class="item-title">${esc(AUDIT_LABELS[a.actionType] || a.actionType || "?")}</span>
+        <span class="item-date">${fmtDate(a.timestamp)}</span>
+      </div>
+      <div class="item-sub">${esc(a.actorName || a.actorId || "")}${a.targetUserName ? " → " + esc(a.targetUserName) : ""}</div>
+      ${a.details ? `<div class="item-text">${esc(a.details)}</div>` : ""}`;
+    listEl.appendChild(el);
+  });
+}
+
+function subscribeAudit() {
+  const listEl = $("audit-list");
+  const max = Number($("audit-limit").value || 50);
+  if (auditUnsub) auditUnsub();
   setLoading(listEl);
-  onSnapshot(
-    query(collection(db, "adminAuditLog"), orderBy("timestamp", "desc"), limit(50)),
+  auditUnsub = onSnapshot(
+    query(collection(db, "adminAuditLog"), orderBy("timestamp", "desc"), limit(max)),
     (snap) => {
-      if (snap.empty) {
-        listEl.innerHTML = '<p class="empty-note">Записей пока нет.</p>';
-        return;
-      }
-      listEl.innerHTML = "";
-      snap.forEach((d) => {
-        const a = d.data();
-        const el = document.createElement("div");
-        el.className = "item";
-        el.innerHTML = `
-          <div class="item-head">
-            <span class="item-title">${esc(AUDIT_LABELS[a.actionType] || a.actionType || "?")}</span>
-            <span class="item-date">${fmtDate(a.timestamp)}</span>
-          </div>
-          <div class="item-sub">${esc(a.actorName || a.actorId || "")}${a.targetUserName ? " → " + esc(a.targetUserName) : ""}</div>
-          ${a.details ? `<div class="item-text">${esc(a.details)}</div>` : ""}`;
-        listEl.appendChild(el);
-      });
+      auditDocs = snap.docs.map((d) => d.data());
+      // Список типов собираем из фактических записей + известных лейблов.
+      const typeSel = $("audit-type");
+      const current = typeSel.value;
+      const types = Array.from(new Set(auditDocs.map((a) => a.actionType).filter(Boolean)))
+        .sort((a, b) => (AUDIT_LABELS[a] || a).localeCompare(AUDIT_LABELS[b] || b, "ru"));
+      typeSel.innerHTML = '<option value="">Все действия</option>' +
+        types.map((t) => `<option value="${esc(t)}">${esc(AUDIT_LABELS[t] || t)}</option>`).join("");
+      typeSel.value = types.includes(current) ? current : "";
+      refreshNiceSelect(typeSel);
+      renderAudit();
     },
     handleErr("Не удалось загрузить журнал")
   );
+}
+
+function startAudit() {
+  $("audit-search").addEventListener("input", renderAudit);
+  $("audit-type").addEventListener("change", renderAudit);
+  $("audit-period").addEventListener("change", renderAudit);
+  $("audit-limit").addEventListener("change", subscribeAudit);
+  $("btn-audit-csv").addEventListener("click", () => {
+    const rows = auditFilteredDocs();
+    if (!rows.length) return toast("Нет записей для экспорта", false);
+    downloadCsv(
+      "yodo-audit-" + new Date().toISOString().slice(0, 10) + ".csv",
+      ["Дата", "Действие", "Код", "Админ", "Объект", "Детали"],
+      rows.map((a) => [
+        fmtDate(a.timestamp),
+        AUDIT_LABELS[a.actionType] || a.actionType || "",
+        a.actionType || "",
+        a.actorName || a.actorId || "",
+        a.targetUserName || a.targetUserId || "",
+        a.details || "",
+      ])
+    );
+    toast("Файл сохранён: " + rows.length + " записей");
+  });
+  subscribeAudit();
 }
 
 /* ------------------------------------------------------------------ */
@@ -4344,11 +4566,13 @@ function startAudit() {
 
 async function refreshSummary() {
   const grid = $("summary-grid");
+  const messengerGrid = $("messenger-summary-grid");
   grid.innerHTML = '<p class="empty-note">Считаю…</p>';
+  messengerGrid.innerHTML = '<p class="empty-note">Считаю…</p>';
   try {
     // ИСПРАВЛЕНО: раньше одно недоступное чтение (например, список users или
     // globalBlocks, если правила Firestore не задеплоены) роняло Promise.all и
-    // всю сводку целиком. Теперь каждый источник читается независимо: те, что
+    // всю св��дку целиком. Теперь каждый источник читается независимо: те, что
     // доступны, отображаются; недоступные пропускаются и логируются в консоль
     // с указанием кода ошибки — это же даёт диагностику при настройке правил.
     const results = await Promise.allSettled([
@@ -4452,32 +4676,38 @@ async function refreshSummary() {
       });
     }
 
-    if (!stats.length) {
-      grid.innerHTML =
-        '<p class="empty-note">Не удалось получить данные. Подробности — в консоли браузера (F12).</p>';
-      return;
-    }
-    grid.innerHTML = "";
-    for (const s of stats) {
-      const el = document.createElement("div");
-      el.className = "summary-stat";
-      el.innerHTML =
-        '<a href="#"><div class="stat-value">' + esc(String(s.value)) +
-        '</div><div class="stat-label">' + esc(s.label) + "</div></a>";
-      el.querySelector("a").addEventListener("click", (e) => {
-        e.preventDefault();
-        document.querySelector('.nav-btn[data-section="' + s.section + '"]').click();
-      });
-      grid.appendChild(el);
-    }
+    const schoolSections = new Set(["news", "polls", "inbox", "teachers", "ideas", "reviews"]);
+    const renderStats = (target, rows) => {
+      target.innerHTML = "";
+      if (!rows.length) {
+        target.innerHTML = '<p class="empty-note">Нет доступных данных для сводки.</p>';
+        return;
+      }
+      for (const stat of rows) {
+        const el = document.createElement("div");
+        el.className = "summary-stat";
+        el.innerHTML =
+          '<a href="#"><div class="stat-value">' + esc(String(stat.value)) +
+          '</div><div class="stat-label">' + esc(stat.label) + "</div></a>";
+        el.querySelector("a").addEventListener("click", (e) => {
+          e.preventDefault();
+          showSection(stat.section);
+        });
+        target.appendChild(el);
+      }
+    };
+    renderStats(grid, stats.filter((stat) => schoolSections.has(stat.section)));
+    renderStats(messengerGrid, stats.filter((stat) => !schoolSections.has(stat.section)));
   } catch (err) {
     grid.innerHTML = "";
+    messengerGrid.innerHTML = "";
     handleErr("Не удалось собрать сводку")(err);
   }
 }
 
 function startSummary() {
   $("btn-refresh-summary").addEventListener("click", refreshSummary);
+  $("btn-refresh-messenger-summary").addEventListener("click", refreshSummary);
   refreshSummary();
 }
 
@@ -4851,7 +5081,7 @@ function startChannel() {
       channelPhotoFiles = [];
       renderChannelThumbs();
       channelPreviewEl.classList.add("hidden");
-      toast(silent ? "Пост опубликован без push" : "Пост опубликован — push уйдёт подписчикам");
+      toast(silent ? "Пост опубликован ��ез push" : "Пост опубликован — push уйдёт подписчикам");
       logAdminAction("CHANNEL_POST_ADDED", (rawText || "Фото").slice(0, 100));
     } catch (err) {
       handleErr("Не удалось опубликовать пост")(err);
@@ -4923,7 +5153,7 @@ function startPush() {
     const body = $("push-broadcast-body").value.trim();
     const audience = audienceSel.value;
     const userId = uidInput.value.trim();
-    if (!title || !body) return toast("Заполните заголовок и текст", false);
+    if (!title || !body) return toast("За��ол��ите заголовок и текст", false);
     if (audience === "uid" && !userId) return toast("Укажите UID получателя", false);
     if (audience === "all" && !confirm("Отправить уведомление ВСЕМ пользователям с приложением?")) return;
     try {
@@ -5033,7 +5263,7 @@ function closeAllNiceSelects(except) {
   });
 }
 
-/** Обновляет подпись после программной смены select.value (например, сброса). */
+/** Обновляет ��одпись после программной смены select.value (например, сброса). */
 function refreshNiceSelect(select) {
   const wrap = select && select.closest(".nice-select");
   if (wrap && typeof wrap._sync === "function") wrap._sync();
@@ -5052,10 +5282,17 @@ function startPanel() {
   startIdeas();
   startReviews();
   startReports();
+  // НОВОЕ (2): отдельная очередь обжалований блокировок.
+  startAppeals();
   startSupport();
   startFaq();
   startUsers();
   startBlocks();
+  // НОВОЕ (3): мут, теневой бан, предупреждения.
+  startSanctions();
+  // НОВОЕ (модерация): шаблоны причин + политика (эскалация, антиспам).
+  startReasonTemplates();
+  startModPolicy();
   startAudit();
   initUserSearchModal();
   initFileModal();
@@ -5063,6 +5300,1518 @@ function startPanel() {
 
   // Кастомные выпадающие списки. #support-reply-template не трогаем — его
   // опции заполняются динамически (шаблоны ответов поддержки).
-  ["news-publish-mode", "channel-post-topic", "push-broadcast-audience", "support-restrict-duration"]
+  ["news-publish-mode", "channel-post-topic", "push-broadcast-audience", "support-restrict-duration",
+    "audit-type", "audit-period", "audit-limit"]
     .forEach((id) => enhanceSelect($(id)));
+
+  // Палитра команд, горячие клавиши, бейджи в меню и
+  // восстановление последнего раздела из URL/localStorage.
+  startUiExtras();
+
+  // НОВОЕ: роли и права доступа + автоснятие истёкших блокировок.
+  startAccessControl().then(startSanctionSweep);
+}
+
+/* ------------------------------------------------------------------ */
+/* Быстрый переход (Ctrl+K), горячие клавиши                          */
+/* ------------------------------------------------------------------ */
+
+/* --- Палитра команд: Ctrl/Cmd+K --------------------------------- */
+
+// Команды = разделы панели + частые действия. Фильтр по подстроке,
+// навигация стрелками, Enter — выполнить, Esc — закрыть.
+function commandList() {
+  // Поиск охватывает оба контекста, даже если сейчас открыт только один.
+  // showSection сам переключит «Мессенджер / Школа» перед переходом.
+  const sections = Array.from(document.querySelectorAll(".nav-btn:not(.hidden)")).map((btn) => ({
+    label: btn.textContent.trim(),
+    hint: btn.dataset.adminArea === "school"
+      ? "Школа"
+      : btn.dataset.adminArea === "messenger" ? "Мессенджер" : "Общий раздел",
+    run: () => showSection(btn.dataset.section),
+  }));
+  const actions = [
+    {
+      label: "Экспорт журнала аудита в CSV",
+      hint: "Действие",
+      run: () => { showSection("audit"); $("btn-audit-csv").click(); },
+    },
+    {
+      label: "Новая рассылка push",
+      hint: "Действие",
+      run: () => { showSection("push"); $("push-broadcast-title").focus(); },
+    },
+    {
+      label: "Новая новость",
+      hint: "Действие",
+      run: () => { showSection("news"); $("news-text").focus(); },
+    },
+    {
+      label: "Поиск пользователя",
+      hint: "Действие",
+      run: () => { showSection("users"); $("users-search-input").focus(); },
+    },
+    {
+      label: "Обновить сводку",
+      hint: "Действие",
+      run: () => { showSection("settings"); refreshSummary(); },
+    },
+    { label: "Выйти из панели", hint: "Аккаунт", run: () => doLogout() },
+  ];
+  return sections.concat(actions);
+}
+
+let paletteItems = [];
+let paletteIndex = 0;
+
+function renderPalette() {
+  const listEl = $("palette-list");
+  const term = ($("palette-input").value || "").trim().toLowerCase();
+  paletteItems = commandList().filter((c) => !term || c.label.toLowerCase().includes(term));
+  if (paletteIndex >= paletteItems.length) paletteIndex = 0;
+  if (!paletteItems.length) {
+    listEl.innerHTML = '<p class="empty-note">Ничего не найдено.</p>';
+    return;
+  }
+  listEl.innerHTML = "";
+  paletteItems.forEach((cmd, idx) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "palette-item" + (idx === paletteIndex ? " active" : "");
+    btn.innerHTML = `<span>${esc(cmd.label)}</span><span class="palette-hint">${esc(cmd.hint)}</span>`;
+    btn.addEventListener("mouseenter", () => {
+      paletteIndex = idx;
+      listEl.querySelectorAll(".palette-item").forEach((el, i) => el.classList.toggle("active", i === idx));
+    });
+    btn.addEventListener("click", () => runPaletteItem(idx));
+    listEl.appendChild(btn);
+  });
+}
+
+function runPaletteItem(idx) {
+  const cmd = paletteItems[idx];
+  closePalette();
+  if (cmd) {
+    try { cmd.run(); } catch (e) { console.error("Команда не выполнена", e); }
+  }
+}
+
+function openPalette() {
+  $("palette-overlay").classList.remove("hidden");
+  $("palette-input").value = "";
+  paletteIndex = 0;
+  renderPalette();
+  $("palette-input").focus();
+}
+
+function closePalette() {
+  $("palette-overlay").classList.add("hidden");
+}
+
+function initPalette() {
+  $("palette-input").addEventListener("input", () => { paletteIndex = 0; renderPalette(); });
+  $("palette-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("palette-overlay")) closePalette();
+  });
+  $("palette-input").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      paletteIndex = Math.min(paletteIndex + 1, paletteItems.length - 1);
+      renderPalette();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      paletteIndex = Math.max(paletteIndex - 1, 0);
+      renderPalette();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      runPaletteItem(paletteIndex);
+    } else if (e.key === "Escape") {
+      closePalette();
+    }
+  });
+  const btn = $("btn-palette");
+  if (btn) btn.addEventListener("click", openPalette);
+}
+
+/* --- Горячие клавиши -------------------------------------------- */
+
+// Ctrl/Cmd+K — палитра команд, Esc — закрыть палитру/модалки,
+// Alt+1…9 — быстрый переход к разделу по номеру.
+function initShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    const inPanel = !$("screen-admin").classList.contains("hidden");
+    if (!inPanel) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      $("palette-overlay").classList.contains("hidden") ? openPalette() : closePalette();
+      return;
+    }
+    if (e.key === "Escape" && !$("palette-overlay").classList.contains("hidden")) {
+      closePalette();
+      return;
+    }
+    if (e.altKey && /^[1-9]$/.test(e.key)) {
+      const btns = document.querySelectorAll(".nav-btn:not(.hidden):not(.area-hidden)");
+      const target = btns[Number(e.key) - 1];
+      if (target) {
+        e.preventDefault();
+        showSection(target.dataset.section);
+      }
+    }
+  });
+}
+
+/* --- Счётчики в боковом меню ------------------------------------ */
+
+// Бейджи «сколько ждёт обработки» у разделов Жалобы / Поддержка / Вопросы:
+// раньше цифры были только внутри секции, теперь видны в меню всегда.
+function setNavBadge(section, count) {
+  const btn = document.querySelector('.nav-btn[data-section="' + section + '"]');
+  if (!btn) return;
+  let badge = btn.querySelector(".nav-badge");
+  if (!count) {
+    if (badge) badge.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-badge";
+    btn.appendChild(badge);
+  }
+  badge.textContent = count > 99 ? "99+" : String(count);
+}
+
+// Бейджи держим в синхронизации с уже существующими счётчиками секций —
+// не создаём дополнительных подписок на Firestore.
+function initNavBadges() {
+  const pairs = [
+    ["reports", "reports-count"],
+    ["support", "support-waiting-badge"],
+    ["inbox", "inbox-count"],
+  ];
+  const sync = () => {
+    pairs.forEach(([section, id]) => {
+      const el = $(id);
+      if (!el) return;
+      const hidden = el.classList.contains("hidden");
+      const num = Number((el.textContent.match(/\d+/) || [0])[0]);
+      setNavBadge(section, hidden ? 0 : num);
+    });
+  };
+  pairs.forEach(([, id]) => {
+    const el = $(id);
+    if (el) new MutationObserver(sync).observe(el, { childList: true, characterData: true, subtree: true, attributes: true });
+  });
+  sync();
+}
+
+function startUiExtras() {
+  initPalette();
+  initShortcuts();
+  initNavBadges();
+  initAdminArea();
+  restoreSection();
+}
+
+/* ================================================================== */
+/* НОВОЕ (1): роли админов и права доступа                     */
+/* ================================================================== */
+/*
+ * Раньше любой email из ADMIN_EMAILS получал полный доступ, включая
+ * массовое удаление и блокировки. Теперь у каждого админа есть роль,
+ * а роль даёт набор прав. Список ролей расширяется без релиза — документом
+ * config/adminRoles: { roles: { "mail@x.ru": "moderator" } }.
+ * Владельцы из ADMIN_EMAILS всегда owner — их невозможно разжаловать
+ * из Firestore, чтобы не потерять доступ к панели.
+ *
+ * Важно: это разграничение интерфейса и защита от ошибок, а не защита
+ * от взлома: жёстко права нужно проверять в firestore.rules / Functions.
+ */
+
+const ROLE_LABELS = {
+  owner: "Владелец",
+  admin: "Администратор",
+  moderator: "Модератор",
+  support: "Поддержка",
+  editor: "Редактор",
+  viewer: "Наблюдатель",
+};
+
+// Права: content — новости/опросы/канал/школа, moderation — жалобы и
+// удаление сообщений, users.block — баны, destructive — массовые операции,
+// settings — настройки и push-рассылки, roles — управление ролями.
+const ROLE_PERMISSIONS = {
+  owner: ["*"],
+  admin: ["content", "moderation", "users.view", "users.block", "support", "settings", "audit", "destructive"],
+  moderator: ["moderation", "users.view", "users.block", "audit"],
+  support: ["support", "users.view", "content.faq"],
+  editor: ["content", "users.view"],
+  viewer: ["users.view", "audit"],
+};
+
+// Какое право нужно для раздела бокового меню.
+const SECTION_PERMISSION = {
+  settings: "settings",
+  news: "content",
+  polls: "content",
+  channel: "content",
+  push: "settings",
+  inbox: "support",
+  teachers: "content",
+  ideas: "content",
+  reviews: "content",
+  reports: "moderation",
+  appeals: "moderation",
+  support: "support",
+  faq: "content.faq",
+  users: "users.view",
+  blocks: "users.block",
+  audit: "audit",
+};
+
+let myAdminRole = "owner";
+let adminRolesMap = {};
+
+function roleOfEmail(email) {
+  const mail = (email || "").toLowerCase();
+  if (ADMIN_EMAILS.includes(mail)) return "owner";
+  return adminRolesMap[mail] || null;
+}
+
+/** Есть ли у текущего админа право. Подправо вида "content.faq" входит �� "content". */
+function can(permission) {
+  const perms = ROLE_PERMISSIONS[myAdminRole] || [];
+  if (perms.includes("*")) return true;
+  if (perms.includes(permission)) return true;
+  const root = permission.split(".")[0];
+  return perms.includes(root);
+}
+
+/** Проверка перед действием: тост и false, если прав нет. */
+function requirePerm(permission, what = "это действие") {
+  if (can(permission)) return true;
+  toast(`Недостаточно прав: ${what} недоступно для роли «${ROLE_LABELS[myAdminRole] || myAdminRole}»`, false);
+  return false;
+}
+
+/** Роли из config/adminRoles (best-effort: без документа работаем на константах). */
+async function loadAdminRoles() {
+  try {
+    const snap = await getDoc(doc(db, "config", "adminRoles"));
+    const raw = snap.exists() ? snap.data().roles || {} : {};
+    adminRolesMap = {};
+    Object.keys(raw).forEach((mail) => {
+      const role = String(raw[mail] || "").toLowerCase();
+      if (ROLE_PERMISSIONS[role]) adminRolesMap[mail.toLowerCase()] = role;
+    });
+  } catch (e) { /* нет доступа или документа — остаёмся на ADMIN_EMAILS */ }
+}
+
+/** Скрывает недоступные разделы и опасные кнопки под текущую роль. */
+function applyRolePermissions() {
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    const perm = SECTION_PERMISSION[btn.dataset.section];
+    const allowed = !perm || can(perm);
+    btn.classList.toggle("hidden", !allowed);
+  });
+  // Опасные операции внутри доступных разделов.
+  ["btn-bulk-del-find", "btn-bulk-del-run", "btn-clean-deleted-history"].forEach((id) => {
+    const el = $(id);
+    if (el && !can("destructive")) {
+      el.disabled = true;
+      el.title = "Доступно только владельцу и администратору";
+    }
+  });
+  const cardRoles = $("card-roles");
+  if (cardRoles) cardRoles.classList.toggle("hidden", !can("roles"));
+  const roleEl = $("admin-role");
+  if (roleEl) {
+    roleEl.textContent = ROLE_LABELS[myAdminRole] || myAdminRole;
+    roleEl.className = "badge " + (myAdminRole === "owner" ? "badge-green" : "badge-blue");
+  }
+  // Если текущий раздел закрыт для роли — переключаемся на первый доступный.
+  const active = document.querySelector(".nav-btn.active");
+  if (!active || active.classList.contains("hidden") || active.classList.contains("area-hidden")) {
+    const first = document.querySelector(".nav-btn:not(.hidden):not(.area-hidden)");
+    if (first) showSection(first.dataset.section);
+  }
+}
+
+/** Список админов и их ролей в разделе «Обзор». */
+function renderRolesList() {
+  const box = $("roles-list");
+  if (!box) return;
+  const rows = [];
+  ADMIN_EMAILS.forEach((mail) => {
+    rows.push(`<div class="item"><div class="item-head"><span class="item-title">${esc(mail)}</span>
+      <span class="badge badge-green">${esc(ROLE_LABELS.owner)}</span></div>
+      <div class="item-sub">Владелец проекта — роль нельзя изменить</div></div>`);
+  });
+  Object.keys(adminRolesMap).sort().forEach((mail) => {
+    if (ADMIN_EMAILS.includes(mail)) return;
+    const role = adminRolesMap[mail];
+    rows.push(`<div class="item" data-role-email="${esc(mail)}">
+      <div class="item-head"><span class="item-title">${esc(mail)}</span>
+      <span class="badge badge-blue">${esc(ROLE_LABELS[role] || role)}</span></div>
+      <div class="item-sub">Права: ${esc((ROLE_PERMISSIONS[role] || []).join(", "))}</div>
+      <div class="item-actions"><button type="button" class="btn-danger btn-role-revoke">Отозвать доступ</button></div></div>`);
+  });
+  box.innerHTML = rows.join("") ||
+    '<p class="empty-note">Дополнительных админов нет — доступ только у владельцев.</p>';
+  box.querySelectorAll(".btn-role-revoke").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mail = btn.closest("[data-role-email]").dataset.roleEmail;
+      saveAdminRole(mail, null);
+    });
+  });
+}
+
+/** Выдать (role) или отозвать (role === null) доступ. */
+async function saveAdminRole(email, role) {
+  if (!requirePerm("roles", "управление ролями")) return;
+  const mail = (email || "").trim().toLowerCase();
+  if (!mail || !mail.includes("@")) return toast("Укажите корректный email", false);
+  if (ADMIN_EMAILS.includes(mail)) return toast("Это владелец — роль изменить нельзя", false);
+  if (role && !ROLE_PERMISSIONS[role]) return toast("Неизвестная роль", false);
+  if (!role && !confirm(`Отозвать доступ у ${mail}?`)) return;
+  try {
+    // Точка в email — разделитель пути в Firestore, поэтому пишем всю карту.
+    const next = { ...adminRolesMap };
+    if (role) next[mail] = role; else delete next[mail];
+    await setDoc(doc(db, "config", "adminRoles"), { roles: next, updatedAt: Date.now() }, { merge: true });
+    adminRolesMap = next;
+    logAdminAction(role ? "ADMIN_ROLE_GRANTED" : "ADMIN_ROLE_REVOKED",
+      role ? `${mail} → ${ROLE_LABELS[role] || role}` : mail);
+    renderRolesList();
+    applyRolePermissions();
+    toast(role ? "Роль выдана" : "Доступ отозван");
+  } catch (err) {
+    handleErr("Не удалось сохранить роль")(err);
+  }
+}
+
+async function startAccessControl() {
+  await loadAdminRoles();
+  myAdminRole = roleOfEmail(auth.currentUser && auth.currentUser.email) || "viewer";
+  applyRolePermissions();
+  renderRolesList();
+  const form = $("form-role-grant");
+  if (form) {
+    const select = $("role-grant-role");
+    if (select && !select.options.length) {
+      Object.keys(ROLE_PERMISSIONS).filter((r) => r !== "owner").forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = r;
+        opt.textContent = ROLE_LABELS[r] || r;
+        select.appendChild(opt);
+      });
+      enhanceSelect(select);
+    }
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await saveAdminRole($("role-grant-email").value, $("role-grant-role").value);
+      $("role-grant-email").value = "";
+    });
+  }
+}
+
+/* ================================================================== */
+/* НОВОЕ (3): санкции на срок и автоснятие                        */
+/* ================================================================== */
+/*
+ * В globalBlocks/{uid} теперь пишутся expiresAt и durationMs. Клиент Android
+ * считает блокировку с истекшим expiresAt недействительной, а панель
+ * дочищает истёкшие документы (при загрузке и каждые 5 минут) — без
+ * Cloud Functions и платного тарифа.
+ */
+
+const BLOCK_DURATIONS = [
+  { ms: 0, label: "Навсегда" },
+  { ms: 60 * 60 * 1000, label: "1 час" },
+  { ms: 6 * 60 * 60 * 1000, label: "6 часов" },
+  { ms: 24 * 60 * 60 * 1000, label: "24 часа" },
+  { ms: 3 * 24 * 60 * 60 * 1000, label: "3 дня" },
+  { ms: 7 * 24 * 60 * 60 * 1000, label: "7 дней" },
+  { ms: 30 * 24 * 60 * 60 * 1000, label: "30 дней" },
+];
+
+function durationLabel(ms) {
+  const found = BLOCK_DURATIONS.find((d) => d.ms === Number(ms || 0));
+  return found ? found.label : fmtDuration(Number(ms || 0));
+}
+
+function populateDurationSelect(select) {
+  if (!select) return;
+  select.innerHTML = "";
+  BLOCK_DURATIONS.forEach((d) => {
+    const opt = document.createElement("option");
+    opt.value = String(d.ms);
+    opt.textContent = d.ms === 0 ? d.label : "На " + d.label;
+    select.appendChild(opt);
+  });
+}
+
+/** Текст срока блокировки для списков. */
+function blockExpiryText(b) {
+  if (!b || !b.expiresAt) return "бессрочно";
+  if (b.expiresAt - Date.now() <= 0) return "срок истёк — будет снята автоматически";
+  return "до " + fmtDate(b.expiresAt);
+}
+
+/**
+ * Автоснятие истёкших блокировок. Идемпотентно: если документ уже
+ * удалён, повторный вызов ничего не делает и в историю не пишет.
+ */
+async function sweepExpiredBlocks() {
+  if (!auth.currentUser || !can("users.block")) return 0;
+  try {
+    const snap = await getDocs(query(collection(db, "globalBlocks"), where("expiresAt", ">", 0)));
+    const now = Date.now();
+    const expired = snap.docs.filter((d) => Number(d.get("expiresAt") || 0) <= now);
+    for (const d of expired) {
+      await deleteDoc(doc(db, "globalBlocks", d.id));
+      addDoc(collection(db, "moderationNotifications"), {
+        userId: d.id,
+        title: "Срок блокировки истёк",
+        body: "Доступ к аккаунту восстановлен автоматически",
+        notified: false,
+        createdAt: Date.now(),
+      }).catch(() => {});
+      await writeBlockHistory(d.id, "UNBLOCKED", d.get("reasonCode") || "", "", "Срок блокировки истёк");
+      logAdminAction("SANCTION_AUTO_EXPIRED",
+        "Автоснятие по истечении срока (" + durationLabel(d.get("durationMs")) + ")", d.id);
+    }
+    if (expired.length) toast(`Автоснято блокировок: ${expired.length}`);
+    return expired.length;
+  } catch (e) {
+    // Без прав или индекса — не мешаем работе панели.
+    return 0;
+  }
+}
+
+let sanctionSweepTimer = null;
+
+function sweepAllExpired() {
+  sweepExpiredBlocks();
+  // НОВОЕ (3): так же автоматически снимаем истёкшие муты и теневые баны.
+  if (typeof sweepExpiredSanctions === "function") sweepExpiredSanctions();
+}
+
+function startSanctionSweep() {
+  sweepAllExpired();
+  if (sanctionSweepTimer) clearInterval(sanctionSweepTimer);
+  sanctionSweepTimer = setInterval(sweepAllExpired, 5 * 60 * 1000);
+}
+
+/* ================================================================== */
+/* НОВОЕ (4): очередь жалоб — взятие в работу                    */
+/* ================================================================== */
+/*
+ * Чтобы двое админов не разбирали одну жалобу, она берётся в работу:
+ * в документ пишутся claimedBy / claimedByName / claimedAt. Захват старше
+ * CLAIM_TTL считается просроченным — иначе забытая жалоба зависла бы навсегда.
+ */
+
+const CLAIM_TTL = 30 * 60 * 1000; // 30 минут
+
+function claimState(r) {
+  const by = r.claimedBy || "";
+  const at = Number(r.claimedAt || 0);
+  if (!by || Date.now() - at > CLAIM_TTL) return { active: false, mine: false, name: "", at };
+  return { active: true, mine: by === (auth.currentUser && auth.currentUser.uid), name: r.claimedByName || "админ", at };
+}
+
+function claimBadge(r) {
+  const st = claimState(r);
+  if (!st.active) return "";
+  return st.mine
+    ? '<span class="badge badge-blue">В работе у вас</span>'
+    : `<span class="badge badge-dim">В работе: ${esc(st.name)}</span>`;
+}
+
+async function claimReport(docSnap) {
+  if (!requirePerm("moderation", "работа с жалобами")) return;
+  const st = claimState(docSnap.data());
+  if (st.active && !st.mine && !confirm(`Жалоба уже в работе у ${st.name}. Передать её себе?`)) return;
+  try {
+    await updateDoc(docSnap.ref, {
+      claimedBy: auth.currentUser.uid,
+      claimedByName: adminActorName || auth.currentUser.email || "Админ",
+      claimedAt: Date.now(),
+    });
+    logAdminAction("REPORT_CLAIMED", "Жалоба " + docSnap.id,
+      docSnap.data().targetUserId, docSnap.data().targetUserName);
+    toast("Жалоба взята в работу");
+  } catch (err) {
+    handleErr("Не удалось взять жалобу")(err);
+  }
+}
+
+async function releaseReport(docSnap) {
+  try {
+    await updateDoc(docSnap.ref, {
+      claimedBy: deleteField(),
+      claimedByName: deleteField(),
+      claimedAt: deleteField(),
+    });
+    logAdminAction("REPORT_RELEASED", "Жалоба " + docSnap.id,
+      docSnap.data().targetUserId, docSnap.data().targetUserName);
+    toast("Жалоба возвращена в общую очередь");
+  } catch (err) {
+    handleErr("Не удалось снять захват")(err);
+  }
+}
+
+/** Предупреждение, если жалобу разбирает другой админ. */
+function confirmClaimConflict(r) {
+  const st = claimState(r);
+  if (!st.active || st.mine) return true;
+  return confirm(`Сейчас эту жалобу разбирает ${st.name}. Всё равно продолжить?`);
+}
+
+/* ================================================================== */
+/* НОВОЕ (3): мягкие санкции — мут, теневой бан, предупреждение        */
+/* ================================================================== */
+/*
+ * Меры мягче полного бана. Документы лежат в коллекциях mutes/{uid},
+ * shadowBans/{uid} и warnings/{autoId} и имеют тот же формат, что
+ * globalBlocks (reason/reasonCode/blockedBy/blockedAt/expiresAt/durationMs),
+ * поэтому срок истечения проверяется и правилами (hasActiveMute), и
+ * панелью (автоснятие). Cloud Functions не нужны.
+ */
+
+const SANCTION_KINDS = {
+  MUTE: { collection: "mutes", label: "Мут (запрет писать)", audit: "USER_MUTED", auditOff: "USER_UNMUTED" },
+  SHADOW: { collection: "shadowBans", label: "Теневой бан (сообщения видит только автор)", audit: "USER_SHADOW_BANNED", auditOff: "USER_SHADOW_UNBANNED" },
+  WARN: { collection: "warnings", label: "Предупреждение", audit: "USER_WARNED", auditOff: "" },
+};
+
+let mutesUnsub = null;
+let shadowUnsub = null;
+let warningsUnsub = null;
+
+/** Общий payload мягкой санкции — 1:1 с globalBlocks. */
+function sanctionPayload(reason, reasonCode, reasonText, durationMs) {
+  const ms = Number(durationMs || 0);
+  return {
+    reason: reason || "",
+    reasonCode: reasonCode || "",
+    reasonText: reasonText || "",
+    blockedBy: auth.currentUser.uid,
+    blockedByName: adminActorName || auth.currentUser.email || "Админ",
+    blockedAt: Date.now(),
+    expiresAt: ms > 0 ? Date.now() + ms : 0,
+    durationMs: ms,
+  };
+}
+
+/** Уведомление пользователю (push-воркер разошлёт его сам). */
+function notifyUser(uid, title, body) {
+  addDoc(collection(db, "moderationNotifications"), {
+    userId: uid,
+    title,
+    body: (body || "").slice(0, 300),
+    notified: false,
+    createdAt: Date.now(),
+  }).catch(() => {});
+}
+
+async function applySanction(kind, uid, reason, reasonCode, reasonText, durationMs) {
+  const cfg = SANCTION_KINDS[kind];
+  if (!cfg) return;
+  if (!requirePerm("users.block", "мягкие санкции")) return;
+  const payload = sanctionPayload(reason, reasonCode, reasonText, durationMs);
+  const untilText = payload.expiresAt ? " · до " + fmtDate(payload.expiresAt) : " · бессрочно";
+  if (kind === "WARN") {
+    // Предупреждение — запись в историю, без ограничений.
+    await addDoc(collection(db, "warnings"), Object.assign({ userId: uid }, payload));
+    notifyUser(uid, "Предупреждение от администрации", reason);
+  } else {
+    await setDoc(doc(db, cfg.collection, uid), payload);
+    if (kind === "MUTE") {
+      notifyUser(uid, "Отправка сообщений ограничена", (reason || "Нарушение правил") + untilText);
+    }
+    // Теневой бан — намеренно без уведомления (в этом его смысл).
+  }
+  await writeBlockHistory(uid, kind === "WARN" ? "WARNED" : kind === "MUTE" ? "MUTED" : "SHADOW_BANNED",
+    reasonCode || "", reasonText || "", reason || "");
+  logAdminAction(cfg.audit, (reason || "") + (kind === "WARN" ? "" : untilText), uid);
+  // НОВОЕ (эскалация): после предупреждения/мута предлагаем следующую меру.
+  await maybeEscalate(uid, kind);
+}
+
+async function removeSanction(kind, uid) {
+  const cfg = SANCTION_KINDS[kind];
+  if (!cfg || kind === "WARN") return;
+  if (!requirePerm("users.block", "снятие санкций")) return;
+  try {
+    await deleteDoc(doc(db, cfg.collection, uid));
+    if (kind === "MUTE") notifyUser(uid, "Ограничение снято", "Вы снова можете отправлять сообщения");
+    await writeBlockHistory(uid, kind === "MUTE" ? "UNMUTED" : "SHADOW_UNBANNED", "", "", "Санкция снята администратором");
+    logAdminAction(cfg.auditOff, "Санкция снята вручную", uid);
+    toast("Санкция снята");
+  } catch (err) {
+    handleErr("Не удалось снять санкцию")(err);
+  }
+}
+
+/**
+ * Автоснятие истёкших мягких санкций — тот же принцип, что у
+ * sweepExpiredBlocks: без Cloud Functions, силами открытой панели.
+ */
+async function sweepExpiredSanctions() {
+  if (!auth.currentUser || !can("users.block")) return 0;
+  let total = 0;
+  for (const kind of ["MUTE", "SHADOW"]) {
+    const cfg = SANCTION_KINDS[kind];
+    try {
+      const snap = await getDocs(query(collection(db, cfg.collection), where("expiresAt", ">", 0)));
+      const now = Date.now();
+      for (const d of snap.docs.filter((x) => Number(x.get("expiresAt") || 0) <= now)) {
+        await deleteDoc(doc(db, cfg.collection, d.id));
+        if (kind === "MUTE") notifyUser(d.id, "Срок ограничения истёк", "Вы снова можете отправлять сообщения");
+        logAdminAction("SANCTION_AUTO_EXPIRED",
+          cfg.label + " — автоснятие по сроку (" + durationLabel(d.get("durationMs")) + ")", d.id);
+        total++;
+      }
+    } catch (e) { /* нет прав/индекса — не мешаем панели */ }
+  }
+  if (total) toast(`Автоснято мягких санкций: ${total}`);
+  return total;
+}
+
+/** Живой список активной мягкой санкции (мут/теневой бан). */
+function subscribeSanctionList(kind, listEl, emptyText) {
+  const cfg = SANCTION_KINDS[kind];
+  setLoading(listEl);
+  return onSnapshot(
+    query(collection(db, cfg.collection), orderBy("blockedAt", "desc")),
+    (snap) => {
+      if (snap.empty) {
+        listEl.innerHTML = `<p class="empty-note">${esc(emptyText)}</p>`;
+        return;
+      }
+      listEl.innerHTML = "";
+      snap.docs.forEach((d) => {
+        const s = d.data();
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            <span class="item-title">UID: ${esc(d.id)}</span>
+            <span class="item-date">${fmtDate(s.blockedAt)}</span>
+          </div>
+          <div class="item-sub">${esc(blockExpiryText(s))}${s.blockedByName ? " · " + esc(s.blockedByName) : ""}</div>
+          ${s.reason ? `<div class="item-text">${esc(s.reason)}</div>` : ""}`;
+        const actions = document.createElement("div");
+        actions.className = "item-actions";
+        const off = document.createElement("button");
+        off.type = "button";
+        off.className = "btn-secondary";
+        off.textContent = "Снять";
+        off.addEventListener("click", () => removeSanction(kind, d.id));
+        actions.appendChild(off);
+        el.appendChild(actions);
+        listEl.appendChild(el);
+      });
+    },
+    handleErr("Не удалось загрузить санкции")
+  );
+}
+
+function startSanctions() {
+  const typeSelect = $("sanction-type");
+  if (!typeSelect) return;
+  typeSelect.innerHTML = "";
+  Object.keys(SANCTION_KINDS).forEach((key) => {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = SANCTION_KINDS[key].label;
+    typeSelect.appendChild(opt);
+  });
+  populateBlockReasonSelect($("sanction-reason-code"));
+  populateDurationSelect($("sanction-duration"));
+  enhanceSelect(typeSelect);
+  enhanceSelect($("sanction-reason-code"));
+  enhanceSelect($("sanction-duration"));
+
+  $("form-sanction").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const uid = $("sanction-uid").value.trim();
+    const kind = typeSelect.value;
+    const code = $("sanction-reason-code").value;
+    const text = $("sanction-reason").value.trim();
+    const durationMs = Number($("sanction-duration").value || 0);
+    if (!uid) return toast("Укажите UID пользователя", false);
+    const base = blockReasonByCode(code);
+    if (base.code === "OTHER" && !text) return toast("Укажите текст причины для «Другое»", false);
+    const reason = blockReasonText({ code: base.code, label: base.label, description: base.description, text });
+    try {
+      await applySanction(kind, uid, reason, base.code, text, durationMs);
+      toast(SANCTION_KINDS[kind].label + " применено");
+      $("sanction-uid").value = "";
+      $("sanction-reason").value = "";
+    } catch (err) {
+      handleErr("Не удалось применить санкцию")(err);
+    }
+  });
+
+  mutesUnsub = subscribeSanctionList("MUTE", $("mutes-list"), "Активных мутов нет.");
+  shadowUnsub = subscribeSanctionList("SHADOW", $("shadow-list"), "Теневых банов нет.");
+
+  const warnEl = $("warnings-list");
+  setLoading(warnEl);
+  warningsUnsub = onSnapshot(
+    query(collection(db, "warnings"), orderBy("blockedAt", "desc"), limit(100)),
+    (snap) => {
+      if (snap.empty) {
+        warnEl.innerHTML = '<p class="empty-note">Предупреждений пока нет.</p>';
+        return;
+      }
+      warnEl.innerHTML = "";
+      // Счётчик предупреждений на пользователя — подсказка, когда пора банить.
+      const counts = new Map();
+      snap.docs.forEach((d) => counts.set(d.get("userId"), (counts.get(d.get("userId")) || 0) + 1));
+      snap.docs.forEach((d) => {
+        const w = d.data();
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="item-head">
+            <span class="item-title">UID: ${esc(w.userId || "—")}</span>
+            <span class="badge badge-yellow">всего: ${counts.get(w.userId) || 1}</span>
+            <span class="item-date">${fmtDate(w.blockedAt)}</span>
+          </div>
+          <div class="item-sub">${esc(w.blockedByName || "")}</div>
+          ${w.reason ? `<div class="item-text">${esc(w.reason)}</div>` : ""}`;
+        warnEl.appendChild(el);
+      });
+    },
+    handleErr("Не удалось загрузить предупреждения")
+  );
+
+  sweepExpiredSanctions();
+}
+
+/* ================================================================== */
+/* НОВОЕ (2): раздел «Обжалования» — апелляции заблокированных         */
+/* ================================================================== */
+/*
+ * Обжалование пользователь подаёт из приложения как жалобу с
+ * reason == 'APPEAL' на самого себя (см. firestore.rules и Report.kt).
+ * Раньше такие обращения смешивались с обычными жалобами; теперь у них
+ * отдельная очередь с контекстом блокировки и решением в один клик.
+ */
+
+let appealsCache = [];
+let appealsUnsub = null;
+let appealsFilter = "PENDING";
+const appealBlocks = new Map(); // uid -> данные globalBlocks/mutes (контекст)
+
+function isAppealDoc(r) {
+  return r.isAppeal === true || r.reason === "APPEAL";
+}
+
+/** Контекст: активна ли ещё блокировка/мут заявителя. */
+async function loadAppealContext(uid) {
+  if (!uid || appealBlocks.has(uid)) return appealBlocks.get(uid);
+  let ctx = { blocked: false, muted: false, block: null };
+  try {
+    const [b, m] = await Promise.all([
+      getDoc(doc(db, "globalBlocks", uid)),
+      getDoc(doc(db, "mutes", uid)),
+    ]);
+    // НОВОЕ (контекст): рядом с обжалованием показываем историю нарушений.
+    const stats = await loadViolationStats(uid);
+    ctx = { blocked: b.exists(), muted: m.exists(), block: b.exists() ? b.data() : null, stats };
+  } catch (e) { /* best-effort */ }
+  appealBlocks.set(uid, ctx);
+  return ctx;
+}
+
+function appealItem(docSnap) {
+  const r = docSnap.data();
+  const status = r.status || "PENDING";
+  const isPending = status === "PENDING";
+  const ctx = appealBlocks.get(r.targetUserId) || { blocked: false, muted: false, block: null };
+  const el = document.createElement("div");
+  el.className = "item";
+  const badge = isPending
+    ? '<span class="badge badge-yellow">Ожидает решения</span>'
+    : status === "RESOLVED"
+      ? '<span class="badge badge-green">Удовлетворено</span>'
+      : '<span class="badge badge-dim">Отказано</span>';
+  const ctxLine = ctx.blocked
+    ? "Аккаунт заблокирован" + (ctx.block && ctx.block.reason ? ": " + ctx.block.reason : "") +
+      " · " + blockExpiryText(ctx.block)
+    : ctx.muted
+      ? "Активен мут (полной блокировки нет)"
+      : "Активных ограничений уже нет";
+  el.innerHTML = `
+    <div class="item-head">
+      <span class="item-title">🔔 ${esc(r.targetUserName || r.reporterName || "Пользователь")}</span>
+      ${badge}${claimBadge(r)}
+      <span class="item-date">${fmtDate(r.createdAt)}</span>
+    </div>
+    <div class="item-sub">${esc(ctxLine)}</div>
+    <div class="item-sub">${esc(violationLine(ctx.stats))}</div>
+    ${r.customReasonText ? `<div class="item-text">${esc(r.customReasonText)}</div>` : ""}
+    ${
+      !isPending
+        ? `<div class="question-answer">✅ <b>${esc(REPORT_STATUS_LABELS[status] || status)}</b> · ${esc(r.reviewedByName || "")}, ${fmtDate(r.reviewedAt)}${r.reviewerComment ? "<br>" + esc(r.reviewerComment) : ""}</div>`
+        : ""
+    }`;
+  if (isPending) {
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const acceptBtn = document.createElement("button");
+    acceptBtn.type = "button";
+    acceptBtn.className = "btn-primary";
+    acceptBtn.textContent = "Снять блокировку";
+    acceptBtn.addEventListener("click", () => resolveAppeal(docSnap, "accept"));
+    actions.appendChild(acceptBtn);
+    const rejectBtn = document.createElement("button");
+    rejectBtn.type = "button";
+    rejectBtn.className = "btn-secondary";
+    rejectBtn.textContent = "Отказать";
+    rejectBtn.addEventListener("click", () => resolveAppeal(docSnap, "reject"));
+    actions.appendChild(rejectBtn);
+    const claimBtn = document.createElement("button");
+    claimBtn.type = "button";
+    claimBtn.className = "btn-link";
+    const st = claimState(r);
+    claimBtn.textContent = st.mine ? "Вернуть в очередь" : "Взять в работу";
+    claimBtn.addEventListener("click", () => (st.mine ? releaseReport(docSnap) : claimReport(docSnap)));
+    actions.appendChild(claimBtn);
+    el.appendChild(actions);
+  }
+  return el;
+}
+
+/** Решение по обжалованию: снять ограничения или отказать с причиной. */
+async function resolveAppeal(docSnap, action) {
+  const r = docSnap.data();
+  if (!requirePerm("moderation", "разбор обжалований")) return;
+  if (action === "accept" && !requirePerm("users.block", "снятие блокировок")) return;
+  if (!confirmClaimConflict(r)) return;
+  const uid = r.targetUserId;
+  try {
+    if (action === "accept") {
+      if (!confirm(`Снять все ограничения с ${r.targetUserName || uid} и удовлетворить обжалование?`)) return;
+      // Снимаем и полный бан, и мут/теневой бан — одним решением.
+      try { await deleteDoc(doc(db, "globalBlocks", uid)); } catch (e) { /* не было бана */ }
+      try { await deleteDoc(doc(db, "mutes", uid)); } catch (e) { /* не было мута */ }
+      try { await deleteDoc(doc(db, "shadowBans", uid)); } catch (e) { /* не было теневого бана */ }
+      await writeBlockHistory(uid, "UNBLOCKED", "", "", "Обжалование удовлетворено");
+      notifyUser(uid, "Обжалование удовлетворено", "Ограничения с вашего аккаунта сняты");
+      await finalizeReport(docSnap, "RESOLVED", "APPEAL_ACCEPTED", "Обжалование удовлетворено, ограничения сняты");
+      logAdminAction("APPEAL_ACCEPTED", "Обжалование " + docSnap.id, uid, r.targetUserName);
+      appealBlocks.delete(uid);
+      toast("Ограничения сняты, обжалование закрыто");
+    } else {
+      const comment = await askTemplateText("APPEAL", "Причина отказа (её увидит пользователь)",
+        "Блокировка вынесена обоснованно");
+      if (comment === null) return;
+      notifyUser(uid, "Обжалование отклонено", comment || "Решение оставлено без изменений");
+      await finalizeReport(docSnap, "DISMISSED", "APPEAL_REJECTED", comment || "Обжалование отклонено");
+      logAdminAction("APPEAL_REJECTED", (comment || "").slice(0, 200), uid, r.targetUserName);
+      toast("Обжалование отклонено");
+    }
+  } catch (err) {
+    handleErr("Не удалось обработать обжалование")(err);
+  }
+}
+
+async function renderAppeals() {
+  const listEl = $("appeals-list");
+  const docs = appealsCache.filter(
+    (d) => appealsFilter === "ALL" || (d.data().status || "PENDING") === appealsFilter
+  );
+  const badge = $("appeals-count");
+  const pending = appealsCache.filter((d) => (d.data().status || "PENDING") === "PENDING").length;
+  badge.textContent = pending ? "ожидают: " + pending : "";
+  badge.classList.toggle("hidden", !pending);
+  if (!docs.length) {
+    listEl.innerHTML = `<p class="empty-note">${appealsFilter === "PENDING" ? "Новых обжалований нет ✅" : "Обжалований с таким фильтром нет."}</p>`;
+    return;
+  }
+  // Контекст блокировок подгружаем один раз на пользователя (кэш на сессию).
+  await Promise.all(docs.map((d) => loadAppealContext(d.data().targetUserId)));
+  listEl.innerHTML = "";
+  docs.forEach((d) => listEl.appendChild(appealItem(d)));
+}
+
+function startAppeals() {
+  $("appeals-filters").querySelectorAll(".filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      $("appeals-filters").querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      appealsFilter = btn.dataset.filter;
+      renderAppeals();
+    });
+  });
+  setLoading($("appeals-list"));
+  // Отдельного индекса не нужно: берём ту же ленту жалоб и фильтруем APPEAL.
+  appealsUnsub = onSnapshot(
+    query(collectionGroup(db, "reports"), orderBy("createdAt", "desc"), limit(300)),
+    (snap) => {
+      appealsCache = snap.docs.filter((d) => isAppealDoc(d.data()));
+      renderAppeals();
+    },
+    handleErr("Не удалось загрузить обжалования")
+  );
+}
+
+/* ================================================================== */
+/* НОВОЕ (5): фильтры и массовые действия в очереди жалоб              */
+/* ================================================================== */
+
+let reportsPeriodDays = 0; // 0 — за всё время
+let reportsOnlyMine = false; // только взятые мной
+let reportsSort = "new"; // new | old | target
+const selectedReports = new Map(); // key -> docSnap
+
+function reportKey(docSnap) {
+  return docSnap.ref.parent.parent.id + "/" + docSnap.id;
+}
+
+/** Доп. фильтры (период, «только мои») и сортировка поверх статуса/типа. */
+function applyReportExtras(docs) {
+  const since = reportsPeriodDays > 0 ? Date.now() - reportsPeriodDays * 86400000 : 0;
+  const uid = auth.currentUser && auth.currentUser.uid;
+  let rows = docs.filter((d) => {
+    const r = d.data();
+    // Обжалования живут в своём разделе и не засоряют очередь жалоб.
+    if (typeof isAppealDoc === "function" && isAppealDoc(r)) return false;
+    if (since && Number(r.createdAt || 0) < since) return false;
+    if (reportsOnlyMine && !(claimState(r).mine && claimState(r).active)) return false;
+    return true;
+  });
+  if (reportsSort === "old") {
+    rows = rows.slice().sort((a, b) => (a.data().createdAt || 0) - (b.data().createdAt || 0));
+  } else if (reportsSort === "target") {
+    // По числу жалоб на одного нарушителя — злостные нарушители наверху.
+    const counts = new Map();
+    docs.forEach((d) => {
+      const t = d.data().targetUserId || "";
+      counts.set(t, (counts.get(t) || 0) + 1);
+    });
+    rows = rows.slice().sort((a, b) => {
+      const diff = (counts.get(b.data().targetUserId || "") || 0) - (counts.get(a.data().targetUserId || "") || 0);
+      return diff !== 0 ? diff : (b.data().createdAt || 0) - (a.data().createdAt || 0);
+    });
+  }
+  return rows;
+}
+
+/** Панель массовых действий — показывается, когда что-то выбрано. */
+function renderBulkBar() {
+  const bar = $("reports-bulk-bar");
+  if (!bar) return;
+  bar.classList.toggle("hidden", selectedReports.size === 0);
+  $("reports-selected-count").textContent = "Выбрано: " + selectedReports.size;
+}
+
+function toggleReportSelection(docSnap, checked) {
+  const key = reportKey(docSnap);
+  if (checked) selectedReports.set(key, docSnap);
+  else selectedReports.delete(key);
+  renderBulkBar();
+}
+
+function clearReportSelection() {
+  selectedReports.clear();
+  renderReportsView();
+}
+
+/**
+ * Массовое действие над выбранными жалобами. Выполняется последовательно —
+ * так видно, на какой записи произошла ошибка, и не упираемся в лимиты.
+ */
+async function bulkReportAction(action) {
+  if (!requirePerm("moderation", "массовые действия по жалобам")) return;
+  if (action !== "dismiss" && !requirePerm("destructive", "массовые операции")) return;
+  if (action === "block" && !requirePerm("users.block", "блокировка аккаунтов")) return;
+  const docs = Array.from(selectedReports.values());
+  if (!docs.length) return toast("Ничего не выбрано", false);
+  const titles = {
+    dismiss: `Отклонить выбранные жалобы (${docs.length})?`,
+    deleteMessage: `Удалить сообщения по выбранным жалобам (${docs.length})? В чатах останется «Сообщение удалено администратором».`,
+    block: `Заблокировать авторов по выбранным жалобам (${docs.length})? Блокировка бессрочная.`,
+  };
+  if (!confirm(titles[action])) return;
+  let ok = 0;
+  let skipped = 0;
+  for (const d of docs) {
+    const r = d.data();
+    const chatId = d.ref.parent.parent.id;
+    try {
+      if ((r.status || "PENDING") !== "PENDING") { skipped++; continue; }
+      if (action === "dismiss") {
+        await finalizeReport(d, "DISMISSED", "DISMISSED", "Отклонено массовым действием");
+      } else if (action === "deleteMessage") {
+        if (r.targetType !== "MESSAGE" || !r.targetMessageId) { skipped++; continue; }
+        const msgSnap = await getDoc(doc(db, "chats", chatId, "messages", r.targetMessageId));
+        const entry = msgSnap.exists()
+          ? buildDeletedEntry(chatId, r.targetMessageId, msgSnap.data(), {
+              reason: "RULES", reasonText: "Массовое удаление по жалобам", source: "WEB",
+            })
+          : null;
+        await softDeleteMessage(chatId, r.targetMessageId);
+        if (entry) await archiveDeletedEntries([entry]);
+        await refreshChatPreviewAfterDelete(chatId, r.targetMessageId);
+        await finalizeReport(d, "RESOLVED", "MESSAGE_DELETED", "Сообщение удалено (массовое действие)");
+      } else if (action === "block") {
+        if (r.isAppeal || !r.targetUserId) { skipped++; continue; }
+        await setGlobalBlock(r.targetUserId,
+          "Нарушение правил по жалобе: " + (REPORT_REASONS[r.reason] || r.reason), "RULES", "", 0);
+        await finalizeReport(d, "RESOLVED", "USER_BANNED", "Аккаунт заблокирован (массовое действие)");
+      }
+      ok++;
+    } catch (e) {
+      skipped++;
+    }
+  }
+  const labels = { dismiss: "REPORTS_BULK_DISMISSED", deleteMessage: "REPORTS_BULK_MESSAGES_DELETED", block: "REPORTS_BULK_USERS_BANNED" };
+  logAdminAction(labels[action], `Обработано: ${ok}, пропущено: ${skipped}`);
+  selectedReports.clear();
+  renderBulkBar();
+  toast(`Готово: ${ok}` + (skipped ? `, пропущено: ${skipped}` : ""));
+}
+
+function startReportsBulk() {
+  const period = $("reports-period");
+  const sort = $("reports-sort");
+  if (period) {
+    period.addEventListener("change", () => {
+      reportsPeriodDays = Number(period.value || 0);
+      renderReportsView();
+    });
+    enhanceSelect(period);
+  }
+  if (sort) {
+    sort.addEventListener("change", () => {
+      reportsSort = sort.value;
+      renderReportsView();
+    });
+    enhanceSelect(sort);
+  }
+  const mine = $("reports-only-mine");
+  if (mine) {
+    mine.addEventListener("change", () => {
+      reportsOnlyMine = mine.checked;
+      renderReportsView();
+    });
+  }
+  $("btn-reports-select-all").addEventListener("click", () => {
+    filteredReports().forEach((d) => {
+      if ((d.data().status || "PENDING") === "PENDING") selectedReports.set(reportKey(d), d);
+    });
+    renderReportsView();
+  });
+  $("btn-reports-clear-sel").addEventListener("click", clearReportSelection);
+  $("btn-bulk-dismiss").addEventListener("click", () => bulkReportAction("dismiss"));
+  $("btn-bulk-delete-msg").addEventListener("click", () => bulkReportAction("deleteMessage"));
+  $("btn-bulk-block").addEventListener("click", () => bulkReportAction("block"));
+  renderBulkBar();
+}
+
+/* ================================================================== */
+/* НОВОЕ (модерация): шаблоны причин, контекст нарушений,              */
+/* авто-эскалация санкций и антиспам-правила из панели                 */
+/* ================================================================== */
+/*
+ * Всё работает без Cloud Functions:
+ *  - шаблоны причин лежат в config/reasonTemplates и подставляются в формы;
+ *  - контекст нарушений считается запросами к warnings/blockHistory;
+ *  - авто-эскалация только ПРЕДЛАГАЕТ следующую меру, решение за админом;
+ *  - антиспам-лимиты пишутся в config/moderationPolicy, клиент их читает.
+ */
+
+const TEMPLATES_DOC = "config/reasonTemplates";
+const POLICY_DOC = "config/moderationPolicy";
+
+const TEMPLATE_KINDS = {
+  SANCTION: "Санкция и блокировка",
+  APPEAL: "Отказ по обжалованию",
+  DELETE: "Удаление сообщения",
+};
+
+/** Набор по умолчанию — чтобы панель была полезна сразу, до настройки. */
+const DEFAULT_TEMPLATES = [
+  { id: "t-spam", kind: "SANCTION", text: "Массовая рассылка и реклама. Повторное нарушение приведёт к постоянной блокировке." },
+  { id: "t-insult", kind: "SANCTION", text: "Оскорбления участников. Общайтесь уважительно." },
+  { id: "t-nsfw", kind: "SANCTION", text: "Публикация неприемлемого контента (NSFW, жестокость)." },
+  { id: "t-appeal-ok-no", kind: "APPEAL", text: "Блокировка вынесена обоснованно, решение оставлено без изменений." },
+  { id: "t-appeal-repeat", kind: "APPEAL", text: "Нарушение повторное, срок блокировки не сокращаем." },
+  { id: "t-appeal-later", kind: "APPEAL", text: "Повторно рассмотрим обращение после окончания срока блокировки." },
+  { id: "t-del-links", kind: "DELETE", text: "Сообщение содержало небезопасную ссылку." },
+  { id: "t-del-flood", kind: "DELETE", text: "Флуд и повторяющиеся сообщения." },
+];
+
+let reasonTemplates = DEFAULT_TEMPLATES.slice();
+
+function templatesOfKind(kind) {
+  return reasonTemplates.filter((t) => t && t.text && (t.kind || "SANCTION") === kind);
+}
+
+async function loadReasonTemplates() {
+  try {
+    const snap = await getDoc(doc(db, TEMPLATES_DOC));
+    const d = snap.exists() ? snap.data() : {};
+    reasonTemplates = Array.isArray(d.templates) && d.templates.length
+      ? d.templates
+      : DEFAULT_TEMPLATES.slice();
+  } catch (e) {
+    reasonTemplates = DEFAULT_TEMPLATES.slice();
+  }
+  renderReasonTemplates();
+  fillTemplateSelect($("sanction-template"), "SANCTION");
+}
+
+async function saveReasonTemplates(details) {
+  if (!requirePerm("settings", "изменение шаблонов причин")) return;
+  try {
+    await setDoc(doc(db, TEMPLATES_DOC), {
+      templates: reasonTemplates,
+      updatedAt: Date.now(),
+      updatedByName: adminActorName || (auth.currentUser ? auth.currentUser.email || "" : "Админ"),
+    });
+    renderReasonTemplates();
+    fillTemplateSelect($("sanction-template"), "SANCTION");
+    logAdminAction("REASON_TEMPLATE_SAVED", details || "Шаблоны причин");
+    toast("Шаблоны сохранены");
+  } catch (err) {
+    handleErr("Не удалось сохранить шаблоны")(err);
+  }
+}
+
+function renderReasonTemplates() {
+  const el = $("templates-list");
+  if (!el) return;
+  if (!reasonTemplates.length) {
+    el.innerHTML = '<p class="empty-note">Шаблонов нет — добавьте первый.</p>';
+    return;
+  }
+  el.innerHTML = "";
+  Object.keys(TEMPLATE_KINDS).forEach((kind) => {
+    const list = templatesOfKind(kind);
+    if (!list.length) return;
+    const head = document.createElement("p");
+    head.className = "card-hint";
+    head.textContent = TEMPLATE_KINDS[kind];
+    el.appendChild(head);
+    list.forEach((tpl) => {
+      const row = document.createElement("div");
+      row.className = "item";
+      row.innerHTML = `<div class="item-text">${esc(tpl.text)}</div>`;
+      const actions = document.createElement("div");
+      actions.className = "item-actions";
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn-danger";
+      del.textContent = "Удалить";
+      del.addEventListener("click", () => {
+        if (!confirm("Удалить шаблон?")) return;
+        reasonTemplates = reasonTemplates.filter((t) => t !== tpl);
+        saveReasonTemplates("Удаление шаблона");
+      });
+      actions.appendChild(del);
+      row.appendChild(actions);
+      el.appendChild(row);
+    });
+  });
+}
+
+/** Наполняет select шаблонами нужного вида (первый пункт — «без шаблона»). */
+function fillTemplateSelect(select, kind) {
+  if (!select) return;
+  select.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "Шаблон причины…";
+  select.appendChild(empty);
+  templatesOfKind(kind).forEach((tpl) => {
+    const opt = document.createElement("option");
+    opt.value = tpl.text;
+    opt.textContent = tpl.text.length > 60 ? tpl.text.slice(0, 57) + "…" : tpl.text;
+    select.appendChild(opt);
+  });
+}
+
+/**
+ * Ввод текста с выбором шаблона — замена prompt(). Оверлей строится
+ * динамически, чтобы не плодить разметку под каждый случай.
+ * Возвращает строку или null (отмена).
+ */
+function askTemplateText(kind, title, fallback) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    const box = document.createElement("div");
+    box.className = "modal-card";
+    box.innerHTML = `<h3>${esc(title || "Причина")}</h3>`;
+    const select = document.createElement("select");
+    fillTemplateSelect(select, kind);
+    const area = document.createElement("textarea");
+    area.rows = 4;
+    area.className = "modal-textarea";
+    area.value = fallback || "";
+    select.addEventListener("change", () => {
+      if (select.value) area.value = select.value;
+    });
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "btn-primary";
+    ok.textContent = "Подтвердить";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn-secondary";
+    cancel.textContent = "Отмена";
+    actions.appendChild(ok);
+    actions.appendChild(cancel);
+    box.appendChild(select);
+    box.appendChild(area);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    area.focus();
+    const finish = (value) => {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      resolve(value);
+    };
+    const onKey = (e) => { if (e.key === "Escape") finish(null); };
+    ok.addEventListener("click", () => {
+      const text = area.value.trim();
+      if (!text) { toast("Укажите причину", false); return; }
+      finish(text);
+    });
+    cancel.addEventListener("click", () => finish(null));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) finish(null); });
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+function startReasonTemplates() {
+  const form = $("form-template");
+  if (!form) return;
+  enhanceSelect($("template-kind"));
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("template-text").value.trim();
+    const kind = $("template-kind").value || "SANCTION";
+    if (!text) return toast("Введите текст шаблона", false);
+    reasonTemplates = reasonTemplates.concat([{
+      id: "t" + Date.now().toString(36),
+      kind,
+      text,
+    }]);
+    $("template-text").value = "";
+    saveReasonTemplates("Новый шаблон: " + text.slice(0, 60));
+  });
+  const sanctionTpl = $("sanction-template");
+  if (sanctionTpl) {
+    sanctionTpl.addEventListener("change", () => {
+      if (!sanctionTpl.value) return;
+      $("sanction-reason").value = sanctionTpl.value;
+      // «Другое» — чтобы в причину попал именно текст шаблона.
+      const codeSelect = $("sanction-reason-code");
+      codeSelect.value = "OTHER";
+      codeSelect.dispatchEvent(new Event("change"));
+    });
+  }
+  loadReasonTemplates();
+}
+
+/* ------------------------------------------------------------------ */
+/* Контекст нарушений: история санкций пользователя одной строкой      */
+/* ------------------------------------------------------------------ */
+
+const violationStatsCache = new Map(); // uid -> stats
+
+/**
+ * Сводка по нарушениям: сколько предупреждений, мутов, банов и жалоб.
+ * Всё best-effort: если у роли нет прав или нет индекса — вернём нули.
+ */
+async function loadViolationStats(uid) {
+  if (!uid) return { warnings: 0, mutes: 0, blocks: 0, reports: 0, last: [] };
+  if (violationStatsCache.has(uid)) return violationStatsCache.get(uid);
+  const stats = { warnings: 0, mutes: 0, blocks: 0, reports: 0, last: [] };
+  try {
+    const snap = await getDocs(query(collection(db, "warnings"), where("userId", "==", uid)));
+    stats.warnings = snap.size;
+  } catch (e) { /* нет прав/индекса */ }
+  try {
+    const snap = await getDocs(query(collection(db, "blockHistory"), where("userId", "==", uid)));
+    snap.docs.forEach((d) => {
+      const action = d.get("action") || "";
+      if (action === "MUTED") stats.mutes++;
+      if (action === "BLOCKED") stats.blocks++;
+      stats.last.push({ action, at: Number(d.get("at") || 0), reason: d.get("reasonLabel") || d.get("reasonText") || "" });
+    });
+    stats.last.sort((a, b) => b.at - a.at);
+    stats.last = stats.last.slice(0, 5);
+  } catch (e) { /* best-effort */ }
+  try {
+    const snap = await getDocs(query(collectionGroup(db, "reports"), where("targetUserId", "==", uid)));
+    stats.reports = snap.docs.filter((d) => !isAppealDoc(d.data())).length;
+  } catch (e) { /* нуж��н индекс — не критично */ }
+  violationStatsCache.set(uid, stats);
+  return stats;
+}
+
+/** Строка «Нарушения: …» для карточки обжалования. */
+function violationLine(stats) {
+  if (!stats) return "";
+  const parts = [
+    "жалоб: " + stats.reports,
+    "предупреждений: " + stats.warnings,
+    "мутов: " + stats.mutes,
+    "банов: " + stats.blocks,
+  ];
+  let line = "История нарушений — " + parts.join(" · ");
+  if (stats.last.length) {
+    const labels = { BLOCKED: "бан", UNBLOCKED: "разбан", MUTED: "мут", UNMUTED: "снятие мута", SHADOW_BANNED: "теневой бан", SHADOW_UNBANNED: "снятие теневого бана", WARNED: "предупреждение" };
+    line += " · последнее: " + (labels[stats.last[0].action] || stats.last[0].action) +
+      " " + fmtDate(stats.last[0].at);
+  }
+  return line;
+}
+
+/* ------------------------------------------------------------------ */
+/* Политика модерации: авто-эскалация и антиспам-лимиты                */
+/* ------------------------------------------------------------------ */
+
+const DEFAULT_POLICY = {
+  warnToMute: 3,        // после N предупреждений предлагать мут
+  muteToBan: 3,         // после N мутов предлагать бан
+  escalationMuteMs: 24 * 60 * 60 * 1000,
+  antispamEnabled: false,
+  maxMessagesPerMinute: 20,
+  maxMessageLength: 4000,
+  slowModeSeconds: 0,
+  blockLinksForNewUsers: false,
+  newAccountHours: 24,
+};
+
+let modPolicy = Object.assign({}, DEFAULT_POLICY);
+let escalating = false; // защита от рекурсии при авто-эскалации
+
+async function loadModPolicy() {
+  try {
+    const snap = await getDoc(doc(db, POLICY_DOC));
+    modPolicy = Object.assign({}, DEFAULT_POLICY, snap.exists() ? snap.data() : {});
+  } catch (e) {
+    modPolicy = Object.assign({}, DEFAULT_POLICY);
+  }
+  renderModPolicy();
+}
+
+function renderModPolicy() {
+  if (!$("policy-warn-to-mute")) return;
+  $("policy-warn-to-mute").value = modPolicy.warnToMute;
+  $("policy-mute-to-ban").value = modPolicy.muteToBan;
+  $("policy-mute-hours").value = Math.round(Number(modPolicy.escalationMuteMs || 0) / 3600000);
+  $("policy-antispam-enabled").checked = modPolicy.antispamEnabled === true;
+  $("policy-msgs-per-minute").value = modPolicy.maxMessagesPerMinute;
+  $("policy-max-length").value = modPolicy.maxMessageLength;
+  $("policy-slow-mode").value = modPolicy.slowModeSeconds;
+  $("policy-block-links").checked = modPolicy.blockLinksForNewUsers === true;
+  $("policy-new-account-hours").value = modPolicy.newAccountHours;
+}
+
+async function saveModPolicy() {
+  if (!requirePerm("settings", "изменение политики модерации")) return;
+  const num = (id, min, max, fallback) => {
+    const v = Number($(id).value);
+    if (!Number.isFinite(v) || v < min || v > max) return fallback;
+    return Math.round(v);
+  };
+  modPolicy = {
+    warnToMute: num("policy-warn-to-mute", 1, 20, DEFAULT_POLICY.warnToMute),
+    muteToBan: num("policy-mute-to-ban", 1, 20, DEFAULT_POLICY.muteToBan),
+    escalationMuteMs: num("policy-mute-hours", 1, 720, 24) * 3600000,
+    antispamEnabled: $("policy-antispam-enabled").checked,
+    maxMessagesPerMinute: num("policy-msgs-per-minute", 1, 600, DEFAULT_POLICY.maxMessagesPerMinute),
+    maxMessageLength: num("policy-max-length", 100, 20000, DEFAULT_POLICY.maxMessageLength),
+    slowModeSeconds: num("policy-slow-mode", 0, 3600, 0),
+    blockLinksForNewUsers: $("policy-block-links").checked,
+    newAccountHours: num("policy-new-account-hours", 1, 720, DEFAULT_POLICY.newAccountHours),
+  };
+  try {
+    await setDoc(doc(db, POLICY_DOC), Object.assign({}, modPolicy, {
+      updatedAt: Date.now(),
+      updatedByName: adminActorName || (auth.currentUser ? auth.currentUser.email || "" : "Админ"),
+    }));
+    renderModPolicy();
+    logAdminAction("MOD_POLICY_SAVED",
+      `эскалация ${modPolicy.warnToMute}/${modPolicy.muteToBan}, антиспам ${modPolicy.antispamEnabled ? "вкл" : "выкл"}`);
+    toast("Политика модерации сохранена");
+  } catch (err) {
+    handleErr("Не удалось сохранить политику модерации")(err);
+  }
+}
+
+function startModPolicy() {
+  const form = $("form-policy");
+  if (!form) return;
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    saveModPolicy();
+  });
+  const resetBtn = $("btn-policy-reset");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      modPolicy = Object.assign({}, DEFAULT_POLICY);
+      renderModPolicy();
+      toast("Значения сброшены, не забудьте сохранить", false);
+    });
+  }
+  loadModPolicy();
+}
+
+/**
+ * Авто-эскалация: после предупреждения/мута считаем историю и ПРЕДЛАГАЕМ
+ * следующую меру. Автоматически ничего не применяется — подтверждает админ.
+ */
+async function maybeEscalate(uid, kind) {
+  if (escalating || !uid) return;
+  if (kind !== "WARN" && kind !== "MUTE") return;
+  violationStatsCache.delete(uid);
+  let stats;
+  try {
+    stats = await loadViolationStats(uid);
+  } catch (e) {
+    return;
+  }
+  try {
+    if (kind === "WARN" && stats.warnings >= Number(modPolicy.warnToMute || 0)) {
+      const muted = await getDoc(doc(db, "mutes", uid));
+      if (muted.exists()) return;
+      const hours = Math.round(Number(modPolicy.escalationMuteMs || 0) / 3600000);
+      if (!confirm(`У пользователя уже ${stats.warnings} предупреждений. Выдать мут на ${hours} ч?`)) return;
+      escalating = true;
+      const reason = `Мут по совокупности предупреждений (${stats.warnings})`;
+      await applySanction("MUTE", uid, reason, "RULES", "", Number(modPolicy.escalationMuteMs || 0));
+      logAdminAction("SANCTION_ESCALATED", reason, uid);
+      toast("Эскалация: выдан мут");
+    } else if (kind === "MUTE" && stats.mutes >= Number(modPolicy.muteToBan || 0)) {
+      const blocked = await getDoc(doc(db, "globalBlocks", uid));
+      if (blocked.exists()) return;
+      if (!confirm(`Это уже ${stats.mutes}-й мут пользователя. Заблокировать аккаунт бессрочно?`)) return;
+      escalating = true;
+      const reason = `Блокировка по совокупности мутов (${stats.mutes})`;
+      await setGlobalBlock(uid, reason, "BYPASS", "", 0);
+      logAdminAction("SANCTION_ESCALATED", reason, uid);
+      toast("Эскалация: аккаунт заблокирован");
+    }
+  } catch (err) {
+    handleErr("Не удалось применить эскалацию")(err);
+  } finally {
+    escalating = false;
+    violationStatsCache.delete(uid);
+  }
 }

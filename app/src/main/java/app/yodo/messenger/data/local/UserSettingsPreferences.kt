@@ -20,6 +20,25 @@ import javax.inject.Singleton
 
 private val Context.settingsDataStore by preferencesDataStore(name = "yodo_user_settings")
 
+enum class ChatListSortOrder(val displayName: String, val description: String) {
+    RECENT("По активности", "Недавно обновлённые чаты выше"),
+    UNREAD_FIRST("Непрочитанные сначала", "Сначала чаты, требующие внимания"),
+    ALPHABETICAL("По алфавиту", "Сортировать по названию")
+}
+
+enum class ScreenTransitionStyle(val displayName: String) {
+    SLIDE("Сдвиг"),
+    FADE("Затухание"),
+    SCALE("Масштаб"),
+    GLASS("Жидкое стекло"),
+    NONE("Без эффекта")
+}
+
+enum class InterfaceStyle(val displayName: String, val description: String) {
+    CLASSIC("Текущий", "Привычный интерфейс YODO"),
+    EXPERIMENTAL("Экспериментальный", "Жидкое стекло: прозрачные панели, блики и глубина")
+}
+
 enum class FontSize(val scale: Float, val displayName: String) {
     EXTRA_SMALL(0.8f, "XS"),
     SMALL(0.9f, "S"),
@@ -63,6 +82,11 @@ class UserSettingsPreferences @Inject constructor(
 ) {
     private val sendOnEnterKey = booleanPreferencesKey("send_on_enter")
     private val fontSizeKey = stringPreferencesKey("font_size")
+    private val interfaceStyleKey = stringPreferencesKey("interface_style")
+    private val glassIntensityKey = intPreferencesKey("glass_intensity_percent")
+    private val screenTransitionDurationKey = intPreferencesKey("screen_transition_duration_ms")
+    private val screenTransitionStyleKey = stringPreferencesKey("screen_transition_style")
+    private val screenTransitionAmplitudeKey = intPreferencesKey("screen_transition_amplitude_percent")
     private val showOnlineStatusKey = booleanPreferencesKey("show_online_status")
     private val showReadReceiptsKey = booleanPreferencesKey("show_read_receipts")
     private val autoDownloadImagesKey = booleanPreferencesKey("auto_download_images")
@@ -111,7 +135,30 @@ class UserSettingsPreferences @Inject constructor(
 
     // НОВОЕ: скрывать системный статус-бар (время/батарея) на экране списка чатов.
     private val hideStatusBarOnChatListKey = booleanPreferencesKey("hide_status_bar_on_chat_list")
+    private val compactChatListKey = booleanPreferencesKey("compact_chat_list")
+    private val hideChatListPreviewsKey = booleanPreferencesKey("hide_chat_list_previews")
+    private val chatListSortOrderKey = stringPreferencesKey("chat_list_sort_order")
+    private val weatherCityKey = stringPreferencesKey("weather_city")
+    private val weatherCardEnabledKey = booleanPreferencesKey("weather_card_enabled")
 
+    val interfaceStyle: Flow<InterfaceStyle> = context.settingsDataStore.data.map { prefs ->
+        prefs[interfaceStyleKey]?.let { raw -> runCatching { InterfaceStyle.valueOf(raw) }.getOrNull() }
+            ?: InterfaceStyle.CLASSIC
+    }
+    val glassIntensity: Flow<Int> = context.settingsDataStore.data.map {
+        (it[glassIntensityKey] ?: 55).coerceIn(0, 100)
+    }
+    val screenTransitionStyle: Flow<ScreenTransitionStyle> = context.settingsDataStore.data.map { prefs ->
+        prefs[screenTransitionStyleKey]?.let { raw ->
+            runCatching { ScreenTransitionStyle.valueOf(raw) }.getOrNull()
+        } ?: ScreenTransitionStyle.SLIDE
+    }
+    val screenTransitionAmplitude: Flow<Int> = context.settingsDataStore.data.map {
+        (it[screenTransitionAmplitudeKey] ?: 35).coerceIn(0, 100)
+    }
+    val screenTransitionDurationMs: Flow<Int> = context.settingsDataStore.data.map {
+        (it[screenTransitionDurationKey] ?: 140).coerceIn(0, 400)
+    }
     val sendOnEnter: Flow<Boolean> = context.settingsDataStore.data.map { it[sendOnEnterKey] ?: true }
     val fontSize: Flow<FontSize> = context.settingsDataStore.data.map { prefs ->
         prefs[fontSizeKey]?.let { raw -> runCatching { FontSize.valueOf(raw) }.getOrNull() } ?: FontSize.MEDIUM
@@ -134,6 +181,15 @@ class UserSettingsPreferences @Inject constructor(
 
     // НОВОЕ: по умолчанию выключено — статус-бар на списке чатов виден, как раньше.
     val hideStatusBarOnChatList: Flow<Boolean> = context.settingsDataStore.data.map { it[hideStatusBarOnChatListKey] ?: false }
+    val compactChatList: Flow<Boolean> = context.settingsDataStore.data.map { it[compactChatListKey] ?: false }
+    val hideChatListPreviews: Flow<Boolean> = context.settingsDataStore.data.map { it[hideChatListPreviewsKey] ?: false }
+    val weatherCity: Flow<String> = context.settingsDataStore.data.map { it[weatherCityKey] ?: "Санкт-Петербург" }
+    val weatherCardEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[weatherCardEnabledKey] ?: true }
+    val chatListSortOrder: Flow<ChatListSortOrder> = context.settingsDataStore.data.map { prefs ->
+        prefs[chatListSortOrderKey]?.let { raw ->
+            runCatching { ChatListSortOrder.valueOf(raw) }.getOrNull()
+        } ?: ChatListSortOrder.RECENT
+    }
 
     val pinRequirement: Flow<PinRequirement> = context.settingsDataStore.data.map { prefs ->
         prefs[pinRequirementKey]?.let { raw -> runCatching { PinRequirement.valueOf(raw) }.getOrNull() } ?: PinRequirement.NEVER
@@ -202,6 +258,23 @@ class UserSettingsPreferences @Inject constructor(
     suspend fun clearNotificationSnooze() {
         context.settingsDataStore.edit { it[notificationsSnoozedUntilKey] = 0L }
     }
+    suspend fun setInterfaceStyle(style: InterfaceStyle) {
+        context.settingsDataStore.edit { it[interfaceStyleKey] = style.name }
+    }
+    suspend fun setGlassIntensity(percent: Int) {
+        context.settingsDataStore.edit { it[glassIntensityKey] = percent.coerceIn(0, 100) }
+    }
+    suspend fun setScreenTransitionStyle(style: ScreenTransitionStyle) {
+        context.settingsDataStore.edit { it[screenTransitionStyleKey] = style.name }
+    }
+    suspend fun setScreenTransitionAmplitude(percent: Int) {
+        context.settingsDataStore.edit { it[screenTransitionAmplitudeKey] = percent.coerceIn(0, 100) }
+    }
+    suspend fun setScreenTransitionDurationMs(durationMs: Int) {
+        context.settingsDataStore.edit {
+            it[screenTransitionDurationKey] = durationMs.coerceIn(0, 400)
+        }
+    }
     suspend fun setSendOnEnter(enabled: Boolean) { context.settingsDataStore.edit { it[sendOnEnterKey] = enabled } }
     suspend fun setFontSize(size: FontSize) { context.settingsDataStore.edit { it[fontSizeKey] = size.name } }
     suspend fun setShowOnlineStatus(enabled: Boolean) { context.settingsDataStore.edit { it[showOnlineStatusKey] = enabled } }
@@ -217,6 +290,11 @@ class UserSettingsPreferences @Inject constructor(
     // НОВОЕ (поиск по настройкам): включить/выключить показ настроек в общем поиске.
     suspend fun setShowSettingsInGlobalSearch(enabled: Boolean) { context.settingsDataStore.edit { it[showSettingsInGlobalSearchKey] = enabled } }
     suspend fun setHideStatusBarOnChatList(enabled: Boolean) { context.settingsDataStore.edit { it[hideStatusBarOnChatListKey] = enabled } }
+    suspend fun setCompactChatList(enabled: Boolean) { context.settingsDataStore.edit { it[compactChatListKey] = enabled } }
+    suspend fun setHideChatListPreviews(enabled: Boolean) { context.settingsDataStore.edit { it[hideChatListPreviewsKey] = enabled } }
+    suspend fun setChatListSortOrder(order: ChatListSortOrder) { context.settingsDataStore.edit { it[chatListSortOrderKey] = order.name } }
+    suspend fun setWeatherCity(city: String) { context.settingsDataStore.edit { it[weatherCityKey] = city.trim().take(80) } }
+    suspend fun setWeatherCardEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[weatherCardEnabledKey] = enabled } }
 
     suspend fun setPin(pin: String) {
         val salt = app.yodo.messenger.core.util.PinHasher.generateSalt()

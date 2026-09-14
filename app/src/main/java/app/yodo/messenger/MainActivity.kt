@@ -23,6 +23,8 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.navigation.compose.rememberNavController
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinRequirement
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.data.local.ScreenTransitionStyle
 import app.yodo.messenger.data.local.ThemePreferences
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.repository.AuthRepository
@@ -67,6 +69,11 @@ class MainActivity : ComponentActivity() {
             val isDarkTheme by themePreferences.isDarkTheme.collectAsState(initial = null)
             val colorThemeName by themePreferences.colorThemeName.collectAsState(initial = null)
             val fontSize by userSettingsPreferences.fontSize.collectAsState(initial = null)
+            val interfaceStyle by userSettingsPreferences.interfaceStyle.collectAsState(initial = null)
+            val glassIntensity by userSettingsPreferences.glassIntensity.collectAsState(initial = null)
+            val screenTransitionDurationMs by userSettingsPreferences.screenTransitionDurationMs.collectAsState(initial = null)
+            val screenTransitionStyle by userSettingsPreferences.screenTransitionStyle.collectAsState(initial = null)
+            val screenTransitionAmplitude by userSettingsPreferences.screenTransitionAmplitude.collectAsState(initial = null)
 
             // PIN-блокировка
             val pinRequirement by userSettingsPreferences.pinRequirement.collectAsState(initial = PinRequirement.NEVER)
@@ -87,7 +94,9 @@ class MainActivity : ComponentActivity() {
             var backgroundedAt by remember { mutableStateOf(0L) }
 
             // SplashScreen: пока настройки не загружены — крутим прогресс.
-            if (languageCode == null || isDarkTheme == null || colorThemeName == null || fontSize == null) {
+            if (languageCode == null || isDarkTheme == null || colorThemeName == null || fontSize == null || interfaceStyle == null || glassIntensity == null || screenTransitionDurationMs == null ||
+                screenTransitionStyle == null || screenTransitionAmplitude == null
+            ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -102,6 +111,11 @@ class MainActivity : ComponentActivity() {
             val safeIsDarkTheme: Boolean = isDarkTheme!!
             val safeColorThemeName: String = colorThemeName!!
             val safeFontSize = fontSize!!
+            val safeInterfaceStyle: InterfaceStyle = interfaceStyle!!
+            val safeGlassIntensity: Int = glassIntensity!!
+            val safeScreenTransitionDurationMs: Int = screenTransitionDurationMs!!
+            val safeScreenTransitionStyle: ScreenTransitionStyle = screenTransitionStyle!!
+            val safeScreenTransitionAmplitude: Int = screenTransitionAmplitude!!
             val colorTheme = getColorThemeByName(safeColorThemeName)
 
             // Как только известно, установлен ли PIN и какой режим выбран — решаем,
@@ -148,7 +162,12 @@ class MainActivity : ComponentActivity() {
                 YodoMessengerTheme(
                     darkTheme = safeIsDarkTheme,
                     colorTheme = colorTheme,
-                    fontScale = safeFontSize.scale
+                    fontScale = safeFontSize.scale,
+                    interfaceStyle = safeInterfaceStyle,
+                    glassIntensity = safeGlassIntensity,
+                    screenTransitionDurationMs = safeScreenTransitionDurationMs,
+                    screenTransitionStyle = safeScreenTransitionStyle,
+                    screenTransitionAmplitude = safeScreenTransitionAmplitude
                 ) {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         if (isLocked && isPinSet && pinRequirement != PinRequirement.NEVER) {

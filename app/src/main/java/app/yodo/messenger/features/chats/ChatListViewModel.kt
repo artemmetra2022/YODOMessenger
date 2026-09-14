@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.core.crypto.CryptoManager
 import app.yodo.messenger.data.local.DraftsPreferences
+import app.yodo.messenger.data.local.ChatListSortOrder
 import app.yodo.messenger.data.local.HiddenPinResult
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.ChatFolder
@@ -89,6 +90,12 @@ class ChatListViewModel @Inject constructor(
     // Поле объявлено здесь, ДО init{}, чтобы гарантировать инициализацию первым.
     val chatFolders: StateFlow<List<ChatFolder>> = userSettingsPreferences.chatFolders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val compactChatList: StateFlow<Boolean> = userSettingsPreferences.compactChatList
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val hideChatListPreviews: StateFlow<Boolean> = userSettingsPreferences.hideChatListPreviews
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val chatListSortOrder: StateFlow<ChatListSortOrder> = userSettingsPreferences.chatListSortOrder
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatListSortOrder.RECENT)
 
     // ФИКС КРАША (продолжение): _activeFilter тоже читается из observeChats() (внутри
     // init{}), но в отличие от chatFolders оставался объявлен ПОСЛЕ блока init — из-за

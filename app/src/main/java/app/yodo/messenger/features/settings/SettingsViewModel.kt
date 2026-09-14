@@ -7,8 +7,11 @@ import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.notifications.NotificationHelper
 import app.yodo.messenger.data.local.AppLanguage
 import app.yodo.messenger.data.local.ChatBackgroundType
+import app.yodo.messenger.data.local.ChatListSortOrder
 import app.yodo.messenger.data.local.DraftsPreferences
 import app.yodo.messenger.data.local.FontSize
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.data.local.ScreenTransitionStyle
 import app.yodo.messenger.data.local.LanguagePreferences
 import app.yodo.messenger.data.local.PinCheckResult
 import app.yodo.messenger.data.local.PinRequirement
@@ -52,6 +55,16 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppLanguage.SYSTEM)
     val isDarkTheme: StateFlow<Boolean> = themePreferences.isDarkTheme.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val colorThemeName: StateFlow<String> = themePreferences.colorThemeName.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "BLUE")
+    val interfaceStyle: StateFlow<InterfaceStyle> = userSettingsPreferences.interfaceStyle
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), InterfaceStyle.CLASSIC)
+    val glassIntensity: StateFlow<Int> = userSettingsPreferences.glassIntensity
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 55)
+    val screenTransitionStyle: StateFlow<ScreenTransitionStyle> = userSettingsPreferences.screenTransitionStyle
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScreenTransitionStyle.SLIDE)
+    val screenTransitionAmplitude: StateFlow<Int> = userSettingsPreferences.screenTransitionAmplitude
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 35)
+    val screenTransitionDurationMs: StateFlow<Int> = userSettingsPreferences.screenTransitionDurationMs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 140)
     val sendOnEnter: StateFlow<Boolean> = userSettingsPreferences.sendOnEnter.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val fontSize: StateFlow<FontSize> = userSettingsPreferences.fontSize.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FontSize.MEDIUM)
     val showOnlineStatus: StateFlow<Boolean> = userSettingsPreferences.showOnlineStatus.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -73,6 +86,14 @@ class SettingsViewModel @Inject constructor(
     // НОВОЕ (поиск по настройкам): показывать ли настройки в общем поиске на главном экране.
     val showSettingsInGlobalSearch: StateFlow<Boolean> = userSettingsPreferences.showSettingsInGlobalSearch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val hideStatusBarOnChatList: StateFlow<Boolean> = userSettingsPreferences.hideStatusBarOnChatList.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val compactChatList: StateFlow<Boolean> = userSettingsPreferences.compactChatList.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val hideChatListPreviews: StateFlow<Boolean> = userSettingsPreferences.hideChatListPreviews.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val chatListSortOrder: StateFlow<ChatListSortOrder> = userSettingsPreferences.chatListSortOrder
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatListSortOrder.RECENT)
+    val weatherCity: StateFlow<String> = userSettingsPreferences.weatherCity
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Санкт-Петербург")
+    val weatherCardEnabled: StateFlow<Boolean> = userSettingsPreferences.weatherCardEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» в разделе «Аккаунт».
     val schoolSectionEnabled: StateFlow<Boolean> = schoolPreferences.sectionEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -154,6 +175,21 @@ class SettingsViewModel @Inject constructor(
     fun setLanguage(language: AppLanguage) { viewModelScope.launch { languagePreferences.setLanguage(language) } }
     fun setDarkTheme(enabled: Boolean) { viewModelScope.launch { themePreferences.setDarkTheme(enabled) } }
     fun setColorTheme(name: String) { viewModelScope.launch { themePreferences.setColorTheme(name) } }
+    fun setInterfaceStyle(style: InterfaceStyle) {
+        viewModelScope.launch { userSettingsPreferences.setInterfaceStyle(style) }
+    }
+    fun setGlassIntensity(percent: Int) {
+        viewModelScope.launch { userSettingsPreferences.setGlassIntensity(percent) }
+    }
+    fun setScreenTransitionStyle(style: ScreenTransitionStyle) {
+        viewModelScope.launch { userSettingsPreferences.setScreenTransitionStyle(style) }
+    }
+    fun setScreenTransitionAmplitude(percent: Int) {
+        viewModelScope.launch { userSettingsPreferences.setScreenTransitionAmplitude(percent) }
+    }
+    fun setScreenTransitionDurationMs(durationMs: Int) {
+        viewModelScope.launch { userSettingsPreferences.setScreenTransitionDurationMs(durationMs) }
+    }
     fun setSendOnEnter(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setSendOnEnter(enabled) } }
     fun setFontSize(size: FontSize) { viewModelScope.launch { userSettingsPreferences.setFontSize(size) } }
     fun setShowOnlineStatus(enabled: Boolean) {
@@ -189,6 +225,10 @@ class SettingsViewModel @Inject constructor(
     // НОВОЕ (поиск по настройкам): переключатель показа настроек в общем поиске.
     fun setShowSettingsInGlobalSearch(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setShowSettingsInGlobalSearch(enabled) } }
     fun setHideStatusBarOnChatList(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideStatusBarOnChatList(enabled) } }
+    fun setCompactChatList(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setCompactChatList(enabled) } }
+    fun setHideChatListPreviews(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideChatListPreviews(enabled) } }
+    fun setChatListSortOrder(order: ChatListSortOrder) { viewModelScope.launch { userSettingsPreferences.setChatListSortOrder(order) } }
+    fun setWeatherCardEnabled(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setWeatherCardEnabled(enabled) } }
 
     fun setPin(pin: String, requirement: PinRequirement = PinRequirement.ON_CLOSE) {
         viewModelScope.launch {

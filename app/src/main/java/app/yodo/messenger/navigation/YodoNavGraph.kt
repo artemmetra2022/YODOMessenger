@@ -1,6 +1,15 @@
 package app.yodo.messenger.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Call
@@ -48,6 +57,11 @@ import app.yodo.messenger.features.profile.ProfileScreen
 import app.yodo.messenger.features.profile.UserProfileScreen
 import app.yodo.messenger.features.search.SearchScreen
 import app.yodo.messenger.offline.OfflineChatScreen
+import app.yodo.messenger.ui.theme.LocalScreenTransitionDuration
+import app.yodo.messenger.ui.theme.LocalScreenTransitionStyle
+import app.yodo.messenger.ui.theme.LocalScreenTransitionAmplitude
+import app.yodo.messenger.data.local.ScreenTransitionStyle
+import app.yodo.messenger.ui.theme.YodoMotion
 
 @Composable
 fun YodoNavGraph(
@@ -58,11 +72,73 @@ fun YodoNavGraph(
     // НОВОЕ (AD): вьюмодель глобальной блокировки на уровне всего навиграфа.
     val globalBlockViewModel: GlobalBlockViewModel = hiltViewModel()
     val globalBlock by globalBlockViewModel.globalBlock.collectAsState()
+    val screenTransitionMs = LocalScreenTransitionDuration.current.coerceIn(0, 400)
+    val screenExitMs = (screenTransitionMs * 0.78f).toInt()
+    val screenTransitionStyle = LocalScreenTransitionStyle.current
+    val transitionAmplitude = LocalScreenTransitionAmplitude.current.coerceIn(0, 100) / 100f
+    val enterScale = (1f - 0.08f * transitionAmplitude).coerceIn(0.90f, 1f)
+    val glassScale = (1f - 0.045f * transitionAmplitude).coerceIn(0.94f, 1f)
     Box(modifier = Modifier.fillMaxSize()) {
     NavHost(
         navController = navController,
         startDestination = startDestination,
-        modifier = modifier
+        modifier = modifier,
+        enterTransition = {
+            when {
+                screenTransitionMs == 0 || screenTransitionStyle == ScreenTransitionStyle.NONE -> EnterTransition.None
+                screenTransitionStyle == ScreenTransitionStyle.FADE -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.StandardEasing))
+                screenTransitionStyle == ScreenTransitionStyle.SCALE -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing)) +
+                    scaleIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing), initialScale = enterScale)
+                screenTransitionStyle == ScreenTransitionStyle.GLASS -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing), initialAlpha = 0.15f) +
+                    scaleIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing), initialScale = glassScale)
+                else -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing)) +
+                    slideInHorizontally(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing)) {
+                        (it * 0.34f * transitionAmplitude).toInt()
+                    }
+            }
+        },
+        exitTransition = {
+            when {
+                screenTransitionMs == 0 || screenTransitionStyle == ScreenTransitionStyle.NONE -> ExitTransition.None
+                screenTransitionStyle == ScreenTransitionStyle.FADE -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing))
+                screenTransitionStyle == ScreenTransitionStyle.SCALE -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing)) +
+                    scaleOut(tween(screenExitMs, easing = YodoMotion.ExitEasing), targetScale = 1f + 0.025f * transitionAmplitude)
+                screenTransitionStyle == ScreenTransitionStyle.GLASS -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing), targetAlpha = 0.12f) +
+                    scaleOut(tween(screenExitMs, easing = YodoMotion.ExitEasing), targetScale = 1f + 0.018f * transitionAmplitude)
+                else -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing)) +
+                    slideOutHorizontally(tween(screenExitMs, easing = YodoMotion.ExitEasing)) {
+                        (-it * 0.16f * transitionAmplitude).toInt()
+                    }
+            }
+        },
+        popEnterTransition = {
+            when {
+                screenTransitionMs == 0 || screenTransitionStyle == ScreenTransitionStyle.NONE -> EnterTransition.None
+                screenTransitionStyle == ScreenTransitionStyle.FADE -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.StandardEasing))
+                screenTransitionStyle == ScreenTransitionStyle.SCALE -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing)) +
+                    scaleIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing), initialScale = enterScale)
+                screenTransitionStyle == ScreenTransitionStyle.GLASS -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing), initialAlpha = 0.15f) +
+                    scaleIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing), initialScale = glassScale)
+                else -> fadeIn(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing)) +
+                    slideInHorizontally(tween(screenTransitionMs, easing = YodoMotion.EmphasizedEasing)) {
+                        (-it * 0.34f * transitionAmplitude).toInt()
+                    }
+            }
+        },
+        popExitTransition = {
+            when {
+                screenTransitionMs == 0 || screenTransitionStyle == ScreenTransitionStyle.NONE -> ExitTransition.None
+                screenTransitionStyle == ScreenTransitionStyle.FADE -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing))
+                screenTransitionStyle == ScreenTransitionStyle.SCALE -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing)) +
+                    scaleOut(tween(screenExitMs, easing = YodoMotion.ExitEasing), targetScale = 1f + 0.025f * transitionAmplitude)
+                screenTransitionStyle == ScreenTransitionStyle.GLASS -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing), targetAlpha = 0.12f) +
+                    scaleOut(tween(screenExitMs, easing = YodoMotion.ExitEasing), targetScale = 1f + 0.018f * transitionAmplitude)
+                else -> fadeOut(tween(screenExitMs, easing = YodoMotion.ExitEasing)) +
+                    slideOutHorizontally(tween(screenExitMs, easing = YodoMotion.ExitEasing)) {
+                        (it * 0.16f * transitionAmplitude).toInt()
+                    }
+            }
+        }
     ) {
         composable(Routes.Welcome.route) {
             WelcomeScreen(
@@ -232,6 +308,9 @@ fun YodoNavGraph(
                 onOpenArchive = {
                     navController.navigate(Routes.ArchivedChats.route)
                 },
+                onWeatherClick = {
+                    navController.navigate(Routes.Weather.route)
+                },
                 // НОВОЕ (чат поддержки): открытие админ-панели поддержки (только для админов).
                 onOpenAdminPanel = {
                     navController.navigate(Routes.AdminPanel.route)
@@ -249,6 +328,12 @@ fun YodoNavGraph(
                 onOpenAdminHome = {
                     navController.navigate(Routes.AdminHome.route)
                 }
+            )
+        }
+
+        composable(Routes.Weather.route) {
+            app.yodo.messenger.features.weather.WeatherScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
 
@@ -293,6 +378,11 @@ fun YodoNavGraph(
                 // НОВОЕ (глобальный аудит-лог): переход к журналу действий Админки.
                 onOpenAuditLog = {
                     navController.navigate(Routes.AdminAuditLog.route)
+                },
+                onOpenSchoolAdmin = {
+                    navController.navigate(Routes.SchoolAdmin.route) {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
@@ -457,6 +547,14 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onOpenTeacherProfiles = {
                     navController.navigate(Routes.SchoolTeacherAdmin.route)
+                },
+                onOpenMessengerAdmin = {
+                    navController.navigate(Routes.AdminHome.route) {
+                        popUpTo(Routes.SchoolAdmin.route) {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
                 }
             )
         }

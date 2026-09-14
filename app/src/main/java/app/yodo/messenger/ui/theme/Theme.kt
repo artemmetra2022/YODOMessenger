@@ -17,10 +17,15 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import app.yodo.messenger.data.local.InterfaceStyle
+import app.yodo.messenger.data.local.ScreenTransitionStyle
 
 /**
  * НОВОЕ (AM): единые скругления для всего приложения.
@@ -40,6 +45,11 @@ private val YodoShapes = Shapes(
 )
 
 val LocalColorTheme = compositionLocalOf { BlueTheme }
+val LocalInterfaceStyle = compositionLocalOf { InterfaceStyle.CLASSIC }
+val LocalGlassIntensity = compositionLocalOf { 55 }
+val LocalScreenTransitionDuration = compositionLocalOf { 140 }
+val LocalScreenTransitionStyle = compositionLocalOf { ScreenTransitionStyle.SLIDE }
+val LocalScreenTransitionAmplitude = compositionLocalOf { 35 }
 
 @Composable
 fun YodoMessengerTheme(
@@ -47,8 +57,18 @@ fun YodoMessengerTheme(
     colorTheme: ColorTheme = BlueTheme,
     dynamicColor: Boolean = false,
     fontScale: Float = 1f,
+    interfaceStyle: InterfaceStyle = InterfaceStyle.CLASSIC,
+    glassIntensity: Int = 55,
+    screenTransitionDurationMs: Int = 140,
+    screenTransitionStyle: ScreenTransitionStyle = ScreenTransitionStyle.SLIDE,
+    screenTransitionAmplitude: Int = 35,
     content: @Composable () -> Unit
 ) {
+    fun tintOver(tint: Color, base: Color, alpha: Float): Color =
+        tint.copy(alpha = alpha).compositeOver(base)
+    val primaryOnColor = if (colorTheme.primary.luminance() > 0.58f) Color(0xFF111318) else Color.White
+    val secondaryOnColor = if (colorTheme.secondary.luminance() > 0.58f) Color(0xFF111318) else Color.White
+
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
@@ -56,22 +76,54 @@ fun YodoMessengerTheme(
         }
         darkTheme -> darkColorScheme(
             primary = colorTheme.primary,
+            onPrimary = primaryOnColor,
+            primaryContainer = tintOver(colorTheme.primary, colorTheme.surfaceDark, 0.24f),
+            onPrimaryContainer = colorTheme.onSurfaceDark,
             secondary = colorTheme.secondary,
+            onSecondary = secondaryOnColor,
+            secondaryContainer = tintOver(colorTheme.secondary, colorTheme.surfaceDark, 0.20f),
+            onSecondaryContainer = colorTheme.onSurfaceDark,
             tertiary = colorTheme.accent,
+            onTertiary = if (colorTheme.accent.luminance() > 0.58f) Color(0xFF111318) else Color.White,
+            tertiaryContainer = tintOver(colorTheme.accent, colorTheme.surfaceDark, 0.18f),
+            onTertiaryContainer = colorTheme.onSurfaceDark,
             background = colorTheme.backgroundDark,
             surface = colorTheme.surfaceDark,
+            surfaceVariant = tintOver(colorTheme.primary, colorTheme.surfaceDark, 0.075f),
             onBackground = colorTheme.onSurfaceDark,
             onSurface = colorTheme.onSurfaceDark,
+            onSurfaceVariant = tintOver(colorTheme.primary, colorTheme.onSurfaceDark, 0.10f),
+            outline = colorTheme.onSurfaceDark.copy(alpha = 0.38f),
+            outlineVariant = colorTheme.onSurfaceDark.copy(alpha = 0.18f),
+            inverseSurface = colorTheme.onSurfaceDark,
+            inverseOnSurface = colorTheme.backgroundDark,
+            inversePrimary = colorTheme.accent,
             error = colorTheme.error
         )
         else -> lightColorScheme(
             primary = colorTheme.primary,
+            onPrimary = primaryOnColor,
+            primaryContainer = tintOver(colorTheme.primary, colorTheme.surfaceLight, 0.13f),
+            onPrimaryContainer = colorTheme.onSurfaceLight,
             secondary = colorTheme.secondary,
+            onSecondary = secondaryOnColor,
+            secondaryContainer = tintOver(colorTheme.secondary, colorTheme.surfaceLight, 0.11f),
+            onSecondaryContainer = colorTheme.onSurfaceLight,
             tertiary = colorTheme.accent,
+            onTertiary = if (colorTheme.accent.luminance() > 0.58f) Color(0xFF111318) else Color.White,
+            tertiaryContainer = tintOver(colorTheme.accent, colorTheme.surfaceLight, 0.10f),
+            onTertiaryContainer = colorTheme.onSurfaceLight,
             background = colorTheme.backgroundLight,
             surface = colorTheme.surfaceLight,
+            surfaceVariant = tintOver(colorTheme.primary, colorTheme.surfaceLight, 0.065f),
             onBackground = colorTheme.onSurfaceLight,
             onSurface = colorTheme.onSurfaceLight,
+            onSurfaceVariant = tintOver(colorTheme.primary, colorTheme.onSurfaceLight, 0.08f),
+            outline = colorTheme.onSurfaceLight.copy(alpha = 0.36f),
+            outlineVariant = colorTheme.onSurfaceLight.copy(alpha = 0.16f),
+            inverseSurface = colorTheme.onSurfaceLight,
+            inverseOnSurface = colorTheme.backgroundLight,
+            inversePrimary = colorTheme.secondary,
             error = colorTheme.error
         )
     }
@@ -81,13 +133,24 @@ fun YodoMessengerTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            window.navigationBarColor = colorScheme.background.toArgb()
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
         }
     }
 
     val typography = remember(fontScale) { scaledTypography(fontScale) }
 
-    CompositionLocalProvider(LocalColorTheme provides colorTheme) {
+    CompositionLocalProvider(
+        LocalColorTheme provides colorTheme,
+        LocalInterfaceStyle provides interfaceStyle,
+        LocalGlassIntensity provides glassIntensity.coerceIn(0, 100),
+        LocalScreenTransitionDuration provides screenTransitionDurationMs.coerceIn(0, 400),
+        LocalScreenTransitionStyle provides screenTransitionStyle,
+        LocalScreenTransitionAmplitude provides screenTransitionAmplitude.coerceIn(0, 100)
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = typography,

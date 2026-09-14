@@ -14,7 +14,7 @@ import javax.inject.Singleton
  */
 data class PendingForwardUndo(
     val targetChatId: String,
-    val messageId: String,
+    val messageIds: List<String>,
     // НОВОЕ (п.1): кому переслали — для плашки "Сообщение переслано пользователю ...".
     // targetUserId — если известен (личный чат) — по клику на имя открываем профиль.
     val targetName: String? = null,

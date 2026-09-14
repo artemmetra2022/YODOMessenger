@@ -84,6 +84,36 @@ object SettingsSearchIndex {
 
     val items: List<SettingsSearchItem> = listOf(
         SettingsSearchItem(
+            id = "interface_style", anchorId = ANCHOR_APPEARANCE,
+            title = "Интерфейс приложения", subtitle = "Текущий или экспериментальный дизайн",
+            keywords = listOf("интерфейс", "дизайн", "экспериментальный", "telegram", "whatsapp"),
+            sectionTitle = SEC_APPEARANCE, categoryRoute = ROUTE_APPEARANCE
+        ),
+        SettingsSearchItem(
+            id = "glass_intensity", anchorId = ANCHOR_APPEARANCE,
+            title = "Матовость стекла", subtitle = "Настроить прозрачность экспериментального интерфейса",
+            keywords = listOf("стекло", "прозрачность", "размытие", "матовость", "glass", "blur", "процент"),
+            sectionTitle = SEC_APPEARANCE, categoryRoute = ROUTE_APPEARANCE
+        ),
+        SettingsSearchItem(
+            id = "screen_transition_duration", anchorId = ANCHOR_APPEARANCE,
+            title = "Анимация переходов", subtitle = "Скорость открытия и закрытия экранов",
+            keywords = listOf("анимация", "переход", "скорость", "быстро", "медленно", "отключить", "миллисекунды"),
+            sectionTitle = SEC_APPEARANCE, categoryRoute = ROUTE_APPEARANCE
+        ),
+        SettingsSearchItem(
+            id = "transition_style", anchorId = ANCHOR_APPEARANCE,
+            title = "Стиль перехода", subtitle = "Сдвиг, затухание, масштаб или жидкое стекло",
+            keywords = listOf("стиль перехода", "сдвиг", "fade", "масштаб", "стекло"),
+            sectionTitle = SEC_APPEARANCE, categoryRoute = ROUTE_APPEARANCE
+        ),
+        SettingsSearchItem(
+            id = "transition_amplitude", anchorId = ANCHOR_APPEARANCE,
+            title = "Амплитуда перехода", subtitle = "Настроить величину движения экранов",
+            keywords = listOf("амплитуда", "движение", "свайп", "назад", "жест"),
+            sectionTitle = SEC_APPEARANCE, categoryRoute = ROUTE_APPEARANCE
+        ),
+        SettingsSearchItem(
             id = "dark_theme", anchorId = ANCHOR_APPEARANCE,
             title = "Тёмная тема", subtitle = "Переключить светлое/тёмное оформление",
             keywords = listOf("темная", "тёмная", "светлая", "ночная", "тема", "night", "dark", "оформление", "цвет фона"),
@@ -109,7 +139,7 @@ object SettingsSearchIndex {
         ),
         SettingsSearchItem(
             id = "send_on_enter", anchorId = ANCHOR_CHATS,
-            title = "Отправка по Enter", subtitle = "Отправлять сообщение при нажатии Enter",
+            title = "Отправка по Enter", subtitle = "Отправлять сообщение при на��атии Enter",
             keywords = listOf("энтер", "клавиша", "отправка", "ввод"),
             sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
@@ -129,6 +159,30 @@ object SettingsSearchIndex {
             id = "advanced_polls", anchorId = ANCHOR_CHATS,
             title = "Расширенные опросы", subtitle = "Опросы с несколькими вариантами и викторины",
             keywords = listOf("опрос", "викторина", "голосование", "poll"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "weather_card", anchorId = ANCHOR_CHATS,
+            title = "Погода", subtitle = "Показывать прогноз OpenWeatherMap на главном экране",
+            keywords = listOf("погода", "температура", "прогноз", "город", "openweather"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "chat_list_sort", anchorId = ANCHOR_CHATS,
+            title = "Сортировка чатов", subtitle = "По активности, непрочитанным или алфавиту",
+            keywords = listOf("сортировка", "порядок", "алфавит", "непрочитанные сначала", "активность"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "compact_chat_list", anchorId = ANCHOR_CHATS,
+            title = "Компактный список чатов", subtitle = "Показать больше диалогов на экране",
+            keywords = listOf("компактный", "плотность", "маленькие карточки", "больше чатов"),
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
+        ),
+        SettingsSearchItem(
+            id = "hide_chat_previews", anchorId = ANCHOR_CHATS,
+            title = "Скрывать текст сообщений", subtitle = "Конфиденциальный список чатов без превью",
+            keywords = listOf("скрыть текст", "превью", "конфиденциальность", "последнее сообщение", "черновик"),
             sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(
@@ -218,7 +272,7 @@ object SettingsSearchIndex {
         ),
         SettingsSearchItem(
             id = "profile_phone", anchorId = ANCHOR_PROFILE_VISIBILITY,
-            title = "Видимость номера телефона", subtitle = "Показывать номер телефона в профиле",
+            title = "Видимость номера телефона", subtitle = "Показывать номе�� телефона в профиле",
             keywords = listOf("телефон", "номер", "phone"),
             sectionTitle = SEC_PRIVACY, categoryRoute = ROUTE_PRIVACY
         ),
@@ -459,7 +513,7 @@ object SettingsSearchMatcher {
             .trim()
 
     // Раскладки клавиатуры ЙЦУКЕН (RU) и QWERTY (EN) в одном порядке символов —
-    // используются, чтобы перевести запрос, набранный не в той раскладке.
+    // используются, чт��бы перевести запрос, набранный не в той раскладке.
     private const val LAYOUT_RU = "йцукенгшщзхъфывапролджэячсмитьбю.ё"
     private const val LAYOUT_EN = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`"
 

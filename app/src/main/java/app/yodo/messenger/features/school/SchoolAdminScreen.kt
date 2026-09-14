@@ -45,6 +45,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.domain.model.SchoolNews
+import app.yodo.messenger.ui.components.AdminArea
+import app.yodo.messenger.ui.components.AdminAreaSwitcher
 import app.yodo.messenger.ui.theme.YodoError
 
 /**
@@ -58,6 +60,7 @@ import app.yodo.messenger.ui.theme.YodoError
 fun SchoolAdminScreen(
     onBackClick: () -> Unit,
     onOpenTeacherProfiles: () -> Unit = {},
+    onOpenMessengerAdmin: () -> Unit = {},
     viewModel: SchoolAdminViewModel = hiltViewModel()
 ) {
     val news by viewModel.news.collectAsState()
@@ -83,7 +86,16 @@ fun SchoolAdminScreen(
 
     if (!viewModel.isAppAdmin) {
         Scaffold(
-            topBar = { SchoolTopBar("Администрирование школы", onBackClick) },
+            topBar = {
+                Column {
+                    SchoolTopBar("Админка", onBackClick)
+                    AdminAreaSwitcher(
+                        selectedArea = AdminArea.SCHOOL,
+                        onMessengerClick = onOpenMessengerAdmin,
+                        onSchoolClick = {}
+                    )
+                }
+            },
             containerColor = Color.Transparent
         ) { padding ->
             Column(
@@ -103,7 +115,16 @@ fun SchoolAdminScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = { SchoolTopBar("Администрирование школы", onBackClick) },
+        topBar = {
+            Column {
+                SchoolTopBar("Админка", onBackClick)
+                AdminAreaSwitcher(
+                    selectedArea = AdminArea.SCHOOL,
+                    onMessengerClick = onOpenMessengerAdmin,
+                    onSchoolClick = {}
+                )
+            }
+        },
         containerColor = Color.Transparent
     ) { padding ->
         LazyColumn(

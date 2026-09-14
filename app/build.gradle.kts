@@ -33,6 +33,8 @@ android {
         versionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0-mvp"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        val openWeatherApiKey = (project.findProperty("OPENWEATHER_API_KEY") as String?).orEmpty()
+        buildConfigField("String", "OPENWEATHER_API_KEY", "\"$openWeatherApiKey\"")
     }
 
     buildTypes {
@@ -47,6 +49,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -83,7 +86,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // Navigation
-    implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("androidx.navigation:navigation-compose:2.8.4")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Hilt (DI)

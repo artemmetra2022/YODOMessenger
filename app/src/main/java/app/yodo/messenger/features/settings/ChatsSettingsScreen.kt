@@ -30,6 +30,10 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.ViewCompact
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -64,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
 import app.yodo.messenger.data.local.ChatBackgroundType
+import app.yodo.messenger.data.local.ChatListSortOrder
 import app.yodo.messenger.domain.model.ChatFolder
 import app.yodo.messenger.ui.theme.LocalColorTheme
 
@@ -89,10 +94,16 @@ fun ChatsSettingsScreen(
     val chatBackgroundCustomPath by viewModel.chatBackgroundCustomPath.collectAsState()
     val chatFolders by viewModel.chatFolders.collectAsState()
     val hideStatusBarOnChatList by viewModel.hideStatusBarOnChatList.collectAsState()
+    val compactChatList by viewModel.compactChatList.collectAsState()
+    val hideChatListPreviews by viewModel.hideChatListPreviews.collectAsState()
+    val chatListSortOrder by viewModel.chatListSortOrder.collectAsState()
+    val weatherCity by viewModel.weatherCity.collectAsState()
+    val weatherCardEnabled by viewModel.weatherCardEnabled.collectAsState()
 
     var showChatBackgroundDialog by remember { mutableStateOf(false) }
     var showChatFoldersDialog by remember { mutableStateOf(false) }
     var showQuickReactionDialog by remember { mutableStateOf(false) }
+    var showSortOrderDialog by remember { mutableStateOf(false) }
 
     val colorTheme = LocalColorTheme.current
     val listState = rememberLazyListState()
@@ -150,6 +161,16 @@ fun ChatsSettingsScreen(
             onSelect = { viewModel.setQuickReaction(it) },
             onDismiss = { showQuickReactionDialog = false },
             colorTheme = colorTheme
+        )
+    }
+    if (showSortOrderDialog) {
+        ChatListSortDialog(
+            selected = chatListSortOrder,
+            onSelect = {
+                viewModel.setChatListSortOrder(it)
+                showSortOrderDialog = false
+            },
+            onDismiss = { showSortOrderDialog = false }
         )
     }
     if (showChatFoldersDialog) {
@@ -282,6 +303,51 @@ fun ChatsSettingsScreen(
                 }
             }
 
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsToggleRow(
+                        icon = Icons.Filled.Cloud,
+                        title = "Погода на главном экране",
+                        subtitle = "OpenWeatherMap · $weatherCity",
+                        checked = weatherCardEnabled,
+                        onCheckedChange = { viewModel.setWeatherCardEnabled(it) },
+                        colorTheme = colorTheme
+                    )
+                }
+            }
+
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Sort,
+                        title = "Сортировка чатов",
+                        subtitle = chatListSortOrder.displayName,
+                        colorTheme = colorTheme,
+                        onClick = { showSortOrderDialog = true }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsToggleRow(
+                        icon = Icons.Filled.ViewCompact,
+                        title = "Компактный список чатов",
+                        subtitle = "Уменьшить карточки и показать больше диалогов на экране",
+                        checked = compactChatList,
+                        onCheckedChange = { viewModel.setCompactChatList(it) },
+                        colorTheme = colorTheme
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
+                    SettingsToggleRow(
+                        icon = Icons.Filled.VisibilityOff,
+                        title = "Скрывать текст сообщений",
+                        subtitle = "Не показывать черновики и текст последних сообщений в списке чатов",
+                        checked = hideChatListPreviews,
+                        onCheckedChange = { viewModel.setHideChatListPreviews(it) },
+                        colorTheme = colorTheme
+                    )
+                }
+            }
+
             // НОВОЕ: скрытие системного статус-бара (время/батарея) на экране списка чатов.
             item { Spacer(modifier = Modifier.height(8.dp)) }
             item {
@@ -299,6 +365,44 @@ fun ChatsSettingsScreen(
             item { Spacer(modifier = Modifier.height(32.dp)) }
         }
     }
+}
+
+@Composable
+private fun ChatListSortDialog(
+    selected: ChatListSortOrder,
+    onSelect: (ChatListSortOrder) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Сортировка чатов") },
+        text = {
+            Column {
+                ChatListSortOrder.entries.forEach { order ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onSelect(order) }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == order, onClick = { onSelect(order) })
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(order.displayName, fontWeight = FontWeight.Medium)
+                            Text(
+                                order.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } }
+    )
 }
 
 // ══════════════════════════════════════════════════════════
