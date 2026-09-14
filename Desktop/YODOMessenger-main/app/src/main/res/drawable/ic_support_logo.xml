@@ -1,0 +1,24 @@
+<!--
+  НОВОЕ (логотип поддержки YodoMessenger): собственный знак поддержки —
+  наушники с микрофоном (суппорт) поверх речевого облака,
+  чтобы отличаться от логотипа «Избранное» (закладка).
+  tint задаётся в месте использования (Icon tint = colorTheme.primary).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+
+    <!-- Речевое облако (чат поддержки) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.28"
+        android:pathData="M12,3C7.03,3 3,6.58 3,11c0,2.09 0.9,3.99 2.38,5.42L4.5,20l3.86,-1.2c1.12,0.38 2.35,0.6 3.64,0.6 4.97,0 9,-3.58 9,-8s-4.03,-8 -9,-8z" />
+
+    <!-- Оголовье наушников -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,6.2c-2.9,0 -5.25,2.35 -5.25,5.25v3.05c0,0.66 0.54,1.2 1.2,1.2h0.9v-4.5h-1.5v0.0c0.06,-2.42 2.04,-4.36 4.65,-4.36s4.59,1.94 4.65,4.36v-0.0h-1.5v4.5h1.5c0,0.83 -0.67,1.2 -1.5,1.2h-1.35v1.35h1.35c1.57,0 2.85,-0.98 2.85,-2.55v-4.9C17.25,8.55 14.9,6.2 12,6.2z" />
+</vector>
