@@ -58,6 +58,8 @@ object SettingsSearchIndex {
     const val ANCHOR_DELETE_ACCOUNT = "delete_account"
     const val ANCHOR_SEARCH_IN_GLOBAL = "search_in_global"
     const val ANCHOR_HIDE_STATUS_BAR_CHAT_LIST = "hide_status_bar_chat_list"
+    // НОВОЕ (OTA-обновления): якорь пункта «О приложении» (версия и обновления).
+    const val ANCHOR_ABOUT = "about_app"
     // НОВОЕ (раздел «Школа»): якоря пунктов школьного раздела.
     const val ANCHOR_SCHOOL = "school"
     const val ANCHOR_SCHOOL_SETTINGS = "school_settings"
@@ -375,6 +377,13 @@ object SettingsSearchIndex {
             id = "hide_status_bar_chat_list", anchorId = ANCHOR_HIDE_STATUS_BAR_CHAT_LIST,
             title = "Скрывать статус-бар в списке чатов", subtitle = "Полностью скрывать системную панель времени и батареи на главном экране",
             keywords = listOf("статус бар", "статусбар", "скрыть статус бар", "полноэкранный режим", "immersive"),
+            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+        ),
+        // НОВОЕ (OTA-обновления): пункт «О приложении» в поиске настроек.
+        SettingsSearchItem(
+            id = "about_app", anchorId = ANCHOR_ABOUT,
+            title = "О приложении", subtitle = "Версия приложения и проверка обновлений",
+            keywords = listOf("о приложении", "версия", "обновление", "обновить", "апдейт", "update", "version", "github", "сборка"),
             sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
         // НОВОЕ (раздел «Школа»): пункты школьного раздела в поиске настроек.

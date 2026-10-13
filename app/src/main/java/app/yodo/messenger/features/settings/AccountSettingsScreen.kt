@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
@@ -61,6 +62,7 @@ import app.yodo.messenger.ui.theme.YodoError
 fun AccountSettingsScreen(
     onBackClick: () -> Unit,
     onOpenTools: () -> Unit,
+    onOpenAbout: () -> Unit = {},
     onOpenSchool: () -> Unit = {},
     onOpenSchoolSettings: () -> Unit = {},
     onOpenSecurity: () -> Unit,
@@ -252,6 +254,17 @@ fun AccountSettingsScreen(
                         checked = hideStatusBarOnChatList,
                         onCheckedChange = { viewModel.setHideStatusBarOnChatList(it) },
                         colorTheme = colorTheme
+                    )
+                }
+            }
+            item {
+                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_ABOUT, anchorPositions, highlightedAnchor, colorTheme)) {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Info,
+                        title = "О приложении",
+                        subtitle = "Версия приложения и проверка обновлений",
+                        colorTheme = colorTheme,
+                        onClick = onOpenAbout
                     )
                 }
             }

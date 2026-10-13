@@ -30,6 +30,7 @@ import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.SessionRepository
 import app.yodo.messenger.features.settings.PinLockScreen
+import app.yodo.messenger.features.update.UpdateGate
 import app.yodo.messenger.navigation.Routes
 import app.yodo.messenger.navigation.YodoNavGraph
 import app.yodo.messenger.ui.locale.LocalizedApp
@@ -193,6 +194,11 @@ class MainActivity : ComponentActivity() {
                                 navController = navController,
                                 startDestination = startDestination
                             )
+
+                            // НОВОЕ (OTA-обновления): авто-проверка новой версии при запуске.
+                            // Не чаще раза в сутки (троттлинг в UpdateRepositoryImpl) и только
+                            // для авторизованных — чтобы не мешать на экранах входа.
+                            UpdateGate(enabled = authRepository.isLoggedIn())
 
                             // НОВОЕ (ссылка-приглашение и шаринг): при открытии приложения по ссылке-
                             // приглашению (yodo://channel/<chatId>) — сразу переходит к профилю канала.

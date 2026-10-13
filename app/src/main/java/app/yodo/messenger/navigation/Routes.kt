@@ -74,6 +74,10 @@ sealed class Routes(val route: String) {
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
     data object Tools : Routes("tools")
 
+    // НОВОЕ (OTA-обновления): экран «О приложении» — версия и проверка обновлений
+    // из GitHub Releases. Вход — Настройки → Аккаунт.
+    data object AboutUpdates : Routes("about_updates")
+
     // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 (перенос
     // функционала Telegram-бота) + экран настройки его отображения.
     // Главный вход — из Настройки → Аккаунт (см. AccountSettingsScreen),

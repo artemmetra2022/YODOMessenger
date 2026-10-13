@@ -16,6 +16,10 @@
     <!-- ==================== УВЕДОМЛЕНИЯ (Android 13+) ==================== -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- ==================== OTA-ОБНОВЛЕНИЯ ==================== -->
+    <!-- Установка APK, скачанного приложением из GitHub Release (не Google Play). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- ==================== КАМЕРА И ГАЛЕРЕЯ ==================== -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- НОВОЕ (п.37): голосовые сообщения -->

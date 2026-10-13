@@ -471,6 +471,13 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() }
             )
         }
+        // НОВОЕ (OTA-обновления): экран «О приложении» — версия и проверка
+        // обновлений из GitHub Releases. Вход — Настройки → Аккаунт.
+        composable(Routes.AboutUpdates.route) {
+            app.yodo.messenger.features.update.UpdateScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
         // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 — перенос
         // функционала Telegram-бота. Вход из Настройки → Аккаунт.
         composable(Routes.School.route) {
@@ -1011,6 +1018,8 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() },
                 // НОВОЕ (батч 7): открыть «Фишки и инструменты».
                 onOpenTools = { navController.navigate(Routes.Tools.route) },
+                // НОВОЕ (OTA-обновления): открыть экран «О приложении» с проверкой обновлений.
+                onOpenAbout = { navController.navigate(Routes.AboutUpdates.route) },
                 // НОВОЕ (раздел «Школа»): открыть школьный раздел и его настройки.
                 onOpenSchool = { navController.navigate(Routes.School.route) },
                 onOpenSchoolSettings = { navController.navigate(Routes.SchoolSettings.route) },

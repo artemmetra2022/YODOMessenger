@@ -601,4 +601,27 @@
     <string name="notification_action_reply">Ответить</string>
     <string name="notification_reply_sent">Ответ отправлен</string>
     <string name="notification_reply_failed">Не удалось отправить ответ</string>
+
+    <!-- НОВОЕ (OTA-обновления): экран «О приложении» и диалог доступного обновления.
+         Обновления раздаются через GitHub Releases, не через Google Play. -->
+    <string name="about_title">О приложении</string>
+    <string name="about_current_version_format">Установленная версия: %1$s</string>
+    <string name="about_check_button">Проверить обновления</string>
+    <string name="about_check_hint">Нажмите, чтобы проверить наличие новой версии</string>
+    <string name="about_checking">Проверяем обновления…</string>
+    <string name="about_up_to_date">У вас последняя версия</string>
+    <string name="about_error_format">Не удалось проверить обновления: %1$s</string>
+    <string name="about_error_generic">Не удалось проверить обновления</string>
+    <string name="about_release_notes">Что нового</string>
+    <string name="about_open_github">Открыть проект на GitHub</string>
+    <string name="update_available_title">Доступно обновление</string>
+    <string name="update_version_format">Версия %1$s</string>
+    <string name="update_current_version_format">Сейчас установлена версия %1$s</string>
+    <string name="update_btn_download">Скачать и установить</string>
+    <string name="update_btn_install">Установить</string>
+    <string name="update_btn_open_github">Открыть на GitHub</string>
+    <string name="update_btn_later">Позже</string>
+    <string name="update_downloading_format">Загрузка… %1$d%%</string>
+    <string name="update_downloading_unknown">Загрузка…</string>
+    <string name="update_ready_text">Обновление скачано. Разрешите установку из этого источника и нажмите «Установить».</string>
 </resources>
