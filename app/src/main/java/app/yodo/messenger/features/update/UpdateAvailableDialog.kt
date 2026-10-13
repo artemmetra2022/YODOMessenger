@@ -60,7 +60,9 @@ fun UpdateAvailableDialog(
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(update.releaseNotes, style = MaterialTheme.typography.bodyMedium)
+                    // Разбираем Markdown описания релиза, чтобы в диалоге не было
+                    // служебных «###» и «**» (см. releaseNotesAnnotated).
+                    Text(releaseNotesAnnotated(update.releaseNotes), style = MaterialTheme.typography.bodyMedium)
                 }
                 if (state.phase == UpdatePhase.DOWNLOADING) {
                     Spacer(modifier = Modifier.height(16.dp))

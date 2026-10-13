@@ -17,7 +17,12 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +32,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.yodo.messenger.features.auth.ForgotPasswordScreen
@@ -37,6 +43,7 @@ import app.yodo.messenger.features.auth.VerifyEmailScreen
 import app.yodo.messenger.features.auth.WelcomeScreen
 import app.yodo.messenger.features.auth.GlobalBlockGateScreen
 import app.yodo.messenger.features.auth.GlobalBlockViewModel
+import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatScreen
 import app.yodo.messenger.features.chats.ChatStatsScreen
 // НОВОЕ (переработка каналов): три новых экрана
@@ -50,6 +57,12 @@ import app.yodo.messenger.features.chats.ImageViewerHolder
 import app.yodo.messenger.features.chats.ImageViewerScreen
 import app.yodo.messenger.features.contacts.ContactsScreen
 import app.yodo.messenger.features.main.MainScreen
+import app.yodo.messenger.features.main.TAB_ADMIN
+import app.yodo.messenger.features.main.TAB_CHATS
+import app.yodo.messenger.features.main.TAB_NEARBY
+import app.yodo.messenger.features.main.TAB_OFFLINE
+import app.yodo.messenger.features.main.TAB_SETTINGS
+import app.yodo.messenger.features.main.YodoBottomBar
 import app.yodo.messenger.features.nearby.NearbyPeopleScreen
 import app.yodo.messenger.features.onboarding.OnboardingScreen
 import app.yodo.messenger.features.onboarding.OnboardingViewModel
@@ -78,11 +91,50 @@ fun YodoNavGraph(
     val transitionAmplitude = LocalScreenTransitionAmplitude.current.coerceIn(0, 100) / 100f
     val enterScale = (1f - 0.08f * transitionAmplitude).coerceIn(0.90f, 1f)
     val glassScale = (1f - 0.045f * transitionAmplitude).coerceIn(0.94f, 1f)
-    Box(modifier = Modifier.fillMaxSize()) {
+    // НОВОЕ (панель во всех основных окнах): нижняя панель навигации рисуется здесь,
+    // на уровне графа, а не внутри экрана списка чатов — иначе она пропадала при
+    // переходе в «Рядом»/«Офлайн»/«Настройки»/«Админку», и вернуться к чатам можно
+    // было только кнопкой «Назад».
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
+    val adminHomeViewModel: AdminHomeViewModel = hiltViewModel()
+    // Признак администратора читаем реактивно: ViewModel на уровне графа живёт всю
+    // сессию, поэтому вкладка «Админка» должна появляться/исчезать сразу при смене
+    // аккаунта, а не только при первом создании ViewModel.
+    val isAppAdmin by adminHomeViewModel.isAppAdmin.collectAsState(initial = false)
+
+    Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        // Инсеты окна (статус-бар и системная панель навигации) обрабатывают сами
+        // экраны — у каждого свой Scaffold. Здесь нужна только высота нижней панели,
+        // поэтому собственными инсетами каркаса не пользуемся, а передаём их вниз
+        // через consumeWindowInsets, чтобы не получить двойной отступ снизу.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            if (shouldShowBottomBar(currentRoute)) {
+                YodoBottomBar(
+                    selectedTab = tabIndexForRoute(currentRoute),
+                    showAdminTab = isAppAdmin,
+                    onChatsClick = { navigateToMainTab(navController, Routes.ChatList.route, currentRoute) },
+                    onNearbyClick = { navigateToMainTab(navController, Routes.NearbyPeople.route, currentRoute) },
+                    onOfflineClick = { navigateToMainTab(navController, Routes.OfflineChat.route, currentRoute) },
+                    onSettingsClick = { navigateToMainTab(navController, Routes.Settings.route, currentRoute) },
+                    onAdminClick = { navigateToMainTab(navController, Routes.AdminHome.route, currentRoute) }
+                )
+            }
+        }
+    ) { padding ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .consumeWindowInsets(padding)
+    ) {
     NavHost(
         navController = navController,
         startDestination = startDestination,
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         enterTransition = {
             when {
                 screenTransitionMs == 0 || screenTransitionStyle == ScreenTransitionStyle.NONE -> EnterTransition.None
@@ -285,14 +337,8 @@ fun YodoNavGraph(
                 onSearchClick = {
                     navController.navigate(Routes.Search.route)
                 },
-                onNearbyClick = {
-                    navController.navigate(Routes.NearbyPeople.route)
-                },
                 onProfileClick = {
                     navController.navigate(Routes.Profile.route)
-                },
-                onOfflineClick = {
-                    navController.navigate(Routes.OfflineChat.route)
                 },
                 onCreateGroupClick = {
                     navController.navigate(Routes.CreateGroup.route)
@@ -323,10 +369,6 @@ fun YodoNavGraph(
                 // сразу к экрану информации о группе (раздел «Заявки»).
                 onOpenGroupInfo = { chatId ->
                     navController.navigate(Routes.GroupInfo.createRoute(chatId))
-                },
-                // НОВОЕ (единая вкладка «Админка»): переход к сводному экрану.
-                onOpenAdminHome = {
-                    navController.navigate(Routes.AdminHome.route)
                 }
             )
         }
@@ -1116,5 +1158,74 @@ fun YodoNavGraph(
         if (globalBlock != null) {
             GlobalBlockGateScreen(viewModel = globalBlockViewModel)
         }
+    }
+    }
+}
+
+/**
+ * НОВОЕ (панель во всех основных окнах): нужно ли показывать нижнюю панель навигации
+ * на текущем экране.
+ *
+ * Панель скрывается только там, где она действительно мешает: экраны входа и
+ * онбординга, полноэкранные режимы (чат, комментарии, звонок, просмотр медиа,
+ * QR-сканер) и чат-подобные экраны с полем ввода. Во всех остальных окнах —
+ * включая разделы настроек, «Школу», «Фишки и инструменты» — панель остаётся,
+ * чтобы из любого места можно было сразу перейти к чатам или в другой раздел.
+ */
+private fun shouldShowBottomBar(route: String?): Boolean {
+    if (route == null) return false
+    return when {
+        route in setOf(
+            Routes.Welcome.route,
+            Routes.Onboarding.route,
+            Routes.OnboardingReplay.route,
+            Routes.Login.route,
+            Routes.Register.route,
+            Routes.PhoneLogin.route,
+            Routes.ForgotPassword.route,
+            Routes.TwoFactorGate.route
+        ) -> false
+        route.startsWith("verify_email/") -> false
+        route.startsWith("chat/") -> false
+        route.startsWith("comments/") -> false
+        route.startsWith("call/") -> false
+        route == Routes.ImageViewer.route -> false
+        route == Routes.QrLogin.route -> false
+        route == Routes.ScanContact.route -> false
+        route == Routes.SavedMessages.route -> false
+        route == Routes.AdminPanel.route -> false
+        else -> true
+    }
+}
+
+/** Индекс активной вкладки нижней панели для текущего маршрута (-1 — ни одна). */
+private fun tabIndexForRoute(route: String?): Int = when {
+    route == null -> -1
+    route == Routes.ChatList.route -> TAB_CHATS
+    route == Routes.NearbyPeople.route -> TAB_NEARBY
+    route == Routes.OfflineChat.route -> TAB_OFFLINE
+    route == Routes.AdminHome.route -> TAB_ADMIN
+    // Все экраны настроек, включая подэкраны категорий (route вида
+    // "settings_account?anchor={anchor}"), остаются внутри вкладки «Настройки».
+    route == Routes.Settings.route || route.startsWith("settings_") -> TAB_SETTINGS
+    else -> -1
+}
+
+/**
+ * Переход между основными разделами по тапу в нижней панели.
+ *
+ * Стек между разделами не копим: возвращаемся к списку чатов как к корню, иначе
+ * переключение «Чаты → Настройки → Чаты → Настройки…» бесконечно росло бы в
+ * истории, и кнопка «Назад» ходила бы по кругу.
+ */
+private fun navigateToMainTab(
+    navController: NavHostController,
+    route: String,
+    currentRoute: String?
+) {
+    if (currentRoute == route) return
+    navController.navigate(route) {
+        popUpTo(Routes.ChatList.route) { inclusive = route == Routes.ChatList.route }
+        launchSingleTop = true
     }
 }

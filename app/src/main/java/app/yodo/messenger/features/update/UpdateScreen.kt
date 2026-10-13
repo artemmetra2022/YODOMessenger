@@ -120,7 +120,8 @@ fun UpdateScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(notes, style = MaterialTheme.typography.bodyMedium)
+                        // Разбираем Markdown описания релиза (см. releaseNotesAnnotated).
+                        Text(releaseNotesAnnotated(notes), style = MaterialTheme.typography.bodyMedium)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
