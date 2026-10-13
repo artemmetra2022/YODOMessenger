@@ -953,19 +953,6 @@ fun YodoNavGraph(
             )
         }
         composable(
-            route = Routes.SettingsLanguage.route,
-            arguments = listOf(navArgument(Routes.SettingsLanguage.ARG_ANCHOR) {
-                type = NavType.StringType
-                nullable = true
-                defaultValue = null
-            })
-        ) { backStackEntry ->
-            app.yodo.messenger.features.settings.LanguageSettingsScreen(
-                onBackClick = { navController.popBackStack() },
-                initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsLanguage.ARG_ANCHOR)
-            )
-        }
-        composable(
             route = Routes.SettingsChats.route,
             arguments = listOf(navArgument(Routes.SettingsChats.ARG_ANCHOR) {
                 type = NavType.StringType
@@ -990,6 +977,10 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onOpenBlockedUsers = { navController.navigate(Routes.BlockedUsers.route) },
                 onOpenPrivacyWho = { navController.navigate(Routes.PrivacyWho.route) },
+                // НОВОЕ (разумные категории): «Центр безопасности» переехал сюда из
+                // «Аккаунта» — двухфакторная аутентификация и защита от скриншотов
+                // относятся к приватности и безопасности, а не к управлению аккаунтом.
+                onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsPrivacy.ARG_ANCHOR)
             )
         }
@@ -1016,18 +1007,8 @@ fun YodoNavGraph(
         ) { backStackEntry ->
             app.yodo.messenger.features.settings.AccountSettingsScreen(
                 onBackClick = { navController.popBackStack() },
-                // НОВОЕ (батч 7): открыть «Фишки и инструменты».
-                onOpenTools = { navController.navigate(Routes.Tools.route) },
-                // НОВОЕ (OTA-обновления): открыть экран «О приложении» с проверкой обновлений.
-                onOpenAbout = { navController.navigate(Routes.AboutUpdates.route) },
-                // НОВОЕ (раздел «Школа»): открыть школьный раздел и его настройки.
-                onOpenSchool = { navController.navigate(Routes.School.route) },
-                onOpenSchoolSettings = { navController.navigate(Routes.SchoolSettings.route) },
-                onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
                 // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
                 onOpenReports = { navController.navigate(Routes.ReportInbox.route) },
-                // НОВОЕ (обучение): повторный показ онбординга из настроек.
-                onOpenOnboarding = { navController.navigate(Routes.OnboardingReplay.route) },
                 // НОВОЕ (Y): открыть экран смены аккаунта.
                 onSwitchAccount = { navController.navigate(Routes.SwitchAccount.route) },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsAccount.ARG_ANCHOR),
@@ -1036,6 +1017,30 @@ fun YodoNavGraph(
                         popUpTo(navController.graph.id) { inclusive = true }
                     }
                 }
+            )
+        }
+        // НОВОЕ (разумные категории): «Приложение» — разделы, обучение, поведение
+        // поиска настроек и информация о версии (раньше всё это лежало в «Аккаунте»).
+        composable(
+            route = Routes.SettingsApp.route,
+            arguments = listOf(navArgument(Routes.SettingsApp.ARG_ANCHOR) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            })
+        ) { backStackEntry ->
+            app.yodo.messenger.features.settings.AppSettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                // НОВОЕ (батч 7): открыть «Фишки и инструменты».
+                onOpenTools = { navController.navigate(Routes.Tools.route) },
+                // НОВОЕ (раздел «Школа»): открыть школьный раздел и его настройки.
+                onOpenSchool = { navController.navigate(Routes.School.route) },
+                onOpenSchoolSettings = { navController.navigate(Routes.SchoolSettings.route) },
+                // НОВОЕ (обучение): повторный показ онбординга из настроек.
+                onOpenOnboarding = { navController.navigate(Routes.OnboardingReplay.route) },
+                // НОВОЕ (OTA-обновления): открыть экран «О приложении» с проверкой обновлений.
+                onOpenAbout = { navController.navigate(Routes.AboutUpdates.route) },
+                initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsApp.ARG_ANCHOR)
             )
         }
         // НОВОЕ (обучение): повторный показ онбординга по запросу из настроек. В отличие

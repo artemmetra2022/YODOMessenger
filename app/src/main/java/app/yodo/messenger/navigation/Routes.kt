@@ -46,11 +46,6 @@ sealed class Routes(val route: String) {
             if (anchor.isNullOrBlank()) "settings_appearance" else "settings_appearance?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
-    data object SettingsLanguage : Routes("settings_language?anchor={anchor}") {
-        fun createRoute(anchor: String? = null) =
-            if (anchor.isNullOrBlank()) "settings_language" else "settings_language?anchor=$anchor"
-        const val ARG_ANCHOR = "anchor"
-    }
     data object SettingsChats : Routes("settings_chats?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
             if (anchor.isNullOrBlank()) "settings_chats" else "settings_chats?anchor=$anchor"
@@ -69,6 +64,15 @@ sealed class Routes(val route: String) {
     data object SettingsAccount : Routes("settings_account?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
             if (anchor.isNullOrBlank()) "settings_account" else "settings_account?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    // НОВОЕ (разумные категории): «Приложение» — разделы (Школа, «Фишки и
+    // инструменты»), обучение, поведение поиска настроек и информация о версии.
+    // Вынесено из категории «Аккаунт», где эти пункты были свалены в кучу с
+    // выходом/удалением аккаунта.
+    data object SettingsApp : Routes("settings_app?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_app" else "settings_app?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).

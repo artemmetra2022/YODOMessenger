@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.RemoveRedEye
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -59,18 +60,20 @@ import app.yodo.messenger.ui.theme.LocalColorTheme
 import kotlin.math.roundToInt
 
 /**
- * НОВОЕ (разделение настроек по категориям): «Конфиденциальность» — статус «в
- * сети», отметки о прочтении, автоудаление аккаунта, PIN/ложный PIN,
- * заблокированные, «кто может…», видимость расширенного профиля. Логика и
- * внешний вид перенесены из бывшего монолитного SettingsScreen.kt без
- * изменений поведения. PinCellsInput переиспользуется из PinCells.kt (тот же
- * пакет) — используется как раньше в PIN-диалогах.
+ * ИЗМЕНЕНО (разумные категории): «Приватность и безопасность» (бывшая
+ * «Конфиденциальность») — статус «в сети», отметки о прочтении, автоудаление
+ * аккаунта, PIN/ложный PIN, заблокированные, «кто может…», видимость
+ * расширенного профиля и «Центр безопасности» (2FA, защита от скриншотов),
+ * который переехал сюда из «Аккаунта» — он относится к безопасности, а не к
+ * управлению аккаунтом. Логика самих настроек не менялась.
+ * PinCellsInput переиспользуется из PinCells.kt (тот же пакет).
  */
 @Composable
 fun PrivacySettingsScreen(
     onBackClick: () -> Unit,
     onOpenBlockedUsers: () -> Unit,
     onOpenPrivacyWho: () -> Unit,
+    onOpenSecurity: () -> Unit,
     initialAnchorId: String? = null,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -126,7 +129,7 @@ fun PrivacySettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Конфиденциальность", style = MaterialTheme.typography.titleLarge) },
+                title = { Text("Приватность и безопасность", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
@@ -367,6 +370,28 @@ fun PrivacySettingsScreen(
                         onCheckedChange = { viewModel.setShowEmail(it) },
                         colorTheme = colorTheme,
                         showIcon = false
+                    )
+                }
+            }
+            // НОВОЕ (разумные категории): «Центр безопасности» переехал сюда из
+            // «Аккаунта» — 2FA, сброс через вопросы и защита от скриншотов
+            // относятся к безопасности, а не к управлению аккаунтом.
+            item {
+                SettingsSectionHeader(
+                    icon = Icons.Filled.Security,
+                    title = "Безопасность",
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SECURITY_CENTER, anchorPositions, highlightedAnchor, colorTheme),
+                    colorTheme = colorTheme
+                )
+            }
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(
+                        icon = Icons.Filled.Security,
+                        title = "Центр безопасности",
+                        subtitle = "Двухфакторная аутентификация, сброс через вопросы, защита от скриншотов, статусы",
+                        colorTheme = colorTheme,
+                        onClick = onOpenSecurity
                     )
                 }
             }

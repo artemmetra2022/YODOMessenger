@@ -50,6 +50,9 @@ object SettingsSearchIndex {
     const val ANCHOR_QUIET_HOURS = "quiet_hours"
     const val ANCHOR_NOTIFICATION_SNOOZE = "notification_snooze"
     const val ANCHOR_ACCOUNT = "account"
+    // НОВОЕ (разумные категории): раздел «Приложение» — Школа, инструменты,
+    // обучение, поведение поиска настроек и «О приложении».
+    const val ANCHOR_APP = "app"
     const val ANCHOR_TOOLS = "tools"
     const val ANCHOR_SECURITY_CENTER = "security_center"
     const val ANCHOR_ONBOARDING = "onboarding"
@@ -68,9 +71,11 @@ object SettingsSearchIndex {
     private const val SEC_CUSTOMIZATION = "Кастомизация"
     private const val SEC_LANGUAGE = "Язык"
     private const val SEC_CHATS = "Чаты"
-    private const val SEC_PRIVACY = "Конфиденциальность"
+    private const val SEC_PRIVACY = "Приватность и безопасность"
+    private const val SEC_SECURITY = "Безопасность"
     private const val SEC_NOTIFICATIONS = "Уведомления"
     private const val SEC_ACCOUNT = "Аккаунт"
+    private const val SEC_APP = "Разделы и приложение"
     private const val SEC_SEARCH = "Поиск"
 
     // ИЗМЕНЕНО (разделение настроек по категориям): маршруты экранов категорий.
@@ -78,11 +83,13 @@ object SettingsSearchIndex {
     // константы (а не прямая ссылка на Routes), чтобы модуль features/settings
     // не зависел от модуля navigation.
     const val ROUTE_APPEARANCE = "settings_appearance"
-    const val ROUTE_LANGUAGE = "settings_language"
     const val ROUTE_CHATS = "settings_chats"
     const val ROUTE_PRIVACY = "settings_privacy"
     const val ROUTE_NOTIFICATIONS = "settings_notifications"
     const val ROUTE_ACCOUNT = "settings_account"
+    // НОВОЕ (разумные категории): «Приложение» — заменяет удалённую категорию
+    // «Язык» (её единственный пункт переехал в «Оформление и язык»).
+    const val ROUTE_APP = "settings_app"
 
     val items: List<SettingsSearchItem> = listOf(
         SettingsSearchItem(
@@ -137,7 +144,8 @@ object SettingsSearchIndex {
             id = "language", anchorId = ANCHOR_LANGUAGE,
             title = "Язык приложения", subtitle = "Сменить язык интерфейса",
             keywords = listOf("язык", "локализация", "русский", "английский", "language"),
-            sectionTitle = SEC_LANGUAGE, categoryRoute = ROUTE_LANGUAGE
+            // ИЗМЕНЕНО (разумные категории): язык переехал в «Оформление и язык».
+            sectionTitle = SEC_LANGUAGE, categoryRoute = ROUTE_APPEARANCE
         ),
         SettingsSearchItem(
             id = "send_on_enter", anchorId = ANCHOR_CHATS,
@@ -330,19 +338,19 @@ object SettingsSearchIndex {
             id = "tools", anchorId = ANCHOR_TOOLS,
             title = "Фишки и инструменты", subtitle = "Заметки, таймер, пароли, конвертеры и другое",
             keywords = listOf("инструменты", "функции", "утилиты", "мини-приложения", "tools"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         SettingsSearchItem(
             id = "security_center", anchorId = ANCHOR_SECURITY_CENTER,
             title = "Центр безопасности", subtitle = "2FA по email, защита от скриншотов",
             keywords = listOf("безопасность", "двухфакторная", "2fa", "скриншот", "security"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_SECURITY, categoryRoute = ROUTE_PRIVACY
         ),
         SettingsSearchItem(
             id = "onboarding", anchorId = ANCHOR_ONBOARDING,
             title = "Пройти обучение", subtitle = "Короткий тур по возможностям приложения",
             keywords = listOf("обучение", "тур", "гайд", "как пользоваться", "туториал"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         SettingsSearchItem(
             id = "switch_account", anchorId = ANCHOR_SWITCH_ACCOUNT,
@@ -362,42 +370,40 @@ object SettingsSearchIndex {
             keywords = listOf("удаление", "удалить профиль", "снести аккаунт", "delete"),
             sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
         ),
-        // ИСПРАВЛЕНО (разделение настроек по категориям): фактически оба пункта
-        // ниже расположены в разделе «Аккаунт» на экране (было видно по коду
-        // SettingsScreen — шли сразу после «Удалить аккаунт»), а не «Поиск»/«Чаты»,
-        // как ошибочно значилось в sectionTitle раньше. categoryRoute поставлен
-        // по фактическому месту на экране.
+        // ИЗМЕНЕНО (разумные категории): «Показывать настройки в общем поиске»
+        // ушло в «Приложение», «Скрывать статус-бар в списке чатов» — в «Чаты»
+        // (там он и должен быть: речь о главном экране со списком чатов).
         SettingsSearchItem(
             id = "search_in_global", anchorId = ANCHOR_SEARCH_IN_GLOBAL,
             title = "Показывать настройки в общем поиске", subtitle = "Включить или выключить показ настроек на главном экране поиска",
             keywords = listOf("общий поиск", "глобальный поиск", "поиск настроек", "показывать настройки"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         SettingsSearchItem(
             id = "hide_status_bar_chat_list", anchorId = ANCHOR_HIDE_STATUS_BAR_CHAT_LIST,
             title = "Скрывать статус-бар в списке чатов", subtitle = "Полностью скрывать системную панель времени и батареи на главном экране",
             keywords = listOf("статус бар", "статусбар", "скрыть статус бар", "полноэкранный режим", "immersive"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         // НОВОЕ (OTA-обновления): пункт «О приложении» в поиске настроек.
         SettingsSearchItem(
             id = "about_app", anchorId = ANCHOR_ABOUT,
             title = "О приложении", subtitle = "Версия приложения и проверка обновлений",
             keywords = listOf("о приложении", "версия", "обновление", "обновить", "апдейт", "update", "version", "github", "сборка"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         // НОВОЕ (раздел «Школа»): пункты школьного раздела в поиске настроек.
         SettingsSearchItem(
             id = "school", anchorId = ANCHOR_SCHOOL,
             title = "Школа", subtitle = "Справочник гимназии №196: учителя, новости, расписание, опросы, викторина и игры",
             keywords = listOf("школа", "гимназия", "учителя", "предметы", "расписание", "звонки", "каникулы", "новости школы", "викторина", "школьный справочник"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         SettingsSearchItem(
             id = "school_settings", anchorId = ANCHOR_SCHOOL_SETTINGS,
             title = "Настройки раздела «Школа»", subtitle = "Показывать раздел целиком и выбирать отдельные подразделы",
             keywords = listOf("настройки школы", "скрыть школу", "подразделы школы", "отображение школы"),
-            sectionTitle = SEC_ACCOUNT, categoryRoute = ROUTE_ACCOUNT
+            sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         )
     )
 }
