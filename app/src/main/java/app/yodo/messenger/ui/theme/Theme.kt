@@ -90,6 +90,17 @@ fun YodoMessengerTheme(
             background = colorTheme.backgroundDark,
             surface = colorTheme.surfaceDark,
             surfaceVariant = tintOver(colorTheme.primary, colorTheme.surfaceDark, 0.075f),
+            // ИСПРАВЛЕНО: роли «surface container» раньше не задавались, поэтому
+            // компоненты Material3, использующие их по умолчанию (NavigationBar —
+            // нижняя панель, ModalBottomSheet, меню), брали базовую палитру M3 и
+            // выбивались из темы приложения. Теперь это тот же семейный цвет.
+            surfaceDim = colorTheme.backgroundDark,
+            surfaceBright = tintOver(colorTheme.onSurfaceDark, colorTheme.surfaceDark, 0.06f),
+            surfaceContainerLowest = colorTheme.backgroundDark,
+            surfaceContainerLow = tintOver(colorTheme.onSurfaceDark, colorTheme.backgroundDark, 0.045f),
+            surfaceContainer = colorTheme.surfaceDark,
+            surfaceContainerHigh = tintOver(colorTheme.onSurfaceDark, colorTheme.surfaceDark, 0.05f),
+            surfaceContainerHighest = tintOver(colorTheme.onSurfaceDark, colorTheme.surfaceDark, 0.10f),
             onBackground = colorTheme.onSurfaceDark,
             onSurface = colorTheme.onSurfaceDark,
             onSurfaceVariant = tintOver(colorTheme.primary, colorTheme.onSurfaceDark, 0.10f),
@@ -116,6 +127,15 @@ fun YodoMessengerTheme(
             background = colorTheme.backgroundLight,
             surface = colorTheme.surfaceLight,
             surfaceVariant = tintOver(colorTheme.primary, colorTheme.surfaceLight, 0.065f),
+            // ИСПРАВЛЕНО: см. комментарий в тёмной схеме — те же роли «surface
+            // container», чтобы нижняя панель и прочие поверхности совпадали с темой.
+            surfaceDim = colorTheme.backgroundLight,
+            surfaceBright = colorTheme.surfaceLight,
+            surfaceContainerLowest = colorTheme.surfaceLight,
+            surfaceContainerLow = tintOver(colorTheme.onSurfaceLight, colorTheme.backgroundLight, 0.02f),
+            surfaceContainer = colorTheme.surfaceLight,
+            surfaceContainerHigh = tintOver(colorTheme.onSurfaceLight, colorTheme.surfaceLight, 0.04f),
+            surfaceContainerHighest = tintOver(colorTheme.onSurfaceLight, colorTheme.surfaceLight, 0.08f),
             onBackground = colorTheme.onSurfaceLight,
             onSurface = colorTheme.onSurfaceLight,
             onSurfaceVariant = tintOver(colorTheme.primary, colorTheme.onSurfaceLight, 0.08f),
