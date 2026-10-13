@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
+import app.yodo.messenger.features.main.TAB_SETTINGS
+import app.yodo.messenger.features.main.YodoBottomBar
 import app.yodo.messenger.ui.theme.LocalColorTheme
 
 /**
@@ -65,7 +67,14 @@ fun SettingsCategoriesScreen(
     onBackClick: () -> Unit,
     onProfileClick: () -> Unit,
     onOpenCategory: (categoryRoute: String) -> Unit,
-    onOpenSearchResult: (categoryRoute: String, anchorId: String) -> Unit
+    onOpenSearchResult: (categoryRoute: String, anchorId: String) -> Unit,
+    // НОВОЕ (панель на основных экранах): нижняя панель на стартовом экране настроек.
+    // Показывается только здесь — в подэкранах категорий её нет.
+    showAdminTab: Boolean = false,
+    onChatsClick: () -> Unit = {},
+    onNearbyClick: () -> Unit = {},
+    onOfflineClick: () -> Unit = {},
+    onAdminClick: () -> Unit = {}
 ) {
     val colorTheme = LocalColorTheme.current
     var query by remember { mutableStateOf("") }
@@ -127,6 +136,18 @@ fun SettingsCategoriesScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
+        },
+        bottomBar = {
+            YodoBottomBar(
+                selectedTab = TAB_SETTINGS,
+                showAdminTab = showAdminTab,
+                onChatsClick = onChatsClick,
+                onNearbyClick = onNearbyClick,
+                onOfflineClick = onOfflineClick,
+                // Уже в настройках — повторный тап ничего не делает.
+                onSettingsClick = {},
+                onAdminClick = onAdminClick
             )
         },
         containerColor = Color.Transparent
