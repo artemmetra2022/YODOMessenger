@@ -10,6 +10,7 @@ import app.yodo.messenger.domain.model.SchoolTeacherProfile
 import app.yodo.messenger.domain.model.SchoolTeacherQuestion
 import app.yodo.messenger.domain.repository.SchoolRepository
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -69,7 +70,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 val news = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolNewsFirestore::class.java)?.toDomain(doc.id)
+                    doc.toSchoolNews()
                 }.orEmpty()
                 trySend(news)
             }
@@ -131,7 +132,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 val polls = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolPollFirestore::class.java)?.toDomain(doc.id)
+                    doc.toSchoolPoll()
                 }.orEmpty()
                 trySend(polls)
             }
@@ -218,7 +219,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 val ideas = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolIdeaFirestore::class.java)?.toDomain(doc.id)
+                    doc.toSchoolIdea()
                 }.orEmpty()
                 trySend(ideas)
             }
@@ -250,7 +251,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 val reviews = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolReviewFirestore::class.java)?.toDomain(doc.id)
+                    doc.toSchoolReview()
                 }.orEmpty()
                 trySend(reviews)
             }
@@ -259,7 +260,9 @@ class SchoolRepositoryImpl @Inject constructor(
 
     override suspend fun getMyReview(uid: String): SchoolReview? = try {
         val snap = firestore.collection(COL_REVIEWS).document(uid).get().await()
-        snap.toObject(SchoolReviewFirestore::class.java)?.toDomain(uid)
+        // Документа ещё нет — оценки нет. Прежний toObject и здесь возвращал не
+        // null, а пустую модель, из-за чего ветка «оценки нет» была недостижима.
+        if (snap.exists()) snap.toSchoolReview(uid) else null
     } catch (e: Exception) {
         Log.w(TAG, "getMyReview: ${e.message}")
         null
@@ -290,7 +293,7 @@ class SchoolRepositoryImpl @Inject constructor(
                 return@addSnapshotListener
             }
             val profile = if (snapshot != null && snapshot.exists()) {
-                snapshot.toObject(SchoolTeacherProfileFirestore::class.java)?.toDomain(snapshot.id)
+                snapshot.toTeacherProfile()
             } else null
             trySend(profile)
         }
@@ -308,7 +311,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 trySend(snapshot?.documents?.firstOrNull()?.let { doc ->
-                    doc.toObject(SchoolTeacherProfileFirestore::class.java)?.toDomain(doc.id)
+                    doc.toTeacherProfile()
                 })
             }
         awaitClose { listener.remove() }
@@ -323,7 +326,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 trySend(snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolTeacherProfileFirestore::class.java)?.toDomain(doc.id)
+                    doc.toTeacherProfile()
                 }.orEmpty())
             }
         awaitClose { listener.remove() }
@@ -338,7 +341,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 trySend(snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolTeacherQuestionFirestore::class.java)?.toDomain(doc.id)
+                    doc.toTeacherQuestion()
                 }.orEmpty())
             }
         awaitClose { listener.remove() }
@@ -442,7 +445,7 @@ class SchoolRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 trySend(snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(SchoolLessonFileFirestore::class.java)?.toDomain(doc.id)
+                    doc.toLessonFile()
                 }.orEmpty())
             }
         awaitClose { listener.remove() }
@@ -505,105 +508,105 @@ class SchoolRepositoryImpl @Inject constructor(
         firestore.collection(COL_TEACHERS).document(teacherName)
 }
 
-// ─────────────────────────────────────────────────────── POJO для toObject
+// ─────────────────────────────────────────── Чтение документов (без рефлексии)
 
-/** POJO-обёртки: Firestore не умеет напрямую в data class с вычисляемыми полями. */
-private data class SchoolNewsFirestore(
-    val sender: String = "",
-    val text: String = "",
-    val eventDate: String = "",
-    val pubDate: Long = 0L,
-    val pinned: Boolean = false,
-    // НОВОЕ (отложенная публикация): поле отсутствует у старых новостей —
-    // по умолчанию считаем опубликованной.
-    val published: Boolean = true
-) {
-    fun toDomain(id: String) = SchoolNews(
-        id = id, sender = sender, text = text, eventDate = eventDate,
-        pubDate = pubDate, pinned = pinned, published = published
-    )
-}
+/**
+ * Раньше документы разбирались через DocumentSnapshot.toObject(...): Firestore
+ * сопоставляет поля документа с полями класса по именам, то есть через
+ * рефлексию. В release-сборке R8 переименовывает поля этих приватных классов,
+ * сопоставление перестаёт находить совпадения, и toObject бросает
+ * «No setter/field for … found on class …». Исключение возникало внутри
+ * колбэка snapshot-listener'а, где его никто не ловит, — приложение вылетало
+ * при открытии раздела «Школа». Поэтому поля читаются явно, как в остальных
+ * репозиториях проекта.
+ */
+private fun DocumentSnapshot.stringField(field: String): String = getString(field) ?: ""
 
-private data class SchoolPollFirestore(
-    val question: String = "",
-    val options: List<String> = emptyList(),
-    val votes: Map<String, Long> = emptyMap(),
-    val voters: Map<String, Long> = emptyMap(),
-    val createdAt: Long = 0L,
-    // НОВОЕ (закрытие опросов): поле отсутствует у старых опросов — открыт.
-    val closed: Boolean = false
-) {
-    fun toDomain(id: String) = SchoolPoll(
-        id = id, question = question, options = options, votes = votes,
-        voters = voters, createdAt = createdAt, closed = closed
-    )
-}
+/** Firestore хранит целые как Long, но может отдать и Double — приводим к Long. */
+private fun DocumentSnapshot.longField(field: String): Long = (get(field) as? Number)?.toLong() ?: 0L
 
-private data class SchoolIdeaFirestore(
-    val authorId: String = "",
-    val authorName: String = "",
-    val text: String = "",
-    val createdAt: Long = 0L
-) {
-    fun toDomain(id: String) = SchoolIdea(
-        id = id, authorId = authorId, authorName = authorName, text = text, createdAt = createdAt
-    )
-}
+private fun DocumentSnapshot.boolField(field: String): Boolean = getBoolean(field) ?: false
 
-private data class SchoolReviewFirestore(
-    val authorId: String = "",
-    val authorName: String = "",
-    val stars: Int = 0,
-    val liked: String = "",
-    val disliked: String = "",
-    val updatedAt: Long = 0L
-) {
-    fun toDomain(id: String) = SchoolReview(
-        id = id, authorId = authorId, authorName = authorName, stars = stars,
-        liked = liked, disliked = disliked, updatedAt = updatedAt
-    )
-}
+private fun DocumentSnapshot.stringListField(field: String): List<String> =
+    (get(field) as? List<*>)?.filterIsInstance<String>() ?: emptyList()
 
-private data class SchoolTeacherProfileFirestore(
-    val name: String = "",
-    val subject: String = "",
-    val linkedUserId: String = "",
-    val linkedUserName: String = "",
-    val fileUrl: String = "",
-    val fileNote: String = "",
-    val fileUpdatedAt: Long = 0L,
-    val subscribers: List<String> = emptyList()
-) {
-    fun toDomain(id: String) = SchoolTeacherProfile(
-        id = id, name = name, subject = subject,
-        linkedUserId = linkedUserId, linkedUserName = linkedUserName,
-        fileUrl = fileUrl, fileNote = fileNote, fileUpdatedAt = fileUpdatedAt,
-        subscribers = subscribers.associateWith { true }
-    )
-}
+/** votes/voters: {индекс варианта или uid -> число голосов}. */
+private fun DocumentSnapshot.longMapField(field: String): Map<String, Long> =
+    (get(field) as? Map<*, *>)
+        ?.mapNotNull { (key, value) ->
+            val name = key as? String ?: return@mapNotNull null
+            val number = (value as? Number)?.toLong() ?: return@mapNotNull null
+            name to number
+        }
+        ?.toMap()
+        ?: emptyMap()
 
-private data class SchoolTeacherQuestionFirestore(
-    val fromUid: String = "",
-    val fromName: String = "",
-    val text: String = "",
-    val hidden: Boolean = false,
-    val answer: String = "",
-    val answeredAt: Long = 0L,
-    val createdAt: Long = 0L
-) {
-    fun toDomain(id: String) = SchoolTeacherQuestion(
-        id = id, fromUid = fromUid, fromName = fromName, text = text,
-        hidden = hidden, answer = answer, answeredAt = answeredAt, createdAt = createdAt
-    )
-}
+private fun DocumentSnapshot.toSchoolNews() = SchoolNews(
+    id = id,
+    sender = stringField("sender"),
+    text = stringField("text"),
+    eventDate = stringField("eventDate"),
+    pubDate = longField("pubDate"),
+    pinned = boolField("pinned"),
+    // Поле появилось позже: у старых новостей его нет — считаем опубликованной.
+    published = if (contains("published")) boolField("published") else true
+)
 
-/** НОВОЕ (история файлов урока): POJO для подколлекции lessonFiles. */
-private data class SchoolLessonFileFirestore(
-    val fileUrl: String = "",
-    val fileNote: String = "",
-    val updatedAt: Long = 0L
-) {
-    fun toDomain(id: String) = SchoolLessonFile(
-        id = id, fileUrl = fileUrl, fileNote = fileNote, updatedAt = updatedAt
-    )
-}
+private fun DocumentSnapshot.toSchoolPoll() = SchoolPoll(
+    id = id,
+    question = stringField("question"),
+    options = stringListField("options"),
+    votes = longMapField("votes"),
+    voters = longMapField("voters"),
+    createdAt = longField("createdAt"),
+    closed = boolField("closed")
+)
+
+private fun DocumentSnapshot.toSchoolIdea() = SchoolIdea(
+    id = id,
+    authorId = stringField("authorId"),
+    authorName = stringField("authorName"),
+    text = stringField("text"),
+    createdAt = longField("createdAt")
+)
+
+/** Оценка лежит в документе с id = uid автора; id передаётся явно. */
+private fun DocumentSnapshot.toSchoolReview(idOverride: String? = null) = SchoolReview(
+    id = idOverride ?: id,
+    authorId = stringField("authorId"),
+    authorName = stringField("authorName"),
+    stars = longField("stars").toInt(),
+    liked = stringField("liked"),
+    disliked = stringField("disliked"),
+    updatedAt = longField("updatedAt")
+)
+
+private fun DocumentSnapshot.toTeacherProfile() = SchoolTeacherProfile(
+    id = id,
+    name = stringField("name"),
+    subject = stringField("subject"),
+    linkedUserId = stringField("linkedUserId"),
+    linkedUserName = stringField("linkedUserName"),
+    fileUrl = stringField("fileUrl"),
+    fileNote = stringField("fileNote"),
+    fileUpdatedAt = longField("fileUpdatedAt"),
+    subscribers = stringListField("subscribers").associateWith { true }
+)
+
+private fun DocumentSnapshot.toTeacherQuestion() = SchoolTeacherQuestion(
+    id = id,
+    fromUid = stringField("fromUid"),
+    fromName = stringField("fromName"),
+    text = stringField("text"),
+    hidden = boolField("hidden"),
+    answer = stringField("answer"),
+    answeredAt = longField("answeredAt"),
+    createdAt = longField("createdAt")
+)
+
+private fun DocumentSnapshot.toLessonFile() = SchoolLessonFile(
+    id = id,
+    fileUrl = stringField("fileUrl"),
+    fileNote = stringField("fileNote"),
+    updatedAt = longField("updatedAt")
+)
