@@ -18,6 +18,8 @@ data class ReplyContext(
 
 interface MessageRepository {
 
+    suspend fun clearLegacyPrivatePreview(chatId: String)
+
     fun observeMessages(chatId: String, topicId: String? = null): Flow<List<Message>>
     // НОВОЕ (переработка каналов): одно сообщение (для превью поста в экране комментариев).
     fun observeMessage(chatId: String, messageId: String): Flow<Message?>
@@ -53,6 +55,9 @@ interface MessageRepository {
     suspend fun sendLocationMessage(chatId: String, lat: Double, lng: Double, topicId: String? = null): SendMessageResult
     // НОВОЕ (расширенные опросы): создание сообщения-опроса. closesAtMillis — необязательная
     // метка времени автозакрытия (для "расширенных" опросов); null означает бессрочный опрос.
+    suspend fun sendChecklistMessage(chatId: String, title: String, items: List<String>, topicId: String? = null): SendMessageResult
+    suspend fun setChecklistItemChecked(chatId: String, messageId: String, itemIndex: Int, checked: Boolean): SendMessageResult
+
     suspend fun sendPollMessage(
         chatId: String,
         question: String,

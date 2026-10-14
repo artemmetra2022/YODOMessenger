@@ -51,11 +51,14 @@ class MainActivity : ComponentActivity() {
     // НОВОЕ (ссылка-приглашение и шаринг): chatId канала из входящей ссылки
     // yodo://channel/<chatId> — проверяется в Compose-дереве и открывает профиль канала.
     private val pendingChannelDeepLink = mutableStateOf<String?>(null)
+    private data class ReminderTarget(val uid: String, val chatId: String, val messageId: String, val topicId: String?)
+    private val pendingReminder = mutableStateOf<ReminderTarget?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingChannelDeepLink.value = extractChannelIdFromIntent(intent)
+        pendingReminder.value = extractReminderTarget(intent)
 
         val startDestination = if (authRepository.isLoggedIn()) {
             Routes.ChatList.route
@@ -200,6 +203,16 @@ class MainActivity : ComponentActivity() {
                             // для авторизованных — чтобы не мешать на экранах входа.
                             UpdateGate(enabled = authRepository.isLoggedIn())
 
+                            LaunchedEffect(pendingReminder.value, authRepository.isLoggedIn()) {
+                                pendingReminder.value?.let { target ->
+                                    if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid == target.uid) {
+                                        navController.navigate(Routes.Chat.createRoute(target.chatId,
+                                            topicId = target.topicId, messageId = target.messageId))
+                                    }
+                                    pendingReminder.value = null
+                                }
+                            }
+
                             // НОВОЕ (ссылка-приглашение и шаринг): при открытии приложения по ссылке-
                             // приглашению (yodo://channel/<chatId>) — сразу переходит к профилю канала.
                             // Авторизованный и неавторизованный пользователь попадает сразу в обычный
@@ -221,9 +234,19 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        pendingReminder.value = extractReminderTarget(intent)
         // НОВОЕ: launchMode="singleTask" — при повторном открытии ссылки, когда активити
         // уже запущена, новый intent приходит сюда, а не в onCreate.
         extractChannelIdFromIntent(intent)?.let { pendingChannelDeepLink.value = it }
+    }
+
+    private fun extractReminderTarget(intent: android.content.Intent?): ReminderTarget? {
+        if (intent?.action != app.yodo.messenger.features.reminders.MessageReminderWorker.ACTION_OPEN_REMINDER) return null
+        val uid = intent.getStringExtra("reminderUid") ?: return null
+        val chat = intent.getStringExtra("reminderChatId")?.takeIf { it.isNotBlank() && '/' !in it } ?: return null
+        val message = intent.getStringExtra("reminderMessageId")?.takeIf { it.isNotBlank() && '/' !in it } ?: return null
+        val topic = intent.getStringExtra("reminderTopicId")?.takeIf { it.isNotBlank() && '/' !in it }
+        return ReminderTarget(uid, chat, message, topic)
     }
 
     /** Извлекает chatId канала из ссылки вида yodo://channel/<chatId>, если она есть в intent. */

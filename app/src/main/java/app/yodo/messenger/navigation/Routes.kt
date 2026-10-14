@@ -176,12 +176,16 @@ sealed class Routes(val route: String) {
     // Если чат открыт из раздела форума, здесь передаётся id и название темы;
     // при обычном открытии чата (из списка чатов) параметры отсутствуют — старое
     // поведение полностью сохраняется.
-    data object Chat : Routes("chat/{chatId}?topicId={topicId}&topicTitle={topicTitle}") {
-        fun createRoute(chatId: String, topicId: String? = null, topicTitle: String? = null): String {
-            val base = "chat/$chatId"
-            if (topicId.isNullOrBlank()) return base
-            val encodedTitle = java.net.URLEncoder.encode(topicTitle.orEmpty(), "UTF-8")
-            return "$base?topicId=$topicId&topicTitle=$encodedTitle"
+    data object Chat : Routes("chat/{chatId}?topicId={topicId}&topicTitle={topicTitle}&messageId={messageId}") {
+        fun createRoute(chatId: String, topicId: String? = null, topicTitle: String? = null, messageId: String? = null): String {
+            val args = mutableListOf<String>()
+            if (!topicId.isNullOrBlank()) {
+                args += "topicId=${android.net.Uri.encode(topicId)}"
+                args += "topicTitle=${android.net.Uri.encode(topicTitle.orEmpty())}"
+            }
+            if (!messageId.isNullOrBlank()) args += "messageId=${android.net.Uri.encode(messageId)}"
+            val base = "chat/${android.net.Uri.encode(chatId)}"
+            return if (args.isEmpty()) base else "$base?${args.joinToString("&")}"
         }
         const val ARG_CHAT_ID = "chatId"
         const val ARG_TOPIC_ID = "topicId"

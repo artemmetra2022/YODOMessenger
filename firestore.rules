@@ -69,6 +69,135 @@ service cloud.firestore {
           .hasOnly(["imageBase64", "viewOnceOpened"]);
     }
 
+    // Group checklists: immutable definition; each operation changes exactly one completion.
+    function checklistGroupMember(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return isSignedIn() && chat.get('type', '') == 'GROUP' &&
+        request.auth.uid in chat.get('participantIds', []) &&
+        !(request.auth.uid in chat.get('bannedUserIds', []));
+    }
+    function validChecklistLabel(items, index) {
+      return items.size() <= index ||
+        (items[index] is string && items[index].size() > 0 && items[index].size() <= 200);
+    }
+    function checklistCreationAllowed(chatId) {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['checklistTitle', 'checklistItems', 'checklistCheckedBy', 'checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) || (
+        checklistGroupMember(chatId) && d.senderId == request.auth.uid &&
+        d.get('text', '') == '' &&
+        d.checklistTitle is string && d.checklistTitle.size() > 0 && d.checklistTitle.size() <= 100 &&
+        d.checklistItems is list && d.checklistItems.size() >= 1 && d.checklistItems.size() <= 20 &&
+        validChecklistLabel(d.checklistItems, 0) &&
+        validChecklistLabel(d.checklistItems, 1) &&
+        validChecklistLabel(d.checklistItems, 2) &&
+        validChecklistLabel(d.checklistItems, 3) &&
+        validChecklistLabel(d.checklistItems, 4) &&
+        validChecklistLabel(d.checklistItems, 5) &&
+        validChecklistLabel(d.checklistItems, 6) &&
+        validChecklistLabel(d.checklistItems, 7) &&
+        validChecklistLabel(d.checklistItems, 8) &&
+        validChecklistLabel(d.checklistItems, 9) &&
+        validChecklistLabel(d.checklistItems, 10) &&
+        validChecklistLabel(d.checklistItems, 11) &&
+        validChecklistLabel(d.checklistItems, 12) &&
+        validChecklistLabel(d.checklistItems, 13) &&
+        validChecklistLabel(d.checklistItems, 14) &&
+        validChecklistLabel(d.checklistItems, 15) &&
+        validChecklistLabel(d.checklistItems, 16) &&
+        validChecklistLabel(d.checklistItems, 17) &&
+        validChecklistLabel(d.checklistItems, 18) &&
+        validChecklistLabel(d.checklistItems, 19) &&
+        d.checklistCheckedBy is map && d.checklistCheckedBy.size() == 0 &&
+        !d.keys().hasAny(['checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) &&
+        (d.get('topicId', null) == null ||
+          get(/databases/$(database)/documents/chats/$(chatId)/topics/$(d.topicId)).data.get('isClosed', false) != true)
+      );
+    }
+    function checklistCompletionAllowed(chatId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let index = after.get('checklistLastItemIndex', -1);
+      let key = string(index);
+      let oldValue = before.get('checklistCheckedBy', {}).get(key, '');
+      let newValue = after.get('checklistCheckedBy', {}).get(key, '');
+      return checklistGroupMember(chatId) && before.get('isDeleted', false) != true &&
+        (before.get('expiresAt', null) == null || before.expiresAt > request.time.toMillis()) &&
+        (before.get('topicId', null) == null ||
+          get(/databases/$(database)/documents/chats/$(chatId)/topics/$(before.topicId)).data.get('isClosed', false) != true) &&
+        before.get('checklistItems', []) is list &&
+        index is int && index >= 0 && index < before.get('checklistItems', []).size() &&
+        after.checklistCheckedBy is map &&
+        after.diff(before).affectedKeys().hasOnly(
+          ['checklistCheckedBy', 'checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) &&
+        after.checklistCheckedBy.diff(before.get('checklistCheckedBy', {})).affectedKeys().hasOnly([key]) &&
+        ((oldValue == '' && newValue == request.auth.uid) || (oldValue != '' && newValue == '')) &&
+        after.checklistUpdatedBy == request.auth.uid && after.checklistUpdatedAt == request.time;
+    }
+    function checklistUpdateGuard(chatId) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['checklistTitle', 'checklistItems', 'checklistCheckedBy', 'checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) ||
+        checklistCompletionAllowed(chatId);
+    }
+
+    // Text protection for regular two-person private chats; support/self-chat are explicit exceptions.
+    function protectedPrivateChat(chatId) {
+      return !chatId.matches('saved_.*') && !isSupportChat(chatId) &&
+        get(/databases/$(database)/documents/chats/$(chatId)).data.get('type', '') == 'PRIVATE';
+    }
+    function safePrivateTextShape(d, participants) {
+      return d.get('text', '') == '' && d.get('replyToText', '') == '' &&
+        d.get('replyToSenderName', '') == '' && !d.keys().hasAny(['_plainPreview', 'lastMessagePlain']) &&
+        (d.get('encrypted', false) != true || (
+          participants.size() == 2 && d.get('encryptedPayloadVersion', 0) == 2 &&
+          d.encByUid is map && d.encByUid.keys().hasOnly(participants) && d.encByUid.keys().hasAll(participants) &&
+          d.encByUid[participants[0]] is string && d.encByUid[participants[0]].size() > 0 &&
+          d.encByUid[participants[1]] is string && d.encByUid[participants[1]].size() > 0
+        ));
+    }
+    function privateMessageCreateAllowed(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return !protectedPrivateChat(chatId) || (
+        request.auth.uid in chat.get('participantIds', []) &&
+        safePrivateTextShape(request.resource.data, chat.get('participantIds', []))
+      );
+    }
+    function privateMessageUpdateAllowed(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !protectedPrivateChat(chatId) || (
+        request.resource.data.get('senderId', '') == resource.data.get('senderId', '') && (
+          // Preserve administrative deletion, never administrative plaintext replacement.
+          (isOfficialChannelAdmin() && request.resource.data.get('isDeleted', false) == true &&
+            request.resource.data.get('text', '') == '' &&
+            changed.hasOnly(['isDeleted', 'deletedByAdmin', 'text', 'imageBase64', 'fileBase64', 'fileName',
+                            'fileMimeType', 'fileSizeBytes', 'locationLat', 'locationLng'])) ||
+          (request.auth.uid in chat.get('participantIds', []) && (
+            !changed.hasAny(['text', 'replyToText', 'replyToSenderName', 'encrypted', 'encByUid', 'encryptedPayloadVersion', '_plainPreview', 'lastMessagePlain']) ||
+            safePrivateTextShape(request.resource.data, chat.get('participantIds', [])) ||
+            (request.auth.uid == resource.data.senderId && request.resource.data.get('isDeleted', false) == true &&
+              request.resource.data.get('text', '') == '' &&
+              changed.hasOnly(['isDeleted', 'deletedByAdmin', 'text', 'imageBase64', 'fileBase64', 'fileName',
+                              'fileMimeType', 'fileSizeBytes', 'locationLat', 'locationLng']))
+          ))
+        )
+      );
+    }
+    function previewCreateAllowed(chatId) {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['lastMessagePlain']) &&
+        (d.get('type', '') != 'PRIVATE' || chatId.matches('saved_.*') || isSupportChat(chatId) ||
+         d.get('lastMessage', '') in ['', '🔒 Сообщение', 'Личное сообщение']);
+    }
+    function previewUpdateAllowed(chatId) {
+      let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['lastMessagePlain']) || !d.keys().hasAny(['lastMessagePlain'])) &&
+        (resource.data.get('type', '') != 'PRIVATE' || chatId.matches('saved_.*') || isSupportChat(chatId) || (
+          d.get('type', '') == resource.data.get('type', '') &&
+          d.get('participantIds', []) == resource.data.get('participantIds', []) &&
+          (!changed.hasAny(['lastMessage']) || d.get('lastMessage', '') in ['', '🔒 Сообщение', 'Личное сообщение'])
+        ));
+    }
+
     function isOfficialChannelAdmin() {
       // Только два доверенных email-адреса (аккаунты создателей приложения)
       // могут писать в официальный канал рассылок.
@@ -617,7 +746,7 @@ service cloud.firestore {
       // id (saved_/support_) можно создавать только для самого себя, а официальный
       // канал — только админам. Добавлять чужие uid в participantIds своего нового
       // чата по-прежнему можно — это и есть «создать группу с участниками».
-      allow create: if isSignedIn() &&
+      allow create: if isSignedIn() && previewCreateAllowed(chatId) &&
         request.resource.data.createdBy == request.auth.uid &&
         request.auth.uid in request.resource.data.participantIds &&
         (!isSupportChat(chatId) || chatId == 'support_' + request.auth.uid) &&
@@ -639,7 +768,7 @@ service cloud.firestore {
       //  НОВОЕ (передача владения): поле createdBy теперь защищено явно —
       //  менять его может только нынешний владелец, и только на пользователя,
       //  который уже состоит в группе (see transferOwnership()).
-      allow update: if isSignedIn() &&
+      allow update: if isSignedIn() && previewUpdateAllowed(chatId) &&
         (isSupportChat(chatId)
           ? canAccessSupportChat(chatId)
           : chatId == 'yodo_official_channel'
@@ -861,6 +990,20 @@ service cloud.firestore {
 
       // НОВОЕ (AD): чтение жалоб/обжалований официального канала для двух админов
       // (очередь жалоб). Обычные жалобы в других чатах — по participantIds выше.
+      match /scheduledMessages/{messageId} {
+        allow read: if isSignedIn() && resource.data.senderId == request.auth.uid &&
+          (chatId == ('saved_' + request.auth.uid) ||
+           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds);
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds &&
+          privateMessageCreateAllowed(chatId);
+        allow update: if isSignedIn() && resource.data.senderId == request.auth.uid &&
+          request.resource.data.senderId == resource.data.senderId &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds &&
+          privateMessageUpdateAllowed(chatId);
+        allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+      }
+
       match /messages/{messageId} {
         // Сообщения официального канала читают все, но отправлять (create)
         // в него могут только два админа.
@@ -884,7 +1027,7 @@ service cloud.firestore {
             (isSupportChat(chatId) && canAccessSupportChat(chatId)) ||
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           );
-        allow create: if isSignedIn() &&
+        allow create: if isSignedIn() && privateMessageCreateAllowed(chatId) && checklistCreationAllowed(chatId) &&
           (chatId != 'yodo_official_channel' || isOfficialChannelAdmin()) &&
           (
             // Отправитель сообщения обязан совпадать с текущим пользователем —
@@ -920,8 +1063,9 @@ service cloud.firestore {
         // ветка update сужена только до «мягкого удаления» (полей, которые
         // трогает deleteMessage/deleteMessages) — полный произвольный rewrite
         // чужого сообщения остаётся доступным лишь глобальным админам.
-        allow update: if isSignedIn() &&
+        allow update: if isSignedIn() && privateMessageUpdateAllowed(chatId) && checklistUpdateGuard(chatId) &&
           (
+            checklistCompletionAllowed(chatId) ||
             // ИСПРАВЛЕНО (AS): админы могут модерировать сообщения в любом чате.
             isOfficialChannelAdmin() ||
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||

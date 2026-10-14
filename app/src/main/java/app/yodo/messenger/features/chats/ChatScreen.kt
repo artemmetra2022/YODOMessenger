@@ -266,6 +266,36 @@ fun ChatScreen(
     val quickReaction = viewModel.quickReaction.collectAsState().value
     val isSelectionMode = selectedMessageIds.value.isNotEmpty()
     var showScheduledList by remember { mutableStateOf(false) }
+    var reminderTarget by remember { mutableStateOf<Message?>(null) }
+    var showChecklistCreation by remember { mutableStateOf(false) }
+    var showKeyVerification by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.conversationSecurity?.peerKeyChanged, uiState.conversationSecurity?.ownKeyActive) {
+        val security = uiState.conversationSecurity
+        if (security != null && (security.peerKeyChanged || !security.ownKeyActive)) showKeyVerification = true
+    }
+    if (showKeyVerification) {
+        app.yodo.messenger.features.security.KeyVerificationDialog(
+            state = uiState.conversationSecurity, loading = uiState.securityLoading, error = uiState.securityError,
+            onDismiss = { showKeyVerification = false }, onRefresh = { viewModel.refreshConversationSecurity() },
+            onVerifyPeer = { viewModel.verifyPeerKey(it) }, onActivateOwn = { viewModel.activateOwnKey(it) }
+        )
+    }
+    var focusMessageHandled by remember(viewModel.initialMessageId) { mutableStateOf(false) }
+    reminderTarget?.let { message ->
+        app.yodo.messenger.features.reminders.ReminderDialog(
+            onDismiss = { reminderTarget = null },
+            onSchedule = { viewModel.scheduleReminder(message, it) },
+            onCancelReminder = { viewModel.cancelReminder(message) }
+        )
+    }
+    if (showChecklistCreation) {
+        ChecklistCreationDialog(onDismiss = { showChecklistCreation = false }, onSend = { title, items ->
+            if (!uiState.isSending) {
+                viewModel.sendChecklist(title, items)
+                showChecklistCreation = false
+            }
+        })
+    }
     // НОВОЕ: диалог «Быстрые ответы» (шаблоны из «Фишки и инструменты»).
     var showQuickReplies by remember { mutableStateOf(false) }
     val toolsPrefs = remember { context.getSharedPreferences("yodo_tools", Context.MODE_PRIVATE) }
@@ -293,7 +323,7 @@ fun ChatScreen(
     //    Compose пересчитает layout — на случай, если высота последнего айтема изменилась
     //    у��е после первого скролла (д��грузилась картинка и т.п.).
     LaunchedEffect(uiState.messages.lastOrNull()?.id, uiState.messages.size) {
-        if (uiState.messages.isNotEmpty()) {
+        if (uiState.messages.isNotEmpty() && viewModel.initialMessageId == null) {
             val lastIndex = uiState.messages.size - 1
             listState.scrollToItem(lastIndex)
             // Даём Compose кадр на пересчёт реальных высот (��артинки/медиа догружаются
@@ -303,6 +333,31 @@ fun ChatScreen(
             if (currentLastIndex >= 0) {
                 listState.animateScrollToItem(currentLastIndex)
             }
+        }
+    }
+    LaunchedEffect(uiState.noticeMessage) {
+        uiState.noticeMessage?.let { snackbarHostState.showSnackbar(it); viewModel.consumeNotice() }
+    }
+    LaunchedEffect(viewModel.initialMessageId, uiState.messages, uiState.initialMessagesReceived) {
+        val targetId = viewModel.initialMessageId
+        if (targetId != null && !focusMessageHandled && uiState.initialMessagesReceived) {
+            val target = uiState.messages.firstOrNull { it.id == targetId && !it.isDeleted }
+            if (target != null) {
+                var index = 0
+                var previousDate: String? = null
+                for (message in uiState.messages) {
+                    val label = formatDateSeparator(message.timestamp)
+                    if (label != previousDate) { index++; previousDate = label }
+                    if (message.id == targetId) break
+                    index++
+                }
+                kotlinx.coroutines.delay(100)
+                listState.scrollToItem(index)
+            } else {
+                kotlinx.coroutines.delay(2000)
+                snackbarHostState.showSnackbar(context.getString(R.string.reminder_message_unavailable))
+            }
+            focusMessageHandled = true
         }
     }
     LaunchedEffect(uiState.errorMessage) {
@@ -439,25 +494,24 @@ fun ChatScreen(
     var selectedNewsTopic by remember { mutableStateOf<String?>(null) }
 
     fun trySend() {
-        if (inputText.isNotBlank()) {
-            // НОВОЕ (лента новостей): в официальном канале админ может указать тему новости (плитку).
+        if (inputText.isNotBlank() && !uiState.isSending) {
+            val originalInput = inputText
             val outgoing = if (uiState.isOfficialChannel && uiState.isAdmin)
-                app.yodo.messenger.domain.model.NewsTopic.encode(selectedNewsTopic, inputText)
-            else inputText
-            viewModel.sendMessage(
-                outgoing,
+                app.yodo.messenger.domain.model.NewsTopic.encode(selectedNewsTopic, originalInput)
+            else originalInput
+            viewModel.sendMessage(outgoing,
                 explicitTtlSeconds = pendingMessageTtlSeconds,
                 hasExplicitTtl = pendingMessageTtlExplicitlySet,
-                silent = (uiState.chatType == "CHANNEL") && channelSilentMode
+                silent = (uiState.chatType == "CHANNEL") && channelSilentMode,
+                onSent = {
+                    if (inputText == originalInput) inputText = ""
+                    viewModel.saveDraft(inputText)
+                    selectedNewsTopic = null
+                    pendingMessageTtlSeconds = null
+                    pendingMessageTtlExplicitlySet = false
+                    if (hideKeyboardOnSend) { keyboardController?.hide(); focusManager.clearFocus() }
+                }
             )
-            inputText = ""
-            selectedNewsTopic = null
-            pendingMessageTtlSeconds = null
-            pendingMessageTtlExplicitlySet = false
-            if (hideKeyboardOnSend) {
-                keyboardController?.hide()
-                focusManager.clearFocus()
-            }
         }
     }
 
@@ -734,6 +788,10 @@ fun ChatScreen(
                                     Icon(Icons.Filled.MoreVert, contentDescription = "Меню")
                                 }
                                 DropdownMenu(expanded = showChatMenu, onDismissRequest = { showChatMenu = false }) {
+                                    if (uiState.chatType == "PRIVATE" && !chatId.startsWith("support_") && !chatId.startsWith("saved_")) {
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.security_keys_title)) },
+                                            onClick = { showChatMenu = false; showKeyVerification = true; viewModel.refreshConversationSecurity() })
+                                    }
                                     if (isChannel && uiState.isAdmin) {
                                         DropdownMenuItem(
                                             text = { Text("Пригласить в канал") },
@@ -1274,8 +1332,11 @@ fun ChatScreen(
                     if (showScheduleDialog) {
                         ScheduleMessageDialog(
                             onConfirm = { millis ->
-                                viewModel.scheduleMessage(inputText, millis)
-                                inputText = ""
+                                val originalInput = inputText
+                                viewModel.scheduleMessage(originalInput, millis, onScheduled = {
+                                    if (inputText == originalInput) inputText = ""
+                                    viewModel.saveDraft(inputText)
+                                })
                                 showScheduleDialog = false
                             },
                             onDismiss = { showScheduleDialog = false }
@@ -1322,6 +1383,10 @@ fun ChatScreen(
                                     )
                                 }
                             },
+                            onPickChecklist = if (uiState.chatType == "GROUP") ({
+                                showAttachMenu = false
+                                showChecklistCreation = true
+                            }) else null,
                             onPickPoll = {
                                 showAttachMenu = false
                                 showPollCreation = true
@@ -1530,6 +1595,11 @@ fun ChatScreen(
                                 onTripleTap = { selected -> viewModel.toggleReaction(selected.id, quickReaction) },
                                 onCommentsClick = { onOpenComments(chatId, message.id) },
                                 onInfoClick = { infoMessage = it },
+                                onRemind = { reminderTarget = message },
+                                onChecklistChange = { index, checked -> viewModel.setChecklistItemChecked(message.id, index, checked) },
+                                checklistEnabled = uiState.chatType == "GROUP" && !isSelectionMode &&
+                                    uiState.pendingChecklistItems.none { it.startsWith("${message.id}:") },
+                                checklistMemberNames = uiState.authorNames,
                                 onReply = { viewModel.setReplyingTo(message) },
                                 onEdit = { viewModel.setEditingMessage(message) },
                                 onDelete = { viewModel.deleteMessage(message) },
@@ -1838,6 +1908,10 @@ private fun SwipeableMessageBubble(
     onSaveToFavorite: () -> Unit,
     onVotePoll: (Int) -> Unit,
     onClosePoll: () -> Unit,
+    onRemind: () -> Unit,
+    onChecklistChange: (Int, Boolean) -> Unit,
+    checklistEnabled: Boolean,
+    checklistMemberNames: Map<String, String>,
     onImageClick: (String) -> Unit,
     onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
@@ -1922,6 +1996,10 @@ private fun SwipeableMessageBubble(
                 onSaveToFavorite = onSaveToFavorite,
                 onVotePoll = onVotePoll,
                 onClosePoll = onClosePoll,
+                onRemind = onRemind,
+                onChecklistChange = onChecklistChange,
+                checklistEnabled = checklistEnabled,
+                checklistMemberNames = checklistMemberNames,
                 onImageClick = onImageClick, onViewOnceClick = onViewOnceClick,
                 onReplyQuoteClick = onReplyQuoteClick,
                 onForwardedSenderClick = onForwardedSenderClick,
@@ -1964,6 +2042,10 @@ private fun MessageBubble(
     onSaveToFavorite: () -> Unit,
     onVotePoll: (Int) -> Unit,
     onClosePoll: () -> Unit,
+    onRemind: () -> Unit,
+    onChecklistChange: (Int, Boolean) -> Unit,
+    checklistEnabled: Boolean,
+    checklistMemberNames: Map<String, String>,
     onImageClick: (String) -> Unit,
     onViewOnceClick: (Message) -> Unit,
     onReplyQuoteClick: (String) -> Unit,
@@ -2312,6 +2394,11 @@ private fun MessageBubble(
                             textColor = textColor
                         )
                     }
+                    message.checklist?.let { checklist ->
+                        SharedChecklistBubble(checklist, currentUserId, checklistMemberNames,
+                            checklistEnabled && !message.isDeleted && (message.expiresAt == null || message.expiresAt > System.currentTimeMillis()),
+                            textColor, onChecklistChange)
+                    }
                     message.poll?.let { poll ->
                         PollMessageBubble(
                             poll = poll,
@@ -2584,6 +2671,11 @@ private fun MessageBubble(
                             onClick = { showMenu = false; onInfoClick(message) }
                         )
                     }
+                    if (!message.isDeleted && !message.isViewOnce) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.reminder_title)) },
+                            leadingIcon = { Icon(Icons.Filled.Schedule, contentDescription = null) },
+                            onClick = { showMenu = false; onRemind() })
+                    }
                     DropdownMenuItem(text = { Text("Ответить") },
 
  leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null) }, onClick = { showMenu = false; onReply() })
@@ -2614,7 +2706,7 @@ private fun MessageBubble(
                         DropdownMenuItem(text = { Text("Переслать") }, leadingIcon = { Icon(Icons.Filled.Forward, contentDescription = null) }, onClick = { showMenu = false; onForward() })
                     }
                     if (isOwnMessage) {
-                        DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
+                        if (message.checklist == null) DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
                         DropdownMenuItem(text = { Text("Удалить") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
                     } else {
                         // НОВОЕ (система жалоб, п.5 ТЗ): жалоба на чужое сообщение.
@@ -4445,6 +4537,7 @@ private fun AttachMenuDialog(
     onPickFile: () -> Unit,
     onPickLocation: () -> Unit,
     onPickPoll: () -> Unit,
+    onPickChecklist: (() -> Unit)? = null,
     onPasteImage: () -> Unit
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
@@ -4495,6 +4588,9 @@ private fun AttachMenuDialog(
                 AttachMenuRow(icon = Icons.Filled.InsertDriveFile, label = "Файл", onClick = onPickFile)
                 AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопоиция", onClick = onPickLocation)
                 AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)
+                onPickChecklist?.let { action ->
+                    AttachMenuRow(icon = Icons.Filled.CheckCircle, label = stringResource(R.string.checklist_create), onClick = action)
+                }
                 Spacer(modifier = Modifier.height(4.dp))
             }
         }

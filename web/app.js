@@ -1484,6 +1484,7 @@ function forwardableChatsList() {
 }
 
 function openForwardModal(msg) {
+  if (msg.encrypted === true) { alert("Для пересылки защищённого текста откройте Android-приложение."); return; }
   forwardingMessage = {
     text: msg.text || "",
     imageBase64: msg.imageBase64 || null,
@@ -1540,6 +1541,10 @@ async function sendForward(targetChatId) {
   try {
     const now = Date.now();
     const chat = findChatData(targetChatId) || chatsCache.get(targetChatId);
+    if (chat && chat.type === "PRIVATE" && !targetChatId.startsWith("support_") && !targetChatId.startsWith("saved_")) {
+      alert("Пересылка в защищённый личный чат доступна в обновлённом Android-приложении.");
+      return;
+    }
 
     const batch = writeBatch(db);
     const msgRef = doc(collection(db, "chats", targetChatId, "messages"));
@@ -1622,7 +1627,9 @@ function renderMessage(msg) {
     if (msg.replyToText) {
       bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText));
     }
-    if (msg.text) {
+    if (msg.encrypted === true) {
+      bubble.appendChild(document.createTextNode("🔒 Защищённый текст. Откройте Android-приложение."));
+    } else if (msg.text) {
       bubble.appendChild(document.createTextNode(msg.text));
     }
     const reactionsBar = buildReactionsBar(activeChatId, msg);
@@ -1695,6 +1702,11 @@ $("form-send").addEventListener("submit", async (e) => {
   const imageBase64 = pendingImageBase64;
   if ((!text && !imageBase64) || !activeChatId) return;
   if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
+  const privacyChat = activeChatData || findChatData(activeChatId);
+  if (privacyChat && privacyChat.type === "PRIVATE" && !activeChatId.startsWith("support_") && !activeChatId.startsWith("saved_")) {
+    alert("Для защищённой личной переписки используйте обновлённое Android-приложение. Веб-клиент не поддерживает эти ключи.");
+    return;
+  }
 
   // Rate limiting: не больше 5 отправок за 10 секунд (порт RateLimiter.kt)
   if (!sendRateLimiter.tryAcquire()) {

@@ -628,6 +628,7 @@ fun YodoNavGraph(
             route = Routes.Chat.route,
             arguments = listOf(
                 navArgument(Routes.Chat.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument("messageId") { type = NavType.StringType; nullable = true; defaultValue = null },
                 // НОВОЕ (форумные группы): необязательные параметры темы форума.
                 navArgument(Routes.Chat.ARG_TOPIC_ID) {
                     type = NavType.StringType

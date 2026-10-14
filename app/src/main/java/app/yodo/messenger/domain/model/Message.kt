@@ -50,9 +50,14 @@ data class Message(
     val isViewOnce: Boolean = false,
     val viewOnceOpened: Boolean = false,
     // НОВОЕ (F3 статистика постов канала): число уникальных просмотров поста.
-    val viewCount: Int = 0
+    val viewCount: Int = 0,
+    val checklist: SharedChecklist? = null,
+    val isTextEncrypted: Boolean = false,
+    val textDecryptionFailed: Boolean = false
 ) {
     fun previewText(): String = when {
+        isDeleted -> "Сообщение удалено"
+        checklist != null -> "☑ ${checklist.title} (${checklist.completedCount}/${checklist.items.size})"
         text.isNotBlank() -> text
         poll != null -> "📊 ${poll.question}"
         voiceBase64 != null -> "Голосовое сообщение"

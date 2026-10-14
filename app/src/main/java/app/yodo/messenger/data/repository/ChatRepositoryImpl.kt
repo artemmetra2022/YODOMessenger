@@ -293,12 +293,9 @@ class ChatRepositoryImpl @Inject constructor(
                         val otherUserId = if (type == ChatType.PRIVATE) {
                             participantIds.firstOrNull { it != uid }
                         } else null
-                        // БАГ-ФИКС (превью шифрованных чатов): для E2EE-личных чатов
-                        // lastMessage хранит "🔒 Сообщение", а открытый текст последнего
-                        // сообщения — в lastMessagePlain (пишется отправителем).
+                        // Never read the legacy plaintext field; private list previews are generic.
                         val rawLastMessage = doc.getString("lastMessage") ?: ""
-                        val lastMessagePlain = doc.getString("lastMessagePlain")
-                        val isEncryptedPreview = rawLastMessage == "🔒 Сообщение" && lastMessagePlain != null
+                        val protectedPrivate = type == ChatType.PRIVATE && !doc.id.startsWith("saved_") && !doc.id.startsWith("support_")
                         // НОВОЕ (замок у скрытых групп): читаем accessMode только для
                         // групп/каналов — у личных чатов этого поля нет и оно не нужно.
                         val isHiddenAccessGroup = (type == ChatType.GROUP || type == ChatType.CHANNEL) &&
@@ -312,7 +309,7 @@ class ChatRepositoryImpl @Inject constructor(
                             // У каналов и групп аватарка лежит в самом документе чата
                             // (поле avatarBase64), а не в профиле пользователя.
                             avatarBase64 = if (type == ChatType.CHANNEL || type == ChatType.GROUP) doc.getString("avatarBase64") else null,
-                            lastMessage = if (isEncryptedPreview) lastMessagePlain!! else rawLastMessage,
+                            lastMessage = if (protectedPrivate && rawLastMessage.isNotBlank()) "Личное сообщение" else rawLastMessage,
                             lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
                             lastMessageSenderId = doc.getString("lastMessageSenderId"),
                             lastMessageStatus = doc.getString("lastMessageStatus"),

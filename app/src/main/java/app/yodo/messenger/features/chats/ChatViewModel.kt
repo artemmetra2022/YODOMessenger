@@ -27,6 +27,8 @@ import app.yodo.messenger.notifications.NotificationHelper
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,11 @@ data class ChatUiState(
     val pinnedMessages: List<Message> = emptyList(),
     val isSending: Boolean = false,
     val errorMessage: String? = null,
+    val noticeMessage: String? = null,
+    val pendingChecklistItems: Set<String> = emptySet(),
+    val conversationSecurity: app.yodo.messenger.core.crypto.ConversationSecurity? = null,
+    val securityLoading: Boolean = false,
+    val securityError: String? = null,
     val otherUserPresence: UserPresence? = null,
     val isOtherUserTyping: Boolean = false,
     // НОВОЕ (индикатор набора текста в группах): имена участников группы, которые сейчас печатают
@@ -127,6 +134,8 @@ class ChatViewModel @Inject constructor(
     private val pendingForwardUndoHolder: PendingForwardUndoHolder,
     private val firebaseAuth: FirebaseAuth,
     private val notificationMessageStore: NotificationMessageStore,
+    private val cryptoManager: app.yodo.messenger.core.crypto.CryptoManager,
+    private val reminderScheduler: app.yodo.messenger.features.reminders.ReminderScheduler,
     @ApplicationContext private val appContext: Context,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -182,6 +191,7 @@ class ChatViewModel @Inject constructor(
     // Заголовок темы, переданный при переходе (для отображения в шапке чата поверх
     // названия группы), если чат открыт как раздел форума.
     val topicTitle: String? = savedStateHandle["topicTitle"]
+    val initialMessageId: String? = savedStateHandle["messageId"]
     val currentUserId: String? get() = firebaseAuth.currentUser?.uid
     // НОВОЕ (FAQ-бот поддержки): чтобы ChatScreen не показывал кнопочный FAQ оператору,
     // который зашёл в этот же support_<uid> чат из админ-панели, чтобы ответить пользователю.
@@ -338,24 +348,24 @@ class ChatViewModel @Inject constructor(
     }
 
     /** Планирует отправку текста (и/или фото из reply-контекста) на указанный момент времени. */
-    fun scheduleMessage(text: String, scheduledForMillis: Long) {
-        if (text.isBlank()) return
+    fun scheduleMessage(text: String, scheduledForMillis: Long, onScheduled: (() -> Unit)? = null) {
+        if (_uiState.value.isSending || text.isBlank() || blockGuard() || supportRestrictionGuard() || rateLimitGuard()) return
         clearTypingStatus()
-        viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
         val replying = _uiState.value.replyingTo
-        val replyContext = replying?.let {
-            ReplyContext(
-                messageId = it.id,
-                senderName = if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle,
-                text = it.previewText()
-            )
-        }
-        _uiState.value = _uiState.value.copy(replyingTo = null)
+        val replyContext = replying?.let { ReplyContext(it.id, if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle, it.previewText()) }
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.scheduleMessage(chatId, text, scheduledForMillis, replyTo = replyContext)) {
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
-                else -> {}
-            }
+            try {
+                when (val result = messageRepository.scheduleMessage(chatId, text, scheduledForMillis, replyTo = replyContext)) {
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                    is SendMessageResult.Success -> {
+                        _uiState.value = _uiState.value.copy(replyingTo = null)
+                        if (onScheduled != null) onScheduled() else draftsPreferences.clearDraft(chatId)
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось запланировать сообщение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
@@ -468,6 +478,9 @@ class ChatViewModel @Inject constructor(
                 if (!chatInfoInitialized) {
                     chatInfoInitialized = true
                     info.otherUserId?.let { observePresence(it) }
+                    if (info.type == "PRIVATE" && !chatId.startsWith("support_") && !chatId.startsWith("saved_")) {
+                        info.otherUserId?.let { observeSecurity(it) }
+                    }
                     if (info.type == "GROUP" || info.type == "CHANNEL") {
                         val names = chatRepository.getGroupInfo(chatId)?.members?.associate { it.uid to it.displayName }.orEmpty()
                         _uiState.value = _uiState.value.copy(authorNames = names)
@@ -556,6 +569,57 @@ class ChatViewModel @Inject constructor(
         return uids.mapNotNull { cache[it] }
     }
 
+    private var securityListenerJob: Job? = null
+
+    private fun observeSecurity(peerUid: String) {
+        securityListenerJob?.cancel()
+        securityListenerJob = viewModelScope.launch {
+            cryptoManager.observeKeyChanges(peerUid).collectLatest { refreshSecurity(peerUid) }
+        }
+        viewModelScope.launch { runCatching { messageRepository.clearLegacyPrivatePreview(chatId) } }
+    }
+
+    private suspend fun refreshSecurity(peerUid: String) {
+        _uiState.value = _uiState.value.copy(securityLoading = true, securityError = null)
+        try {
+            val info = cryptoManager.inspectConversation(peerUid)
+            _uiState.value = _uiState.value.copy(conversationSecurity = info, securityError = null)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(securityError = e.toUserMessage("Не удалось проверить ключи. Подключитесь к сети"))
+        } finally { _uiState.value = _uiState.value.copy(securityLoading = false) }
+    }
+
+    fun refreshConversationSecurity() {
+        val peer = _uiState.value.otherUserId ?: return
+        viewModelScope.launch { refreshSecurity(peer) }
+    }
+
+    fun verifyPeerKey(expected: String) {
+        val peer = _uiState.value.otherUserId ?: return
+        _uiState.value = _uiState.value.copy(securityLoading = true, securityError = null)
+        viewModelScope.launch {
+            try {
+                cryptoManager.verifyPeerKey(peer, expected)
+                refreshSecurity(peer)
+                _uiState.value = _uiState.value.copy(noticeMessage = appContext.getString(app.yodo.messenger.R.string.security_peer_verified))
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(securityError = e.toUserMessage("Не удалось подтвердить ключ")) }
+            finally { _uiState.value = _uiState.value.copy(securityLoading = false) }
+        }
+    }
+
+    fun activateOwnKey(expected: String?) {
+        val peer = _uiState.value.otherUserId ?: return
+        _uiState.value = _uiState.value.copy(securityLoading = true, securityError = null)
+        viewModelScope.launch {
+            try { cryptoManager.activateThisDevice(expected); refreshSecurity(peer) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(securityError = e.toUserMessage("Не удалось активировать ключ")) }
+            finally { _uiState.value = _uiState.value.copy(securityLoading = false) }
+        }
+    }
+
     private fun observeMessages() {
         viewModelScope.launch {
             messageRepository.observeMessages(chatId, topicId).collect { messages ->
@@ -630,6 +694,10 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setEditingMessage(message: Message?) {
+        if (message?.textDecryptionFailed == true) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Сообщение не расшифровано — редактирование остановлено")
+            return
+        }
         _uiState.value = _uiState.value.copy(editingMessage = message, replyingTo = null)
     }
 
@@ -639,54 +707,37 @@ class ChatViewModel @Inject constructor(
     // - hasExplicitTtl = true, explicitTtlSeconds = null -> пользователь явно ВЫКЛЮЧИЛ
     //   исчезание для этого конкретного сообщения (даже если в чате TTL по умолчанию включён).
     // - hasExplicitTtl = true, explicitTtlSeconds = N -> пользователь явно выбрал таймер N сек.
-    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false, silent: Boolean = false) {
-        if (text.isBlank()) return
-        // НОВОЕ (реальная блокировка): нельзя писать, если кто-то кого-то заблокировал.
-        if (blockGuard()) return
-        // НОВОЕ (п.19 ТЗ): нельзя писать в поддержку при активном ограничении.
-        if (supportRestrictionGuard()) return
+    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false, silent: Boolean = false, onSent: (() -> Unit)? = null) {
+        if (_uiState.value.isSending || text.isBlank() || blockGuard() || supportRestrictionGuard()) return
         val editing = _uiState.value.editingMessage
-        // НОВОЕ (rate limiting): лимитируем только отправку новых сообщений, а не
-        // редактирование уже существующих — правка не создаёт новый флуд.
         if (editing == null && rateLimitGuard()) return
         clearTypingStatus()
-        viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
-        if (editing != null) {
-            _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null, editingMessage = null)
-            viewModelScope.launch {
-                when (val result = messageRepository.editMessage(chatId, editing.id, text)) {
-                    is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
-                }
-            }
-            return
-        }
         val replying = _uiState.value.replyingTo
         val replyContext = replying?.let {
-            ReplyContext(
-                messageId = it.id,
-                senderName = if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle,
-                text = it.previewText()
-            )
+            ReplyContext(it.id, if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle, it.previewText())
         }
-        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null, replyingTo = null)
+        // Do not clear the input, draft, quote, or edit target before the protected write succeeds.
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            // НОВОЕ (п.18 ТЗ): только 1 активное обращение в поддержку без ответа —
-            // проверяем непосредственно перед отправкой (актуальное состояние из Firestore).
-            if (awaitingSupportReplyGuard()) return@launch
-            when (val result = messageRepository.sendMessage(
-                chatId, text, replyContext,
-                hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds,
-                silent = silent, topicId = topicId
-            )) {
-                is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
-            }
+            try {
+                if (editing == null && awaitingSupportReplyGuard()) return@launch
+                val result = if (editing != null) messageRepository.editMessage(chatId, editing.id, text)
+                    else messageRepository.sendMessage(chatId, text, replyContext,
+                        hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds, silent = silent, topicId = topicId)
+                when (result) {
+                    is SendMessageResult.Success -> {
+                        _uiState.value = _uiState.value.copy(editingMessage = null, replyingTo = null)
+                        if (onSent != null) onSent() else draftsPreferences.clearDraft(chatId)
+                    }
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить сообщение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
-    // НОВОЕ (реальная блокировка): единая проверка перед отправкой. Возвращает true,
-    // если отправка запрещена (и выставляет понятное сообщение об ошибке).
+    // Existing contact block checks still apply before encryption.
     private fun blockGuard(): Boolean {
         val s = _uiState.value
         if (s.otherBlockedMe) {
@@ -856,6 +907,62 @@ class ChatViewModel @Inject constructor(
     }
 
     // НОВОЕ (расширенные опросы): голос/переголосование по варианту ответа.
+    fun scheduleReminder(message: Message, at: Long) {
+        val uid = currentUserId ?: return
+        viewModelScope.launch {
+            try {
+                reminderScheduler.schedule(uid, chatId, message.id, message.topicId, at)
+                _uiState.value = _uiState.value.copy(noticeMessage = appContext.getString(app.yodo.messenger.R.string.reminder_saved))
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = appContext.getString(app.yodo.messenger.R.string.reminder_save_failed))
+            }
+        }
+    }
+
+    fun cancelReminder(message: Message) {
+        val uid = currentUserId ?: return
+        viewModelScope.launch {
+            try {
+                reminderScheduler.cancel(uid, chatId, message.id)
+                _uiState.value = _uiState.value.copy(noticeMessage = appContext.getString(app.yodo.messenger.R.string.reminder_cancelled))
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = appContext.getString(app.yodo.messenger.R.string.reminder_save_failed))
+            }
+        }
+    }
+
+    fun consumeNotice() { _uiState.value = _uiState.value.copy(noticeMessage = null) }
+
+    fun sendChecklist(title: String, items: List<String>) {
+        if (_uiState.value.isSending || blockGuard() || supportRestrictionGuard() || rateLimitGuard()) return
+        if (_uiState.value.chatType != "GROUP") return
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
+        viewModelScope.launch {
+            try {
+                when (val result = messageRepository.sendChecklistMessage(chatId, title, items, topicId)) {
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                    else -> Unit
+                }
+            } finally { _uiState.value = _uiState.value.copy(isSending = false) }
+        }
+    }
+
+    fun setChecklistItemChecked(messageId: String, index: Int, checked: Boolean) {
+        val key = "$messageId:$index"
+        if (key in _uiState.value.pendingChecklistItems || blockGuard()) return
+        _uiState.value = _uiState.value.copy(pendingChecklistItems = _uiState.value.pendingChecklistItems + key)
+        viewModelScope.launch {
+            try {
+                when (val result = messageRepository.setChecklistItemChecked(chatId, messageId, index, checked)) {
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                    else -> Unit
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(pendingChecklistItems = _uiState.value.pendingChecklistItems - key)
+            }
+        }
+    }
+
     fun voteOnPoll(messageId: String, optionIndex: Int) {
         viewModelScope.launch {
             when (val result = messageRepository.voteOnPoll(chatId, messageId, optionIndex)) {

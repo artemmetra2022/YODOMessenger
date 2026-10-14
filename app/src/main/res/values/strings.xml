@@ -624,4 +624,51 @@
     <string name="update_downloading_format">Загрузка… %1$d%%</string>
     <string name="update_downloading_unknown">Загрузка…</string>
     <string name="update_ready_text">Обновление скачано. Разрешите установку из этого источника и нажмите «Установить».</string>
+
+    <!-- Message reminders and group checklists -->
+    <string name="reminder_channel">Напоминания о сообщениях</string>
+    <string name="reminder_notification_title">Напоминание о сообщении</string>
+    <string name="reminder_notification_body">Нажмите, чтобы открыть сообщение</string>
+    <string name="reminder_title">Напомнить о сообщении</string>
+    <string name="reminder_explanation">Напоминание хранится на этом устройстве. Новое время заменит прежнее. Android может задержать уведомление в режиме энергосбережения.</string>
+    <string name="reminder_in_hour">Через час</string>
+    <string name="reminder_at_twenty">В ближайшие 20:00</string>
+    <string name="reminder_custom_time">Выбрать дату и время</string>
+    <string name="reminder_cancel">Отменить напоминание</string>
+    <string name="reminder_permission_required">Разрешите уведомления для YODO в настройках телефона</string>
+    <string name="reminder_future_required">Выберите время в будущем</string>
+    <string name="reminder_saved">Напоминание сохранено на этом устройстве</string>
+    <string name="reminder_save_failed">Не удалось сохранить изменение напоминания</string>
+    <string name="reminder_cancelled">Напоминание отменено</string>
+    <string name="reminder_message_unavailable">Сообщение удалено, истекло или пока недоступно. Попробуйте открыть чат после синхронизации.</string>
+    <string name="checklist_create">Совместный список</string>
+    <string name="checklist_name">Название</string>
+    <string name="checklist_items">Пункты — по одному на строке</string>
+    <string name="checklist_limits">От 1 до 20 пунктов, до 200 символов каждый. Название — до 100 символов.</string>
+    <string name="checklist_group_notice">Любой участник группы может отмечать и снимать отметки. Списки не защищены сквозным шифрованием.</string>
+    <string name="checklist_progress">Выполнено: %1$d из %2$d</string>
+    <string name="checklist_completed_by">Отметил(а): %1$s</string>
+    <string name="checklist_you">вы</string>
+    <string name="checklist_member">участник</string>
+    <string name="feature_send">Отправить</string>
+    <string name="feature_cancel">Отмена</string>
+    <string name="feature_close">Закрыть</string>
+
+    <!-- Private-text security and key verification -->
+    <string name="security_keys_title">Проверка ключей</string>
+    <string name="security_scope_notice">Защищаются текст, подписи и цитаты обычных личных чатов. Медиа, группы, каналы, поддержка и Избранное не защищены этой схемой.</string>
+    <string name="security_own_key">Ключ этого устройства</string>
+    <string name="security_peer_key">Текущий ключ собеседника</string>
+    <string name="security_old_peer_key">Ранее сохранённый ключ</string>
+    <string name="security_key_changed">Ключ собеседника изменился. Отправка текста остановлена до повторной проверки.</string>
+    <string name="security_tofu_status">Ключ сохранён при первом использовании, но личность собеседника ещё не подтверждена.</string>
+    <string name="security_verified_status">Вы подтвердили этот ключ на данном устройстве.</string>
+    <string name="security_compare_instruction">Сравните ключ собеседника с ключом на его устройстве лично или по независимому доверенному каналу. Попросите его также сверить ваш ключ. Само совпадение с сервером не подтверждает личность.</string>
+    <string name="security_compared_ack">Я сверил(а) новый отпечаток с собеседником</string>
+    <string name="security_verify_peer">Подтвердить ключ собеседника</string>
+    <string name="security_peer_verified">Ключ собеседника подтверждён на этом устройстве</string>
+    <string name="security_refresh">Обновить проверку</string>
+    <string name="security_own_key_warning">Ключ аккаунта не совпадает с ключом этого устройства или ещё не опубликован. Автоматической замены нет. Старый ключ не переносится: история другого устройства может остаться недоступной.</string>
+    <string name="security_own_replace_ack">Я понимаю: этот ключ станет активным, другое устройство может перестать расшифровывать новые сообщения; контакты должны сверить ключ заново</string>
+    <string name="security_activate_own">Активировать ключ этого устройства</string>
 </resources>

@@ -612,4 +612,51 @@ Try later — people appear when they open this screen.</string>
     <string name="update_downloading_unknown">Downloading…</string>
     <string name="update_ready_text">Update downloaded. Allow installs from this source, then tap \'Install\'.</string>
 
+
+    <!-- Message reminders and group checklists -->
+    <string name="reminder_channel">Message reminders</string>
+    <string name="reminder_notification_title">Message reminder</string>
+    <string name="reminder_notification_body">Tap to open the message</string>
+    <string name="reminder_title">Remind me</string>
+    <string name="reminder_explanation">This reminder stays on this device. A new time replaces the old one. Android may delay it in battery-saving mode.</string>
+    <string name="reminder_in_hour">In one hour</string>
+    <string name="reminder_at_twenty">At the next 20:00</string>
+    <string name="reminder_custom_time">Choose date and time</string>
+    <string name="reminder_cancel">Cancel reminder</string>
+    <string name="reminder_permission_required">Allow YODO notifications in your phone settings</string>
+    <string name="reminder_future_required">Choose a future time</string>
+    <string name="reminder_saved">Reminder saved on this device</string>
+    <string name="reminder_save_failed">Could not save the reminder change</string>
+    <string name="reminder_cancelled">Reminder cancelled</string>
+    <string name="reminder_message_unavailable">The message was deleted, expired, or is not available yet. Try opening the chat after syncing.</string>
+    <string name="checklist_create">Shared checklist</string>
+    <string name="checklist_name">Title</string>
+    <string name="checklist_items">Items — one per line</string>
+    <string name="checklist_limits">1–20 items, up to 200 characters each. Title: up to 100 characters.</string>
+    <string name="checklist_group_notice">Any group member can check or uncheck items. Checklists are not end-to-end encrypted.</string>
+    <string name="checklist_progress">Completed: %1$d of %2$d</string>
+    <string name="checklist_completed_by">Checked by: %1$s</string>
+    <string name="checklist_you">you</string>
+    <string name="checklist_member">member</string>
+    <string name="feature_send">Send</string>
+    <string name="feature_cancel">Cancel</string>
+    <string name="feature_close">Close</string>
+
+    <!-- Private-text security and key verification -->
+    <string name="security_keys_title">Verify encryption keys</string>
+    <string name="security_scope_notice">Text, captions and reply snippets in regular private chats are protected. Media, groups, channels, support and Saved Messages are not protected by this scheme.</string>
+    <string name="security_own_key">This device’s key</string>
+    <string name="security_peer_key">Current contact key</string>
+    <string name="security_old_peer_key">Previously saved key</string>
+    <string name="security_key_changed">The contact key changed. Text sending is paused until you verify it again.</string>
+    <string name="security_tofu_status">Key saved on first use; contact identity has not been independently verified.</string>
+    <string name="security_verified_status">You verified this key on this device.</string>
+    <string name="security_compare_instruction">Compare the contact key with the key on their device in person or over an independent trusted channel. Ask them to verify your key too. A server match alone does not verify identity.</string>
+    <string name="security_compared_ack">I compared the new fingerprint with my contact</string>
+    <string name="security_verify_peer">Verify contact key</string>
+    <string name="security_peer_verified">Contact key verified on this device</string>
+    <string name="security_refresh">Refresh keys</string>
+    <string name="security_own_key_warning">The account key differs from this device or has not been published. It is never replaced automatically. The old private key is not transferred: other-device history may remain unreadable.</string>
+    <string name="security_own_replace_ack">I understand: this key becomes active, another device may stop decrypting new messages, and contacts must verify the new key</string>
+    <string name="security_activate_own">Activate this device’s key</string>
 </resources>
