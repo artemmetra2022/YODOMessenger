@@ -12,6 +12,7 @@ import app.yodo.messenger.data.repository.ReportRepositoryImpl
 import app.yodo.messenger.data.repository.SchoolRepositoryImpl
 import app.yodo.messenger.data.repository.SessionRepositoryImpl
 import app.yodo.messenger.data.repository.TwoFactorRepositoryImpl
+import app.yodo.messenger.data.repository.UpdateRepositoryImpl
 import app.yodo.messenger.data.repository.UserRepositoryImpl
 import app.yodo.messenger.domain.repository.AppSettingsRepository
 import app.yodo.messenger.domain.repository.AuthRepository
@@ -25,6 +26,7 @@ import app.yodo.messenger.domain.repository.ReportRepository
 import app.yodo.messenger.domain.repository.SchoolRepository
 import app.yodo.messenger.domain.repository.SessionRepository
 import app.yodo.messenger.domain.repository.TwoFactorRepository
+import app.yodo.messenger.domain.repository.UpdateRepository
 import app.yodo.messenger.domain.repository.UserRepository
 import dagger.Binds
 import dagger.Module
@@ -88,4 +90,9 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindSchoolRepository(impl: SchoolRepositoryImpl): SchoolRepository
+
+    // НОВОЕ (OTA-обновления): проверка новой версии в GitHub Releases и загрузка APK.
+    @Binds
+    @Singleton
+    abstract fun bindUpdateRepository(impl: UpdateRepositoryImpl): UpdateRepository
 }

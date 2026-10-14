@@ -23,6 +23,15 @@ android {
     namespace = "app.yodo.messenger"
     compileSdk = 34
 
+    // OTA-обновления: release-APK должен подписываться ПОСТОЯННЫМ ключом, иначе
+    // каждая сборка получает новую подпись и установка обновления «поверх»
+    // отклоняется системой (INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+    // Ключ передаётся через переменные окружения (в CI — из GitHub Secrets),
+    // поэтому приватный ключ не хранится в репозитории. Локальная сборка без
+    // этих переменных просто не имеет release-подписи.
+    val keystorePath = System.getenv("YODO_KEYSTORE_PATH")
+    val hasReleaseKeystore = !keystorePath.isNullOrBlank()
+
     defaultConfig {
         applicationId = "app.yodo.messenger"
         minSdk = 26
@@ -35,12 +44,29 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val openWeatherApiKey = (project.findProperty("OPENWEATHER_API_KEY") as String?).orEmpty()
         buildConfigField("String", "OPENWEATHER_API_KEY", "\"$openWeatherApiKey\"")
+        // НОВОЕ (OTA-обновления): репозиторий GitHub, из последнего релиза которого
+        // приложение проверяет новую версию и откуда скачивает APK (см. UpdateRepositoryImpl).
+        buildConfigField("String", "GITHUB_REPO", "\"artemmetra2022/YODOMessenger\"")
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = System.getenv("YODO_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("YODO_KEY_ALIAS")
+                keyPassword = System.getenv("YODO_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isMinifyEnabled = false

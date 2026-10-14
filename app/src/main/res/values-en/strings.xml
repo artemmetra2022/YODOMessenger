@@ -589,4 +589,27 @@ Try later — people appear when they open this screen.</string>
     <string name="notification_reply_sent">Reply sent</string>
     <string name="notification_reply_failed">Couldn\'t send reply</string>
 
+    <!-- NEW (OTA updates): "About" screen and available-update dialog.
+         Updates are delivered via GitHub Releases, not Google Play. -->
+    <string name="about_title">About</string>
+    <string name="about_current_version_format">Installed version: %1$s</string>
+    <string name="about_check_button">Check for updates</string>
+    <string name="about_check_hint">Tap to check for a new version</string>
+    <string name="about_checking">Checking for updates…</string>
+    <string name="about_up_to_date">You have the latest version</string>
+    <string name="about_error_format">Couldn\'t check for updates: %1$s</string>
+    <string name="about_error_generic">Couldn\'t check for updates</string>
+    <string name="about_release_notes">What\'s new</string>
+    <string name="about_open_github">Open project on GitHub</string>
+    <string name="update_available_title">Update available</string>
+    <string name="update_version_format">Version %1$s</string>
+    <string name="update_current_version_format">Currently installed: %1$s</string>
+    <string name="update_btn_download">Download and install</string>
+    <string name="update_btn_install">Install</string>
+    <string name="update_btn_open_github">Open on GitHub</string>
+    <string name="update_btn_later">Later</string>
+    <string name="update_downloading_format">Downloading… %1$d%%</string>
+    <string name="update_downloading_unknown">Downloading…</string>
+    <string name="update_ready_text">Update downloaded. Allow installs from this source, then tap \'Install\'.</string>
+
 </resources>

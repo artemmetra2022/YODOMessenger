@@ -1563,16 +1563,16 @@ private fun ChatListItem(
 
             // Нижняя строка
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (chat.draftText.isNotBlank()) {
+                // При включённом «Скрывать текст сообщений» черновик не показываем вовсе:
+                // один префикс «Черновик:» всё равно выдавал, что переписка есть.
+                if (!hidePreview && chat.draftText.isNotBlank()) {
                     Text(
                         buildAnnotatedString {
                             withStyle(SpanStyle(color = Color.Red, fontWeight = FontWeight.Medium)) {
                                 append(stringResource(R.string.chat_list_draft_prefix))
                             }
-                            if (!hidePreview) {
-                                withStyle(SpanStyle(color = previewColor)) {
-                                    append(chat.draftText)
-                                }
+                            withStyle(SpanStyle(color = previewColor)) {
+                                append(chat.draftText)
                             }
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -1597,8 +1597,10 @@ private fun ChatListItem(
                             )
                         }
                         Text(
+                            // При включённом «Скрывать текст сообщений» превью не выводим вовсе:
+                            // заглушка «Сообщение скрыто» сама сообщала, что переписка есть.
                             if (hidePreview) {
-                                if (chat.lastMessage.isBlank()) "" else "Сообщение скрыто"
+                                ""
                             } else {
                                 chat.lastMessage.ifBlank { if (isChannel) stringResource(R.string.chat_list_channel_label) else "" }
                             },

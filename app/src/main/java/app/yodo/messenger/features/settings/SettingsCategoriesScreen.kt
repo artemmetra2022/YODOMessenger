@@ -19,9 +19,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.yodo.messenger.R
+import app.yodo.messenger.features.main.TAB_SETTINGS
+import app.yodo.messenger.features.main.YodoBottomBar
 import app.yodo.messenger.ui.theme.LocalColorTheme
 
 /**
@@ -65,7 +67,14 @@ fun SettingsCategoriesScreen(
     onBackClick: () -> Unit,
     onProfileClick: () -> Unit,
     onOpenCategory: (categoryRoute: String) -> Unit,
-    onOpenSearchResult: (categoryRoute: String, anchorId: String) -> Unit
+    onOpenSearchResult: (categoryRoute: String, anchorId: String) -> Unit,
+    // НОВОЕ (панель на основных экранах): нижняя панель на стартовом экране настроек.
+    // Показывается только здесь — в подэкранах категорий её нет.
+    showAdminTab: Boolean = false,
+    onChatsClick: () -> Unit = {},
+    onNearbyClick: () -> Unit = {},
+    onOfflineClick: () -> Unit = {},
+    onAdminClick: () -> Unit = {}
 ) {
     val colorTheme = LocalColorTheme.current
     var query by remember { mutableStateOf("") }
@@ -77,26 +86,14 @@ fun SettingsCategoriesScreen(
         SettingsCategory(
             route = SettingsSearchIndex.ROUTE_APPEARANCE,
             icon = Icons.Filled.ColorLens,
-            title = "Внешний вид",
-            description = "Тёмная тема, цветовая схема, размер шрифта"
-        ),
-        SettingsCategory(
-            route = SettingsSearchIndex.ROUTE_LANGUAGE,
-            icon = Icons.Filled.Language,
-            title = "Язык",
-            description = "Язык интерфейса приложения"
+            title = "Оформление и язык",
+            description = "Тёмная тема, цветовая схема, размер шрифта, анимации и язык интерфейса"
         ),
         SettingsCategory(
             route = SettingsSearchIndex.ROUTE_CHATS,
             icon = Icons.Filled.Chat,
             title = "Чаты",
-            description = "Отправка сообщений, клавиатура, фон чата, папки"
-        ),
-        SettingsCategory(
-            route = SettingsSearchIndex.ROUTE_PRIVACY,
-            icon = Icons.Filled.PrivacyTip,
-            title = "Конфиденциальность",
-            description = "Статус «в сети», PIN-код, блокировки, видимость профиля"
+            description = "Отправка сообщений, клавиатура, фон чата, папки, погода и вид списка чатов"
         ),
         SettingsCategory(
             route = SettingsSearchIndex.ROUTE_NOTIFICATIONS,
@@ -105,10 +102,22 @@ fun SettingsCategoriesScreen(
             description = "Звук, вибрация, тихие часы, пауза уведомлений"
         ),
         SettingsCategory(
+            route = SettingsSearchIndex.ROUTE_PRIVACY,
+            icon = Icons.Filled.PrivacyTip,
+            title = "Приватность и безопасность",
+            description = "Статус «в сети», PIN-код, блокировки, двухфакторная аутентификация, видимость профиля"
+        ),
+        SettingsCategory(
             route = SettingsSearchIndex.ROUTE_ACCOUNT,
             icon = Icons.Filled.Person,
             title = "Аккаунт",
-            description = "Безопасность, смена аккаунта, выход, удаление аккаунта"
+            description = "Смена аккаунта, выход и удаление аккаунта"
+        ),
+        SettingsCategory(
+            route = SettingsSearchIndex.ROUTE_APP,
+            icon = Icons.Filled.Settings,
+            title = "Приложение",
+            description = "Школа, «Фишки и инструменты», обучение, поиск настроек и обновления"
         )
     )
 
@@ -127,6 +136,18 @@ fun SettingsCategoriesScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
+        },
+        bottomBar = {
+            YodoBottomBar(
+                selectedTab = TAB_SETTINGS,
+                showAdminTab = showAdminTab,
+                onChatsClick = onChatsClick,
+                onNearbyClick = onNearbyClick,
+                onOfflineClick = onOfflineClick,
+                // Уже в настройках — повторный тап ничего не делает.
+                onSettingsClick = {},
+                onAdminClick = onAdminClick
             )
         },
         containerColor = Color.Transparent

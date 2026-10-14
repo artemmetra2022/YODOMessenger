@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.DashboardCustomize
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.yodo.messenger.R
+import app.yodo.messenger.data.local.AppLanguage
 import app.yodo.messenger.data.local.FontSize
 import app.yodo.messenger.data.local.InterfaceStyle
 import app.yodo.messenger.data.local.ScreenTransitionStyle
@@ -82,6 +84,7 @@ fun AppearanceSettingsScreen(
     val screenTransitionDurationMs by viewModel.screenTransitionDurationMs.collectAsState()
     val screenTransitionStyle by viewModel.screenTransitionStyle.collectAsState()
     val screenTransitionAmplitude by viewModel.screenTransitionAmplitude.collectAsState()
+    val currentLanguage by viewModel.currentLanguage.collectAsState()
     val colorTheme = LocalColorTheme.current
 
     val listState = rememberLazyListState()
@@ -108,7 +111,7 @@ fun AppearanceSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Внешний вид", style = MaterialTheme.typography.titleLarge) },
+                title = { Text("Оформление и язык", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
@@ -541,6 +544,54 @@ fun AppearanceSettingsScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (fontSize == size) colorTheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // НОВОЕ (разумные категории): язык интерфейса переехал сюда из отдельной
+            // категории «Язык», которая состояла из единственного пункта — открывать
+            // ради него целый экран было неудобно.
+            item {
+                SettingsSectionHeader(
+                    icon = Icons.Filled.Language,
+                    title = stringResource(R.string.settings_section_language),
+                    modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_LANGUAGE, anchorPositions, highlightedAnchor, colorTheme),
+                    colorTheme = colorTheme
+                )
+            }
+            item {
+                SettingsCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Language,
+                                contentDescription = null,
+                                tint = colorTheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(stringResource(R.string.settings_language_title), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            AppLanguage.entries.forEach { language ->
+                                val isSelected = currentLanguage == language
+                                Text(
+                                    text = stringResource(language.labelResId),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isSelected) colorTheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                        .clickable { viewModel.setLanguage(language) }
+                                        .padding(horizontal = 16.dp, vertical = 10.dp)
                                 )
                             }
                         }

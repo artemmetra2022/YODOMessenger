@@ -12,12 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Flag
-import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -48,24 +43,24 @@ import app.yodo.messenger.ui.theme.LocalColorTheme
 import app.yodo.messenger.ui.theme.YodoError
 
 /**
- * НОВОЕ (разделение настроек по категориям): «Аккаунт» — раздел «Жалобы»
- * (только для 2 главных админов), «Фишки и инструменты», Центр безопасности,
- * повторный онбординг, показ настроек в общем поиске, скрытие статус-бара,
- * смена аккаунта, выход и удаление аккаунта. Логика и внешний вид перенесены
- * из бывшего монолитного SettingsScreen.kt без изменений поведения —
- * включая обработку ошибок (errorMessage/errorMessageResId) и события
- * accountDeleted, которые на едином экране обрабатывались глобально, а
- * фактически относятся к действиям именно этого раздела (выход, удаление).
+ * ИЗМЕНЕНО (разумные категории): «Аккаунт» содержит только то, что относится к
+ * личному аккаунту — смену аккаунта, выход и удаление (плюс «Жалобы» для главных
+ * админов).
+ *
+ * Раньше сюда были свалены вперемешку разделы приложения («Школа», «Фишки и
+ * инструменты»), обучение, поведение поиска настроек и «О приложении» — они
+ * переехали в новую категорию «Приложение» (AppSettingsScreen). «Центр
+ * безопасности» ушёл в «Приватность и безопасность» (PrivacySettingsScreen), а
+ * «Скрывать статус-бар в списке чатов» — в «Чаты», где он и должен быть (до этого
+ * он дублировался сразу на двух экранах).
+ *
+ * Обработка ошибок (errorMessage/errorMessageResId) и событие accountDeleted
+ * сохранены без изменений.
  */
 @Composable
 fun AccountSettingsScreen(
     onBackClick: () -> Unit,
-    onOpenTools: () -> Unit,
-    onOpenSchool: () -> Unit = {},
-    onOpenSchoolSettings: () -> Unit = {},
-    onOpenSecurity: () -> Unit,
     onOpenReports: () -> Unit,
-    onOpenOnboarding: () -> Unit,
     onSwitchAccount: () -> Unit,
     onLoggedOut: () -> Unit = {},
     initialAnchorId: String? = null,
@@ -74,15 +69,6 @@ fun AccountSettingsScreen(
     val accountDeleted by viewModel.accountDeleted.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val errorMessageResId by viewModel.errorMessageResId.collectAsState()
-    val showSettingsInGlobalSearch by viewModel.showSettingsInGlobalSearch.collectAsState()
-    val hideStatusBarOnChatList by viewModel.hideStatusBarOnChatList.collectAsState()
-    // НОВОЕ (раздел «Школа»): показывать ли пункт «Школа» (переключатель
-    // на экране «Настройки раздела „Школа“»). Плюс глобальное скрытие админом:
-    // обычные пользователи кнопку не видят, админы — всегда (чтобы вернуть).
-    val schoolSectionEnabled by viewModel.schoolSectionEnabled.collectAsState()
-    val schoolSectionGloballyHidden by viewModel.schoolSectionGloballyHidden.collectAsState()
-    val showSchoolSection = schoolSectionEnabled &&
-        (!schoolSectionGloballyHidden || viewModel.isAppAdmin)
 
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
 
@@ -169,90 +155,6 @@ fun AccountSettingsScreen(
                             onClick = onOpenReports
                         )
                     }
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_TOOLS, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsNavigateRow(
-                        icon = Icons.Filled.Star,
-                        title = "Фишки и инструменты",
-                        subtitle = "20 мини-функций: заметки, таймер, пароли, конвертеры и другое",
-                        colorTheme = colorTheme,
-                        onClick = onOpenTools
-                    )
-                }
-            }
-            // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 и
-            // настройка его отображения. Пункт скрывается переключателем или
-            // глобально админом (showSchoolSection уже учитывает оба случая).
-            if (showSchoolSection) {
-                item {
-                    SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SCHOOL, anchorPositions, highlightedAnchor, colorTheme)) {
-                        SettingsNavigateRow(
-                            icon = Icons.Filled.School,
-                            title = "Школа",
-                            subtitle = "Справочник гимназии №196: учителя, новости, расписание, опросы, викторина и игры",
-                            colorTheme = colorTheme,
-                            onClick = onOpenSchool
-                        )
-                    }
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SCHOOL_SETTINGS, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsNavigateRow(
-                        icon = Icons.Filled.School,
-                        title = "Настройки раздела «Школа»",
-                        subtitle = "Показывать раздел целиком и выбирать отдельные подразделы",
-                        colorTheme = colorTheme,
-                        onClick = onOpenSchoolSettings
-                    )
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SECURITY_CENTER, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsNavigateRow(
-                        icon = Icons.Filled.Security,
-                        title = "Центр безопасности",
-                        subtitle = "Двухфакторная аутентификация, сброс через вопросы, защита от скриншотов, статусы",
-                        colorTheme = colorTheme,
-                        onClick = onOpenSecurity
-                    )
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_ONBOARDING, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsNavigateRow(
-                        icon = Icons.Filled.School,
-                        title = "Пройти обучение",
-                        subtitle = "Короткий тур по возможностям приложения",
-                        colorTheme = colorTheme,
-                        onClick = onOpenOnboarding
-                    )
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_SEARCH_IN_GLOBAL, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsToggleRow(
-                        icon = Icons.Filled.Search,
-                        title = "Показывать настройки в общем поиске",
-                        subtitle = "Результаты поиска настроек будут видны на главном экране поиска",
-                        checked = showSettingsInGlobalSearch,
-                        onCheckedChange = { viewModel.setShowSettingsInGlobalSearch(it) },
-                        colorTheme = colorTheme
-                    )
-                }
-            }
-            item {
-                SettingsCard(modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_HIDE_STATUS_BAR_CHAT_LIST, anchorPositions, highlightedAnchor, colorTheme)) {
-                    SettingsToggleRow(
-                        icon = Icons.Filled.Fullscreen,
-                        title = "Скрывать статус-бар в списке чатов",
-                        subtitle = "Системная панель времени и батареи будет полностью скрыта на главном экране",
-                        checked = hideStatusBarOnChatList,
-                        onCheckedChange = { viewModel.setHideStatusBarOnChatList(it) },
-                        colorTheme = colorTheme
-                    )
                 }
             }
             item {

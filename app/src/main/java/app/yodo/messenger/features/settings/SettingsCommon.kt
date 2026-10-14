@@ -50,11 +50,11 @@ import app.yodo.messenger.ui.theme.ColorTheme
 /**
  * НОВОЕ (разделение настроек по категориям): общие переиспользуемые компоненты
  * и утилиты, вынесенные из бывшего монолитного SettingsScreen.kt — используются
- * и экраном списка категорий (SettingsCategoriesScreen), и каждым из 6 экранов
- * конкретной категории (AppearanceSettingsScreen, LanguageSettingsScreen,
- * ChatsSettingsScreen, PrivacySettingsScreen, NotificationsSettingsScreen,
- * AccountSettingsScreen). Логика и внешний вид компонентов не менялись —
- * это чистый перенос без изменений поведения.
+ * и экраном списка категорий (SettingsCategoriesScreen), и экранами категорий
+ * (AppearanceSettingsScreen — «Оформление и язык», ChatsSettingsScreen,
+ * PrivacySettingsScreen — «Приватность и безопасность», NotificationsSettingsScreen,
+ * AccountSettingsScreen, AppSettingsScreen — «Приложение»). Логика и внешний вид
+ * компонентов не менялись — это чистый перенос без изменений поведения.
  */
 
 const val SETTINGS_HIGHLIGHT_DURATION_MS = 1400L

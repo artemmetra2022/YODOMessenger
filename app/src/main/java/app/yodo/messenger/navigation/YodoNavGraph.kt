@@ -37,6 +37,7 @@ import app.yodo.messenger.features.auth.VerifyEmailScreen
 import app.yodo.messenger.features.auth.WelcomeScreen
 import app.yodo.messenger.features.auth.GlobalBlockGateScreen
 import app.yodo.messenger.features.auth.GlobalBlockViewModel
+import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatScreen
 import app.yodo.messenger.features.chats.ChatStatsScreen
 // НОВОЕ (переработка каналов): три новых экрана
@@ -72,6 +73,12 @@ fun YodoNavGraph(
     // НОВОЕ (AD): вьюмодель глобальной блокировки на уровне всего навиграфа.
     val globalBlockViewModel: GlobalBlockViewModel = hiltViewModel()
     val globalBlock by globalBlockViewModel.globalBlock.collectAsState()
+    // НОВОЕ (панель на основных экранах): признак администратора нужен, чтобы решить,
+    // показывать ли вкладку «Админка» в нижней панели списка чатов, настроек и самой
+    // Админки. Читаем реактивно — ViewModel на уровне графа живёт всю сессию, и после
+    // «выход → вход другим аккаунтом» вкладка не должна оставаться в прежнем состоянии.
+    val adminHomeViewModel: AdminHomeViewModel = hiltViewModel()
+    val isAppAdmin by adminHomeViewModel.isAppAdmin.collectAsState(initial = false)
     val screenTransitionMs = LocalScreenTransitionDuration.current.coerceIn(0, 400)
     val screenExitMs = (screenTransitionMs * 0.78f).toInt()
     val screenTransitionStyle = LocalScreenTransitionStyle.current
@@ -327,7 +334,9 @@ fun YodoNavGraph(
                 // НОВОЕ (единая вкладка «Админка»): переход к сводному экрану.
                 onOpenAdminHome = {
                     navController.navigate(Routes.AdminHome.route)
-                }
+                },
+                // Видна ли вкладка «Админка» в нижней панели (только для админов).
+                showAdminTab = isAppAdmin
             )
         }
 
@@ -383,7 +392,13 @@ fun YodoNavGraph(
                     navController.navigate(Routes.SchoolAdmin.route) {
                         launchSingleTop = true
                     }
-                }
+                },
+                // НОВОЕ (панель на основных экранах): нижняя панель доступна и на
+                // самой Админке.
+                onChatsClick = { navigateToMainTab(navController, Routes.ChatList.route) },
+                onNearbyClick = { navigateToMainTab(navController, Routes.NearbyPeople.route) },
+                onOfflineClick = { navigateToMainTab(navController, Routes.OfflineChat.route) },
+                onSettingsClick = { navigateToMainTab(navController, Routes.Settings.route) }
             )
         }
         // НОВОЕ (единая вкладка «Админка»): поиск пользователя и его глобальная
@@ -468,6 +483,13 @@ fun YodoNavGraph(
         // НОВОЕ (батч 7): экран «Фишки и инструменты».
         composable(Routes.Tools.route) {
             app.yodo.messenger.features.tools.ToolsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+        // НОВОЕ (OTA-обновления): экран «О приложении» — версия и проверка
+        // обновлений из GitHub Releases. Вход — Настройки → Аккаунт.
+        composable(Routes.AboutUpdates.route) {
+            app.yodo.messenger.features.update.UpdateScreen(
                 onBackClick = { navController.popBackStack() }
             )
         }
@@ -929,7 +951,15 @@ fun YodoNavGraph(
                 onOpenCategory = { categoryRoute -> navController.navigate(categoryRoute) },
                 onOpenSearchResult = { categoryRoute, anchorId ->
                     navController.navigate("$categoryRoute?anchor=$anchorId")
-                }
+                },
+                // НОВОЕ (панель на основных экранах): нижняя панель доступна и на
+                // стартовом экране настроек, чтобы можно было сразу уйти в чаты,
+                // «Рядом», «Офлайн» или «Админку», не нажимая «Назад».
+                showAdminTab = isAppAdmin,
+                onChatsClick = { navigateToMainTab(navController, Routes.ChatList.route) },
+                onNearbyClick = { navigateToMainTab(navController, Routes.NearbyPeople.route) },
+                onOfflineClick = { navigateToMainTab(navController, Routes.OfflineChat.route) },
+                onAdminClick = { navigateToMainTab(navController, Routes.AdminHome.route) }
             )
         }
         composable(
@@ -943,19 +973,6 @@ fun YodoNavGraph(
             app.yodo.messenger.features.settings.AppearanceSettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsAppearance.ARG_ANCHOR)
-            )
-        }
-        composable(
-            route = Routes.SettingsLanguage.route,
-            arguments = listOf(navArgument(Routes.SettingsLanguage.ARG_ANCHOR) {
-                type = NavType.StringType
-                nullable = true
-                defaultValue = null
-            })
-        ) { backStackEntry ->
-            app.yodo.messenger.features.settings.LanguageSettingsScreen(
-                onBackClick = { navController.popBackStack() },
-                initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsLanguage.ARG_ANCHOR)
             )
         }
         composable(
@@ -983,6 +1000,10 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onOpenBlockedUsers = { navController.navigate(Routes.BlockedUsers.route) },
                 onOpenPrivacyWho = { navController.navigate(Routes.PrivacyWho.route) },
+                // НОВОЕ (разумные категории): «Центр безопасности» переехал сюда из
+                // «Аккаунта» — двухфакторная аутентификация и защита от скриншотов
+                // относятся к приватности и безопасности, а не к управлению аккаунтом.
+                onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsPrivacy.ARG_ANCHOR)
             )
         }
@@ -1009,16 +1030,8 @@ fun YodoNavGraph(
         ) { backStackEntry ->
             app.yodo.messenger.features.settings.AccountSettingsScreen(
                 onBackClick = { navController.popBackStack() },
-                // НОВОЕ (батч 7): открыть «Фишки и инструменты».
-                onOpenTools = { navController.navigate(Routes.Tools.route) },
-                // НОВОЕ (раздел «Школа»): открыть школьный раздел и его настройки.
-                onOpenSchool = { navController.navigate(Routes.School.route) },
-                onOpenSchoolSettings = { navController.navigate(Routes.SchoolSettings.route) },
-                onOpenSecurity = { navController.navigate(Routes.SecurityCenter.route) },
                 // НОВОЕ (AC): открыть раздел «Жалобы» (только админы).
                 onOpenReports = { navController.navigate(Routes.ReportInbox.route) },
-                // НОВОЕ (обучение): повторный показ онбординга из настроек.
-                onOpenOnboarding = { navController.navigate(Routes.OnboardingReplay.route) },
                 // НОВОЕ (Y): открыть экран смены аккаунта.
                 onSwitchAccount = { navController.navigate(Routes.SwitchAccount.route) },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsAccount.ARG_ANCHOR),
@@ -1027,6 +1040,30 @@ fun YodoNavGraph(
                         popUpTo(navController.graph.id) { inclusive = true }
                     }
                 }
+            )
+        }
+        // НОВОЕ (разумные категории): «Приложение» — разделы, обучение, поведение
+        // поиска настроек и информация о версии (раньше всё это лежало в «Аккаунте»).
+        composable(
+            route = Routes.SettingsApp.route,
+            arguments = listOf(navArgument(Routes.SettingsApp.ARG_ANCHOR) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            })
+        ) { backStackEntry ->
+            app.yodo.messenger.features.settings.AppSettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                // НОВОЕ (батч 7): открыть «Фишки и инструменты».
+                onOpenTools = { navController.navigate(Routes.Tools.route) },
+                // НОВОЕ (раздел «Школа»): открыть школьный раздел и его настройки.
+                onOpenSchool = { navController.navigate(Routes.School.route) },
+                onOpenSchoolSettings = { navController.navigate(Routes.SchoolSettings.route) },
+                // НОВОЕ (обучение): повторный показ онбординга из настроек.
+                onOpenOnboarding = { navController.navigate(Routes.OnboardingReplay.route) },
+                // НОВОЕ (OTA-обновления): открыть экран «О приложении» с проверкой обновлений.
+                onOpenAbout = { navController.navigate(Routes.AboutUpdates.route) },
+                initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsApp.ARG_ANCHOR)
             )
         }
         // НОВОЕ (обучение): повторный показ онбординга по запросу из настроек. В отличие
@@ -1102,5 +1139,20 @@ fun YodoNavGraph(
         if (globalBlock != null) {
             GlobalBlockGateScreen(viewModel = globalBlockViewModel)
         }
+    }
+}
+
+/**
+ * НОВОЕ (панель на основных экранах): переход между разделами по тапу в нижней панели
+ * (список чатов, стартовый экран настроек, Админка).
+ *
+ * Стек между разделами не копим: возвращаемся к списку чатов как к корню, иначе
+ * переключение «Чаты → Настройки → Чаты → Настройки…» бесконечно росло бы в истории
+ * и кнопка «Назад» ходила бы по кругу.
+ */
+private fun navigateToMainTab(navController: NavHostController, route: String) {
+    navController.navigate(route) {
+        popUpTo(Routes.ChatList.route)
+        launchSingleTop = true
     }
 }

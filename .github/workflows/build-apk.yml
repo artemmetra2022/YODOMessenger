@@ -1,9 +1,13 @@
-name: Build Debug APK
+name: Build Release APK
 
 on:
   workflow_dispatch:        # запуск вручную кнопкой "Run workflow" на вкладке Actions
   push:
     branches: [ main ]
+
+# Прикрепление APK к релизу требует права записи в содержимое репозитория.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -56,6 +60,21 @@ jobs:
           echo "--- Проверка валидности JSON ---"
           python3 -c "import json; json.load(open('app/google-services.json'))" && echo "OK: google-services.json валиден"
 
+      # Постоянный ключ подписи обязателен для OTA: без него каждая сборка получает
+      # новую подпись, и установка обновления поверх установленного приложения
+      # отклоняется системой (INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+      # Ключ лежит в секрете (base64), в репозиторий не попадает.
+      - name: Restore release keystore from secret
+        env:
+          YODO_KEYSTORE_BASE64: ${{ secrets.YODO_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$YODO_KEYSTORE_BASE64" ]; then
+            echo "::error::Secret YODO_KEYSTORE_BASE64 не задан — release APK нельзя подписать постоянным ключом."
+            exit 1
+          fi
+          echo "$YODO_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/yodo-release.jks"
+          echo "Keystore восстановлен: $RUNNER_TEMP/yodo-release.jks"
+
       # Версия берётся из последнего GitHub-релиза (тег вида v1.2.3 → versionName=1.2.3,
       # versionCode=10203). Если релиза нет или тег не в формате vX.Y.Z — fallback на дефолт.
       - name: Get latest release version
@@ -84,23 +103,55 @@ jobs:
               version_code = 1
           print(f"Latest release tag: {tag!r} -> versionName={version_name}, versionCode={version_code}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"tag={tag}\n")
               f.write(f"version_name={version_name}\n")
               f.write(f"version_code={version_code}\n")
           EOF
 
-      - name: Build debug APK
-        run: gradle assembleDebug -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
+      - name: Build release APK
+        env:
+          YODO_KEYSTORE_PATH: ${{ runner.temp }}/yodo-release.jks
+          YODO_KEYSTORE_PASSWORD: ${{ secrets.YODO_KEYSTORE_PASSWORD }}
+          YODO_KEY_ALIAS: ${{ secrets.YODO_KEY_ALIAS }}
+          YODO_KEY_PASSWORD: ${{ secrets.YODO_KEY_PASSWORD }}
+        run: gradle assembleRelease -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
 
-      # Отпечатки подписи нужны для Google Sign-In и Phone Auth — получить их без
-      # компьютера (без `./gradlew signingReport`) больше неоткуда. Берём напрямую
-      # из собранного APK через apksigner (не зависит от alias/расположения keystore).
+      - name: Prepare APK for release
+        id: apk
+        run: |
+          SRC=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$SRC" ]; then
+            echo "::error::Release APK не найден: $SRC"
+            exit 1
+          fi
+          NAME="YODO-Messenger-${{ steps.release.outputs.version_name }}.apk"
+          cp "$SRC" "./$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          ls -la "./$NAME"
+
+      # Отпечатки подписи нужны для Google Sign-In и Phone Auth: при смене ключа
+      # подписи новый SHA-1 обязательно нужно добавить в Firebase Console.
+      # Берём напрямую из собранного APK через apksigner.
       - name: Print APK signing SHA-1 / SHA-256
         run: |
           APKSIGNER=$(find "$ANDROID_HOME" -name apksigner -type f | head -1)
-          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256"
-     
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -E "SHA-1|SHA-256"
+
+      # Прикрепляем подписанный APK к последнему релизу — именно этот файл
+      # приложение скачивает и устанавливает при OTA-обновлении (см. UpdateRepositoryImpl:
+      # берётся первый asset релиза с расширением .apk).
+      - name: Attach APK to GitHub release
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.release.outputs.tag }}" \
+            "${{ steps.apk.outputs.name }}" \
+            --clobber \
+            --repo "$GITHUB_REPOSITORY"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yodo-messenger-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: yodo-messenger-release-apk
+          path: ${{ steps.apk.outputs.name }}

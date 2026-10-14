@@ -46,11 +46,6 @@ sealed class Routes(val route: String) {
             if (anchor.isNullOrBlank()) "settings_appearance" else "settings_appearance?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
-    data object SettingsLanguage : Routes("settings_language?anchor={anchor}") {
-        fun createRoute(anchor: String? = null) =
-            if (anchor.isNullOrBlank()) "settings_language" else "settings_language?anchor=$anchor"
-        const val ARG_ANCHOR = "anchor"
-    }
     data object SettingsChats : Routes("settings_chats?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
             if (anchor.isNullOrBlank()) "settings_chats" else "settings_chats?anchor=$anchor"
@@ -71,8 +66,21 @@ sealed class Routes(val route: String) {
             if (anchor.isNullOrBlank()) "settings_account" else "settings_account?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
+    // НОВОЕ (разумные категории): «Приложение» — разделы (Школа, «Фишки и
+    // инструменты»), обучение, поведение поиска настроек и информация о версии.
+    // Вынесено из категории «Аккаунт», где эти пункты были свалены в кучу с
+    // выходом/удалением аккаунта.
+    data object SettingsApp : Routes("settings_app?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_app" else "settings_app?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
     // НОВОЕ (батч 7): экран «Фишки и инструменты» (20 новых функций).
     data object Tools : Routes("tools")
+
+    // НОВОЕ (OTA-обновления): экран «О приложении» — версия и проверка обновлений
+    // из GitHub Releases. Вход — Настройки → Аккаунт.
+    data object AboutUpdates : Routes("about_updates")
 
     // НОВОЕ (раздел «Школа»): школьный справочник гимназии №196 (перенос
     // функционала Telegram-бота) + экран настройки его отображения.
