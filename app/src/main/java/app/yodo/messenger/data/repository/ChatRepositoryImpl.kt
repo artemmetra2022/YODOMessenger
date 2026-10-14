@@ -322,7 +322,6 @@ class ChatRepositoryImpl @Inject constructor(
                             otherUserId = otherUserId,
                             subscriberCount = if (type == ChatType.CHANNEL) participantIds.size else 0,
                             isArchived = archivedMap?.get(uid) as? Boolean ?: false,
-                            isEncryptedPreview = isEncryptedPreview,
                             isHiddenAccessGroup = isHiddenAccessGroup
                         )
                     } catch (e: Exception) { null }
