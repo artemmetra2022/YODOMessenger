@@ -1,0 +1,35 @@
+name: Send Push Notifications
+
+on:
+  workflow_dispatch:      # можно запустить вручную для теста
+  schedule:
+    - cron: '*/5 * * * *' # каждые 5 минут — минимальный интервал, который поддерживает GitHub Actions
+
+jobs:
+  send-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4     # страхуемся, чтобы не пересечься со следующим запуском при зависании
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: push-worker
+
+      - name: Write service account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/service-account.json
+
+      - name: Run push worker
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/service-account.json
+        run: node index.js
+        working-directory: push-worker

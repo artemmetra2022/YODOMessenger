@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Тема для ночного режима системы -->
+    <style name="Theme.YODOMessenger" parent="android:Theme.Material.NoActionBar">
+        
+        <!-- Прозрачные системные панели -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        
+        <!-- Светлые иконки в статус-баре и навигации (подходит для темного фона) -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        
+        <!-- Отключаем автоматическую подложку навигационной панели -->
+        <item name="android:enforceNavigationBarContrast">false</item>
+        
+        <!-- Цвет фона при запуске -->
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        
+        <!-- Разрешаем рисование за системными барами -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        
+    </style>
+</resources>
