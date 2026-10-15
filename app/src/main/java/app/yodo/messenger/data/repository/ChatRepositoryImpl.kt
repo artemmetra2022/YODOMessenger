@@ -322,7 +322,8 @@ class ChatRepositoryImpl @Inject constructor(
                             otherUserId = otherUserId,
                             subscriberCount = if (type == ChatType.CHANNEL) participantIds.size else 0,
                             isArchived = archivedMap?.get(uid) as? Boolean ?: false,
-                            isEncryptedPreview = isEncryptedPreview,
+                            // Only the encrypted-text marker enables the lock; media is not E2EE.
+                            isEncryptedPreview = protectedPrivate && rawLastMessage == "🔒 Сообщение",
                             isHiddenAccessGroup = isHiddenAccessGroup
                         )
                     } catch (e: Exception) { null }
