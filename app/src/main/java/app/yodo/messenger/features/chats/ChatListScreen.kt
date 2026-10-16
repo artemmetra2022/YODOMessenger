@@ -1,9 +1,14 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.FloatingActionButton
+import app.yodo.messenger.ui.components.Checkbox
+import app.yodo.messenger.ui.components.DropdownMenuItem
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import app.yodo.messenger.ui.components.clickable
+import app.yodo.messenger.ui.components.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -53,19 +58,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState

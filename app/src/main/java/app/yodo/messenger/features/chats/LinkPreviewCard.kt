@@ -1,7 +1,7 @@
 package app.yodo.messenger.features.chats
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth

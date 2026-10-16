@@ -1,5 +1,13 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.Switch
+import app.yodo.messenger.ui.components.Checkbox
+import app.yodo.messenger.ui.components.RadioButton
+import app.yodo.messenger.ui.components.DropdownMenuItem
 import app.yodo.messenger.ui.components.FullscreenDialog
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
 import app.yodo.messenger.data.local.InterfaceStyle
@@ -35,8 +43,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import app.yodo.messenger.ui.components.clickable
+import app.yodo.messenger.ui.components.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -121,30 +129,22 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
@@ -4847,7 +4847,7 @@ private fun LocationPickerDialog(
                 Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
                     TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Отмена") }
                     Spacer(modifier = Modifier.width(8.dp))
-                    androidx.compose.material3.Button(
+                    app.yodo.messenger.ui.components.Button(
                         onClick = { onConfirm(centerLat, centerLng) },
                         modifier = Modifier.weight(1f)
                     ) {

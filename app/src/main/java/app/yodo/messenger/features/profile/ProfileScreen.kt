@@ -1,12 +1,15 @@
 package app.yodo.messenger.features.profile
 
 
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.DropdownMenuItem
 import app.yodo.messenger.ui.components.DeveloperVerifiedBadge
 import app.yodo.messenger.ui.components.isDeveloperAccount
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.layout.Arrangement
@@ -43,12 +46,10 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
@@ -68,7 +69,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.History

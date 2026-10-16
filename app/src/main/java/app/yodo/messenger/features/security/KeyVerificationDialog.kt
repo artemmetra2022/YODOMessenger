@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.security
 
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.Checkbox
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer

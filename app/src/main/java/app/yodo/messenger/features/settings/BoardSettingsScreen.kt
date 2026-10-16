@@ -1,8 +1,11 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.FilterChip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*

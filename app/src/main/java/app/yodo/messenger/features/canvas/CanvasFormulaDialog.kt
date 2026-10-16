@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.canvas
 
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.FilterChip
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState

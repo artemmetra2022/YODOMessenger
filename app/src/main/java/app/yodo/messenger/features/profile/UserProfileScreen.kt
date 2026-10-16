@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.DeveloperVerifiedBadge
 import app.yodo.messenger.ui.components.isDeveloperAccount
 import androidx.compose.animation.core.LinearEasing
@@ -38,14 +41,11 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text

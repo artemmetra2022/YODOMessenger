@@ -1,8 +1,10 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.RadioButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,10 +32,8 @@ import androidx.compose.material.icons.filled.DashboardCustomize
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
