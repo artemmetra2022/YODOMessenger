@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
@@ -94,6 +95,12 @@ fun SettingsCategoriesScreen(
             icon = Icons.Filled.Chat,
             title = "Чаты",
             description = "Отправка сообщений, клавиатура, фон чата, папки, погода и вид списка чатов"
+        ),
+        SettingsCategory(
+            route = SettingsSearchIndex.ROUTE_BOARD,
+            icon = Icons.Filled.Edit,
+            title = "Интерактивная доска",
+            description = "Доска в чате, цвет и толщина линии, умные фигуры, сетка и вибрация"
         ),
         SettingsCategory(
             route = SettingsSearchIndex.ROUTE_NOTIFICATIONS,

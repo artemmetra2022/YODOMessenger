@@ -25,10 +25,13 @@ data class CanvasUiState(val doc: CanvasDocument?=null,val background: Bitmap?=n
 class CanvasViewModel @Inject constructor(
     private val savedState: SavedStateHandle, private val auth: FirebaseAuth,
     private val messages: MessageRepository, private val store: CanvasStore,
-    transport: CanvasNearbyTransport,
+    transport: CanvasNearbyTransport, onlineTransport: CanvasOnlineTransport, private val settingsStore: CanvasSettingsStore,
     @ApplicationContext private val context: Context
 ): ViewModel() {
     private val owner=auth.currentUser?.uid.orEmpty()
+    /** Настройки раздела «Интерактивная доска»: цвет, толщина, умные фигуры, сетка, вибрация. */
+    val boardSettings: kotlinx.coroutines.flow.StateFlow<BoardSettings> = settingsStore.settings.stateIn(viewModelScope,kotlinx.coroutines.flow.SharingStarted.Eagerly,BoardSettings())
+    private suspend fun newBoardDocument()=CanvasDocument(title="Новая доска",grid=settingsStore.settings.first().defaultGrid)
     private val chat=savedState.get<String>("chatId").orEmpty()
     private val topic=savedState.get<String>("topicId")
     private val _state=MutableStateFlow(CanvasUiState())
@@ -36,7 +39,7 @@ class CanvasViewModel @Inject constructor(
     private var history:CanvasHistory?=null
     private var autosave:Job?=null
     private val operation=Mutex()
-    private val collab=CanvasCollaboration(transport,viewModelScope,{_state.value.doc}, { doc ->
+    private val collab=CanvasCollabHub(transport,onlineTransport,viewModelScope,{_state.value.doc}, { doc ->
         checkAccount()
         val background=if(doc.backgroundBase64==_state.value.doc?.backgroundBase64)_state.value.background else withContext(Dispatchers.IO){doc.backgroundBase64?.let(CanvasImages::fromBase64)}
         checkAccount();history=CanvasHistory(doc);savedState["activeCanvasId"]=doc.id
@@ -46,6 +49,8 @@ class CanvasViewModel @Inject constructor(
     })
     val collaboration=collab.state
     fun startCollaboration(host:Boolean)=task {saveCurrent();collab.start(host)}
+    fun startOnlineCollaboration(host:Boolean)=task {saveCurrent();collab.startOnline(host)}
+    fun joinOnline(code:String)=task {saveCurrent();collab.join(code)}
     fun connectCanvasPeer(peer:CanvasPeer)=collab.connect(peer)
     fun verifyCanvasPeer(matches:Boolean)=collab.verify(matches)
     fun stopCollaboration()=collab.stop()
@@ -77,7 +82,7 @@ class CanvasViewModel @Inject constructor(
                     CanvasDocument(title="Разбор изображения",grid=CanvasGrid.NONE,backgroundBase64=encoded)
                 }
             } else if(requested!=null) requireNotNull(store.load(owner,chat,requested)) { "Локальная доска не найдена" }
-            else CanvasDocument(title="Новая доска")
+            else newBoardDocument()
             install(doc); saveCurrent(); _state.update { it.copy(busy=false) }
         } catch(e:Exception) { if(e is CancellationException) throw e; _state.update { it.copy(busy=false,error=e.message?:"Не удалось открыть доску") } }
     } } }
@@ -138,7 +143,7 @@ class CanvasViewModel @Inject constructor(
     }
     }
     fun save(onSaved:()->Unit={})=task { saveCurrent(); onSaved() }
-    fun newBoard()=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); install(CanvasDocument(title="Новая доска")); _state.update{it.copy(busy=true)}; saveCurrent() }
+    fun newBoard()=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); install(newBoardDocument()); _state.update{it.copy(busy=true)}; saveCurrent() }
     fun openBoard(id:String)=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); install(requireNotNull(store.load(owner,chat,id))); _state.update{it.copy(busy=true)}; saveCurrent() }
     fun recent(onLoaded:(List<CanvasRecent>)->Unit)=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); onLoaded(store.recent(owner,chat)) }
     fun importImage(uri:Uri)=task {check(!collab.running) { "Сначала завершите совместную сессию" };

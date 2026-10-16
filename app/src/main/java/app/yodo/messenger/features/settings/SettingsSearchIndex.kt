@@ -66,6 +66,11 @@ object SettingsSearchIndex {
     // НОВОЕ (раздел «Школа»): якоря пунктов школьного раздела.
     const val ANCHOR_SCHOOL = "school"
     const val ANCHOR_SCHOOL_SETTINGS = "school_settings"
+    // Раздел «Интерактивная доска».
+    const val ANCHOR_BOARD = "board"
+    const val ANCHOR_BOARD_IN_CHAT = "board_in_chat"
+    const val ANCHOR_BOARD_DRAWING = "board_drawing"
+    const val ANCHOR_BOARD_NEW = "board_new"
 
     private const val SEC_APPEARANCE = "Оформление"
     private const val SEC_CUSTOMIZATION = "Кастомизация"
@@ -77,6 +82,7 @@ object SettingsSearchIndex {
     private const val SEC_ACCOUNT = "Аккаунт"
     private const val SEC_APP = "Разделы и приложение"
     private const val SEC_SEARCH = "Поиск"
+    private const val SEC_BOARD = "Интерактивная доска"
 
     // ИЗМЕНЕНО (разделение настроек по категориям): маршруты экранов категорий.
     // Значения совпадают с Routes.Settings*.route — продублированы здесь как
@@ -90,6 +96,7 @@ object SettingsSearchIndex {
     // НОВОЕ (разумные категории): «Приложение» — заменяет удалённую категорию
     // «Язык» (её единственный пункт переехал в «Оформление и язык»).
     const val ROUTE_APP = "settings_app"
+    const val ROUTE_BOARD = "settings_board"
 
     val items: List<SettingsSearchItem> = listOf(
         SettingsSearchItem(
@@ -404,6 +411,55 @@ object SettingsSearchIndex {
             title = "Настройки раздела «Школа»", subtitle = "Показывать раздел целиком и выбирать отдельные подразделы",
             keywords = listOf("настройки школы", "скрыть школу", "подразделы школы", "отображение школы"),
             sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
+        ),
+        // Раздел «Интерактивная доска».
+        SettingsSearchItem(
+            id = "board_show_in_chat", anchorId = ANCHOR_BOARD_IN_CHAT,
+            title = "Доска в чате", subtitle = "Показывать общую доску живой карточкой в чате",
+            keywords = listOf("доска", "холст", "рисование", "карточка", "в чате", "общая доска", "canvas"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_preview_height", anchorId = ANCHOR_BOARD_IN_CHAT,
+            title = "Размер доски в чате", subtitle = "Высота карточки: маленькая, средняя или большая",
+            keywords = listOf("размер доски", "высота", "превью доски", "большая доска", "маленькая доска"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_collapsed", anchorId = ANCHOR_BOARD_IN_CHAT,
+            title = "Сворачивать доску в чате", subtitle = "Показывать только заголовок, пока доску не развернут",
+            keywords = listOf("свернуть", "скрыть доску", "компактно", "экономия места"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_ink", anchorId = ANCHOR_BOARD_DRAWING,
+            title = "Цвет и толщина линии", subtitle = "Что выбрано по умолчанию при открытии доски",
+            keywords = listOf("цвет", "толщина", "кисть", "карандаш", "перо", "чернила"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_shape_assist", anchorId = ANCHOR_BOARD_DRAWING,
+            title = "Умные фигуры", subtitle = "Задержите палец после штриха — он выровняется в фигуру",
+            keywords = listOf("фигуры", "выравнивание", "распознавание", "круг", "квадрат", "линия"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_snap_grid", anchorId = ANCHOR_BOARD_DRAWING,
+            title = "Привязка к сетке", subtitle = "Притягивать линии и фигуры к узлам сетки",
+            keywords = listOf("сетка", "привязка", "клетка", "притягивание", "точность"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_haptics", anchorId = ANCHOR_BOARD_DRAWING,
+            title = "Вибрация при выравнивании", subtitle = "Короткая вибрация, когда штрих стал фигурой",
+            keywords = listOf("вибрация", "отклик", "haptic", "виброотклик"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
+        SettingsSearchItem(
+            id = "board_default_grid", anchorId = ANCHOR_BOARD_NEW,
+            title = "Сетка новой доски", subtitle = "Клетка, точки или без сетки",
+            keywords = listOf("сетка", "клетка", "точки", "новая доска", "фон доски"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
         )
     )
 }

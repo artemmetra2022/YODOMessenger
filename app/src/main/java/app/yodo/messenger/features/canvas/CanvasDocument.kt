@@ -3,8 +3,12 @@ package app.yodo.messenger.features.canvas
 import java.util.UUID
 import kotlin.math.*
 
-enum class CanvasTool { PEN, LINE, ARROW, RECTANGLE, CIRCLE, TEXT, FORMULA, ERASER, HAND }
-enum class CanvasObjectKind { PEN, LINE, ARROW, RECTANGLE, CIRCLE, TEXT, FORMULA }
+// HIGHLIGHTER — не отдельный вид объекта: это PEN с полупрозрачным цветом (формат не меняется).
+enum class CanvasTool { PEN, HIGHLIGHTER, LINE, ARROW, RECTANGLE, ROUNDED_RECT, CIRCLE, ELLIPSE, TRIANGLE, DIAMOND, TEXT, FORMULA, ERASER, HAND }
+// ROUNDED_RECT, ELLIPSE, TRIANGLE, DIAMOND — этап 4 (формат документа v3, Nearby-протокол 4).
+enum class CanvasObjectKind { PEN, LINE, ARROW, RECTANGLE, CIRCLE, TEXT, FORMULA, ROUNDED_RECT, ELLIPSE, TRIANGLE, DIAMOND }
+/** Виды, которых нет в документах v1/v2: старые клиенты их не прочитают. */
+val CanvasStage4Kinds: Set<CanvasObjectKind> = setOf(CanvasObjectKind.ROUNDED_RECT, CanvasObjectKind.ELLIPSE, CanvasObjectKind.TRIANGLE, CanvasObjectKind.DIAMOND)
 enum class CanvasGrid { NONE, SQUARES, DOTS }
 enum class CanvasTemplate { NONE, AXES, TRIANGLE, RIGHT_TRIANGLE }
 data class CanvasPoint(val x: Float, val y: Float)
@@ -102,9 +106,18 @@ fun hitCanvasObject(obj: CanvasObject, point: CanvasPoint, radius: Float): Boole
             val legs = arrowLegs(a, b, obj.width)
             segmentDistance(point, a, b) <= tolerance || segmentDistance(point, b, legs.first) <= tolerance || segmentDistance(point, b, legs.second) <= tolerance
         }
-        CanvasObjectKind.RECTANGLE -> {
+        CanvasObjectKind.RECTANGLE, CanvasObjectKind.ROUNDED_RECT -> {
             val c = CanvasPoint(a.x, b.y); val d = CanvasPoint(b.x, a.y)
             listOf(a to c, c to b, b to d, d to a).any { segmentDistance(point, it.first, it.second) <= tolerance }
+        }
+        CanvasObjectKind.TRIANGLE, CanvasObjectKind.DIAMOND -> {
+            val polygon = canvasPolygon(obj.kind, a, b)
+            polygon.indices.any { segmentDistance(point, polygon[it], polygon[(it + 1) % polygon.size]) <= tolerance }
+        }
+        CanvasObjectKind.ELLIPSE -> {
+            val rx = (abs(b.x - a.x) / 2f).coerceAtLeast(0.5f); val ry = (abs(b.y - a.y) / 2f).coerceAtLeast(0.5f)
+            val normalized = hypot((point.x - (a.x + b.x) / 2f) / rx, (point.y - (a.y + b.y) / 2f) / ry)
+            abs(normalized - 1f) * min(rx, ry) <= tolerance
         }
         CanvasObjectKind.CIRCLE -> abs(hypot(point.x - a.x, point.y - a.y) - hypot(b.x - a.x, b.y - a.y)) <= tolerance
         CanvasObjectKind.FORMULA -> point.x>=a.x-radius&&point.x<=b.x+radius&&point.y>=a.y-radius&&point.y<=b.y+radius

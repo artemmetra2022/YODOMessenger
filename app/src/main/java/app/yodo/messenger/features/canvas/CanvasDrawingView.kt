@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -16,6 +17,11 @@ class CanvasDrawingView(context: Context) : View(context) {
     var inkColor = 0xff1e293b.toInt()
     var inkWidth = 4f
     var fontSize = 32f
+    // Этап 4: «умные фигуры» (удержание пальца после штриха карандашом выравнивает его)
+    // и привязка точек фигур к узлам сетки.
+    var shapeAssist = true
+    var snapToGrid = false
+    var haptics = true
     var onCommit: (CanvasDocument) -> Unit = {}
     var onGesture: ((CanvasDocument,CanvasDocument,Long)->Unit)? = null
     var documentRevision=0L
@@ -35,6 +41,22 @@ class CanvasDrawingView(context: Context) : View(context) {
     private var multiTouch=false
     private var gestureTooLong=false
     private var activeGesture=false
+    private var snapped=false
+    private var holdAnchor: CanvasPoint?=null
+    private val holdRunnable=Runnable{trySnapShape()}
+    private fun isShapeTool(t:CanvasTool)=when(t){
+        CanvasTool.LINE,CanvasTool.ARROW,CanvasTool.RECTANGLE,CanvasTool.ROUNDED_RECT,CanvasTool.CIRCLE,
+        CanvasTool.ELLIPSE,CanvasTool.TRIANGLE,CanvasTool.DIAMOND->true
+        else->false
+    }
+    private fun scheduleHold(){removeCallbacks(holdRunnable);if(shapeAssist&&tool==CanvasTool.PEN)postDelayed(holdRunnable,600L)}
+    private fun trySnapShape(){
+        val obj=draft?:return;val doc=document?:return
+        if(!activeGesture||snapped||!shapeAssist||tool!=CanvasTool.PEN||obj.kind!=CanvasObjectKind.PEN)return
+        val shape=recognizeCanvasShape(obj.points,doc.width.toFloat(),doc.height.toFloat())?:return
+        draft=obj.copy(kind=shape.kind,points=shape.points);snapped=true
+        if(haptics)performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);invalidate()
+    }
     private fun transform() = document?.let { CanvasTransform.fit(width.toFloat(),height.toFloat(),it,zoom,pan) }
     private val detector = ScaleGestureDetector(context, object: ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -48,7 +70,7 @@ class CanvasDrawingView(context: Context) : View(context) {
     })
     fun cancelRemoteConflict(){cancelDraft();invalidate()}
     fun resetViewport(){zoom=1f;pan=CanvasPoint(0f,0f);cancelDraft();invalidate()}
-    private fun cancelDraft(){activeGesture=false;draft=null;erasedIds.clear();erasedPreview=null;eraserPoint=null;gestureTooLong=false}
+    private fun cancelDraft(){removeCallbacks(holdRunnable);snapped=false;holdAnchor=null;activeGesture=false;draft=null;erasedIds.clear();erasedPreview=null;eraserPoint=null;gestureTooLong=false}
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas);canvas.drawColor(0xffe9edf3.toInt())
         val base=document?:return
@@ -77,7 +99,8 @@ class CanvasDrawingView(context: Context) : View(context) {
         if(multiTouch){if(event.actionMasked==MotionEvent.ACTION_UP||event.actionMasked==MotionEvent.ACTION_CANCEL){multiTouch=false;lastFocus=null};return true}
         val transform=transform()?:return false
         val world=transform.world(CanvasPoint(event.x,event.y))
-        val point=CanvasPoint(world.x.coerceIn(0f,doc.width.toFloat()),world.y.coerceIn(0f,doc.height.toFloat()))
+        val rawPoint=CanvasPoint(world.x.coerceIn(0f,doc.width.toFloat()),world.y.coerceIn(0f,doc.height.toFloat()))
+        val point=if(snapToGrid&&isShapeTool(tool))snapCanvasPoint(rawPoint,doc.width.toFloat(),doc.height.toFloat()) else rawPoint
         fun erase(){eraserPoint=point;val current=doc.copy(objects=doc.objects.filterNot{it.id in erasedIds});val radius=max(12f,18f/transform.scale)
             current.objects.filter{hitCanvasObject(it,point,radius)}.forEach{erasedIds.add(it.id)}
             erasedPreview=doc.copy(objects=doc.objects.filterNot{it.id in erasedIds})}
@@ -96,24 +119,37 @@ class CanvasDrawingView(context: Context) : View(context) {
                     CanvasTool.TEXT -> {onText(point);performClick()}
                     CanvasTool.FORMULA -> {val existing=doc.objects.asReversed().firstOrNull{it.kind==CanvasObjectKind.FORMULA&&hitCanvasObject(it,point,0f)};onFormula(existing?.points?.first()?:point,existing);performClick()}
                     CanvasTool.ERASER -> erase()
-                    else -> {val kind=CanvasObjectKind.valueOf(tool.name);draft=CanvasObject(kind=kind,points=if(kind==CanvasObjectKind.PEN)listOf(point)else listOf(point,point),color=inkColor,width=inkWidth,fontSize=fontSize)}
+                    else -> {
+                        val highlighter=tool==CanvasTool.HIGHLIGHTER
+                        val kind=if(highlighter)CanvasObjectKind.PEN else CanvasObjectKind.valueOf(tool.name)
+                        // Маркер — обычный штрих PEN: полупрозрачный цвет и толстая линия, формат не меняется.
+                        val ink=if(highlighter){(inkColor and 0x00ffffff) or 0x66000000}else{inkColor}
+                        val strokeWidth=if(highlighter)max(inkWidth*3f,14f).coerceAtMost(32f) else inkWidth
+                        draft=CanvasObject(kind=kind,points=if(kind==CanvasObjectKind.PEN)listOf(point)else listOf(point,point),color=ink,width=strokeWidth,fontSize=fontSize)
+                        holdAnchor=CanvasPoint(event.x,event.y);scheduleHold()
+                    }
                 }
             }
             MotionEvent.ACTION_MOVE -> when(tool){
                 CanvasTool.HAND -> {lastFocus?.let{pan=CanvasPoint(pan.x+event.x-it.x,pan.y+event.y-it.y)};lastFocus=CanvasPoint(event.x,event.y)}
                 CanvasTool.ERASER -> erase()
                 CanvasTool.TEXT,CanvasTool.FORMULA -> Unit
-                else -> draft?.let { obj ->
+                else -> if(!snapped) draft?.let { obj ->
                     if(obj.kind==CanvasObjectKind.PEN){
                         if(hypot(point.x-obj.points.last().x,point.y-obj.points.last().y)>1.5f){
                             if(obj.points.size>=CanvasLimits.MAX_POINTS_PER_OBJECT)gestureTooLong=true
                             else draft=obj.copy(points=obj.points+point)
                         }
+                        // Палец почти не двигается 600 мс — пробуем выровнять штрих в фигуру.
+                        val anchor=holdAnchor
+                        if(anchor==null||hypot(event.x-anchor.x,event.y-anchor.y)>8f*resources.displayMetrics.density){
+                            holdAnchor=CanvasPoint(event.x,event.y);scheduleHold()
+                        }
                     }else draft=obj.copy(points=listOf(obj.points.first(),point))
                 }
             }
             MotionEvent.ACTION_UP -> {
-                draft?.let { obj ->
+                if(!snapped) draft?.let { obj ->
                     if(obj.kind==CanvasObjectKind.PEN) {
                         if(hypot(point.x-obj.points.last().x,point.y-obj.points.last().y)>1.5f) {
                             if(obj.points.size>=CanvasLimits.MAX_POINTS_PER_OBJECT)gestureTooLong=true

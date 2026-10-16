@@ -648,6 +648,7 @@ fun YodoNavGraph(
                 onOpenCanvas = { sourceId, imageIndex, boardId ->
                     navController.navigate(Routes.Canvas.createRoute(chatId, backStackEntry.arguments?.getString(Routes.Chat.ARG_TOPIC_ID), boardId, sourceId, imageIndex))
                 },
+                onOpenSharedBoard = { id -> navController.navigate(Routes.SharedBoard.createRoute(id)) },
                 onBackClick = { navController.popBackStack() },
                 onOpenUserProfile = { userId ->
                     navController.navigate(Routes.UserProfile.createRoute(userId))
@@ -701,6 +702,10 @@ fun YodoNavGraph(
             navArgument("sourceMessageId") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("imageIndex") { type = NavType.IntType; defaultValue = 0 }
         )) { app.yodo.messenger.features.canvas.CanvasScreen(onBackClick = { navController.popBackStack() }) }
+        composable(
+            Routes.SharedBoard.route,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) { app.yodo.messenger.features.canvas.SharedBoardScreen(onBackClick = { navController.popBackStack() }) }
         composable(Routes.ImageViewer.route) {
             ImageViewerScreen(
                 onBackClick = { navController.popBackStack() }
@@ -997,6 +1002,19 @@ fun YodoNavGraph(
             app.yodo.messenger.features.settings.ChatsSettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsChats.ARG_ANCHOR)
+            )
+        }
+        composable(
+            route = Routes.SettingsBoard.route,
+            arguments = listOf(navArgument(Routes.SettingsBoard.ARG_ANCHOR) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            })
+        ) { backStackEntry ->
+            app.yodo.messenger.features.settings.BoardSettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsBoard.ARG_ANCHOR)
             )
         }
         composable(

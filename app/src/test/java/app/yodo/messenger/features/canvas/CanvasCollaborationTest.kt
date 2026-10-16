@@ -38,11 +38,11 @@ class CanvasCollaborationTest {
     @Test fun proposalRoundTrip(){val m=CanvasWire.Propose(host,edit(1,adds=listOf(obj())));assertEquals(m,CanvasCollabWire.decode(CanvasCollabWire.encode(m)))}
     @Test fun rejectionRoundTrip(){val m=CanvasWire.Rejected(host,guest,3,"Отказ");assertEquals(m,CanvasCollabWire.decode(CanvasCollabWire.encode(m)))}
     @Test fun cursorRoundTrip(){for(p in listOf(CanvasPoint(24f,56f),null)){val m=CanvasWire.Cursor(host,10,p,-1);assertEquals(m,CanvasCollabWire.decode(CanvasCollabWire.encode(m)))}}
-    @Test fun wrongProtocolRejected(){val raw=CanvasCollabWire.encode(CanvasWire.Cursor(host,1,null,0)).toString(Charsets.UTF_8);reject{CanvasCollabWire.decode(raw.replace("\"protocol\":3","\"protocol\":99").toByteArray())}}
+    @Test fun wrongProtocolRejected(){val raw=CanvasCollabWire.encode(CanvasWire.Cursor(host,1,null,0)).toString(Charsets.UTF_8);reject{CanvasCollabWire.decode(raw.replace("\"protocol\":4","\"protocol\":99").toByteArray())}}
     @Test fun invalidSessionRejected(){val raw=CanvasCollabWire.encode(CanvasWire.Cursor(host,1,null,0)).toString(Charsets.UTF_8);reject{CanvasCollabWire.decode(raw.replace(host,"../../path").toByteArray())}}
     @Test fun nonfiniteCursorRejected(){val raw=CanvasCollabWire.encode(CanvasWire.Cursor(host,1,CanvasPoint(2f,2f),0)).toString(Charsets.UTF_8);reject{CanvasCollabWire.decode(raw.replace("\"x\":2.0","\"x\":-1.0").toByteArray())}}
     @Test fun deeplyNestedPacketRejected(){reject{CanvasCollabWire.decode(("[".repeat(100)+"0"+"]".repeat(100)).toByteArray())}}
-    @Test fun deeplyNestedEmbeddedDocumentRejected(){val raw=buildJsonObject{put("protocol",3);put("type","snapshot");put("session",host);put("host",host);put("guest",guest);put("revision",0);put("doc","[".repeat(100)+"0"+"]".repeat(100))};reject{CanvasCollabWire.decode(raw.toString().toByteArray())}}
+    @Test fun deeplyNestedEmbeddedDocumentRejected(){val raw=buildJsonObject{put("protocol",4);put("type","snapshot");put("session",host);put("host",host);put("guest",guest);put("revision",0);put("doc","[".repeat(100)+"0"+"]".repeat(100))};reject{CanvasCollabWire.decode(raw.toString().toByteArray())}}
     @Test fun oversizeWireRejected(){reject{CanvasCollabWire.decode(ByteArray(CanvasCollabWire.MAX_BYTES+1))}}
     @Test fun frameFitsNearbyBytesLimit(){CanvasFrames.split(ByteArray(100000)).forEach{assertTrue(it.size<32768)}}
     @Test fun frameRoundTripOutOfOrder(){val bytes=ByteArray(100001){(it%251).toByte()};val frames=CanvasFrames.split(bytes);val a=CanvasFrames.Assembler();var out:ByteArray?=null;frames.reversed().forEach{a.accept(it,100)?.let{b->out=b}};assertArrayEquals(bytes,out)}

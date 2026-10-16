@@ -12,6 +12,9 @@ data class ChatPreview(
     val lastMessageTimestamp: Long,
     val lastMessageSenderId: String? = null,
     val lastMessageStatus: String? = null,
+    // ID последнего сообщения — нужен, чтобы локально (на устройстве) расшифровать превью
+    // личного чата, не храня открытый текст на сервере.
+    val lastMessageId: String? = null,
     val unreadCount: Int,
     val isOnline: Boolean,
     // п.30: верифицированный официальный канал — синяя галочка

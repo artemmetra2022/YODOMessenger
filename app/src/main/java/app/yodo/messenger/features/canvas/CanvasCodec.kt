@@ -6,7 +6,7 @@ object CanvasCodec {
     fun encode(doc: CanvasDocument): String {
         CanvasLimits.validate(doc)
         return buildJsonObject {
-            put("format", "yodo.canvas"); put("version", if(doc.objects.any{it.kind==CanvasObjectKind.FORMULA})2 else 1); put("id", doc.id); put("title", doc.title)
+            put("format", "yodo.canvas"); put("version", if(doc.objects.any{it.kind in CanvasStage4Kinds})3 else if(doc.objects.any{it.kind==CanvasObjectKind.FORMULA})2 else 1); put("id", doc.id); put("title", doc.title)
             put("width", doc.width); put("height", doc.height); put("grid", doc.grid.name); put("template", doc.template.name)
             doc.backgroundBase64?.let { put("background", it) }
             put("objects", buildJsonArray { doc.objects.forEach { obj -> add(buildJsonObject {
@@ -21,7 +21,7 @@ object CanvasCodec {
         requireShallowCanvasJson(raw)
         val json = Json.parseToJsonElement(raw).jsonObject
         val version=json["version"]?.jsonPrimitive?.int
-        require(json["format"]?.jsonPrimitive?.content == "yodo.canvas" && version in listOf(1,2))
+        require(json["format"]?.jsonPrimitive?.content == "yodo.canvas" && version in listOf(1,2,3))
         val rows = json.getValue("objects").jsonArray
         require(rows.size <= CanvasLimits.MAX_OBJECTS)
         var total = 0
@@ -34,6 +34,7 @@ object CanvasCodec {
                 obj["text"]?.jsonPrimitive?.content ?: "", obj["fontSize"]?.jsonPrimitive?.float ?: 32f)
         }
         require(version!=1||objects.none{it.kind==CanvasObjectKind.FORMULA}){"Для формул нужен формат документа v2"}
+        require(version==3||objects.none{it.kind in CanvasStage4Kinds}){"Для новых фигур нужен формат документа v3"}
         return CanvasDocument(json.getValue("id").jsonPrimitive.content, json.getValue("title").jsonPrimitive.content,
             json.getValue("width").jsonPrimitive.int, json.getValue("height").jsonPrimitive.int,
             CanvasGrid.valueOf(json.getValue("grid").jsonPrimitive.content), CanvasTemplate.valueOf(json.getValue("template").jsonPrimitive.content),

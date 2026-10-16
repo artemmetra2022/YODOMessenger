@@ -38,6 +38,8 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     var color by remember { mutableIntStateOf(0xff1e293b.toInt()) }
     var width by remember { mutableFloatStateOf(4f) }
     var fontSize by remember { mutableFloatStateOf(32f) }
+    var shapeAssist by remember { mutableStateOf(true) }
+    var snapGrid by remember { mutableStateOf(false) }
     var drawingView by remember { mutableStateOf<CanvasDrawingView?>(null) }
     var textPoint by remember { mutableStateOf<CanvasPoint?>(null) }
     var formulaPoint by remember { mutableStateOf<CanvasPoint?>(null) }
@@ -52,6 +54,9 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     var confirmImport by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf<List<CanvasRecent>?>(null) }
     val snack=remember { SnackbarHostState() }
+    val boardSettings by viewModel.boardSettings.collectAsState()
+    // Значения по умолчанию из настроек раздела «Интерактивная доска».
+    LaunchedEffect(boardSettings){color=boardSettings.inkColor;width=boardSettings.inkWidth;shapeAssist=boardSettings.shapeAssist;snapGrid=boardSettings.snapToGrid}
     val gallery=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importImage) }
     val export=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri -> uri?.let(viewModel::export) }
     fun leave(){ if(state.doc==null) onBackClick() else { exiting=true; viewModel.save { exiting=false; onBackClick() } } }
@@ -73,10 +78,10 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
         CanvasCollabPanel(viewModel,collab,enabled=!state.busy&&state.doc!=null)
         CanvasToolbar {
             CanvasTool.entries.forEach { option -> FilterChip(selected=tool==option,onClick={tool=option},enabled=!state.busy,
-                label={Text(when(option){CanvasTool.PEN->"Карандаш";CanvasTool.LINE->"Линия";CanvasTool.ARROW->"Стрелка";CanvasTool.RECTANGLE->"Прямоугольник";CanvasTool.CIRCLE->"Окружность";CanvasTool.TEXT->"Текст";CanvasTool.FORMULA->"Формула";CanvasTool.ERASER->"Ластик";CanvasTool.HAND->"Рука"})}) }
+                label={Text(when(option){CanvasTool.PEN->"Карандаш";CanvasTool.HIGHLIGHTER->"Маркер";CanvasTool.LINE->"Линия";CanvasTool.ARROW->"Стрелка";CanvasTool.RECTANGLE->"Прямоугольник";CanvasTool.ROUNDED_RECT->"Скруглённый";CanvasTool.CIRCLE->"Окружность";CanvasTool.ELLIPSE->"Эллипс";CanvasTool.TRIANGLE->"Треугольник";CanvasTool.DIAMOND->"Ромб";CanvasTool.TEXT->"Текст";CanvasTool.FORMULA->"Формула";CanvasTool.ERASER->"Ластик";CanvasTool.HAND->"Рука"})}) }
         }
         CanvasToolbar {
-            listOf("Чёрный" to 0xff1e293b.toInt(),"Синий" to 0xff2563eb.toInt(),"Красный" to 0xffdc2626.toInt(),"Зелёный" to 0xff16a34a.toInt(),"Фиолетовый" to 0xff9333ea.toInt()).forEach { (name,value) ->
+            listOf("Чёрный" to 0xff1e293b.toInt(),"Синий" to 0xff2563eb.toInt(),"Красный" to 0xffdc2626.toInt(),"Зелёный" to 0xff16a34a.toInt(),"Фиолетовый" to 0xff9333ea.toInt(),"Жёлтый" to 0xffeab308.toInt(),"Оранжевый" to 0xfff97316.toInt()).forEach { (name,value) ->
                 Box(Modifier.size(44.dp).semantics { contentDescription="Цвет: $name" }.clickable(enabled=!state.busy){color=value},contentAlignment=Alignment.Center) {
                     Box(Modifier.size(28.dp).background(Color(value),CircleShape).border(if(color==value)3.dp else 0.dp,MaterialTheme.colorScheme.onSurface,CircleShape))
                 }
@@ -93,12 +98,14 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
             OutlinedButton(enabled=(if(sessionRunning)collab.canUndo else state.canUndo)&&!state.busy&&sessionReady,onClick={viewModel.undo()}){Text("Отмена")}
             OutlinedButton(enabled=(if(sessionRunning)collab.canRedo else state.canRedo)&&!state.busy&&sessionReady,onClick={viewModel.undo(true)}){Text("Повтор")}
             TextButton(onClick={drawingView?.resetViewport()}){Text("Вписать")}
+            FilterChip(selected=shapeAssist,onClick={shapeAssist=!shapeAssist},label={Text("Умные фигуры")})
+            FilterChip(selected=snapGrid,onClick={snapGrid=!snapGrid},label={Text("К сетке")})
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xffe9edf3))) {
             val doc=state.doc
             if(doc!=null) AndroidView(modifier=Modifier.fillMaxSize(),factory={context->CanvasDrawingView(context).also{drawingView=it}},update={view->
                 val changed=view.document?.id!=doc.id
-                view.document=doc;view.backgroundImage=state.background;view.tool=tool;view.inkColor=color;view.inkWidth=width;view.fontSize=fontSize
+                view.document=doc;view.backgroundImage=state.background;view.tool=tool;view.inkColor=color;view.inkWidth=width;view.fontSize=fontSize;view.shapeAssist=shapeAssist;view.snapToGrid=snapGrid;view.haptics=boardSettings.haptics
                 view.isEnabled=!state.busy&&sessionReady
                 view.remoteCursor=collab.cursor
                 view.onCursor={point->viewModel.sendCursor(point,color)}
@@ -115,7 +122,7 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
                 if(!state.busy) TextButton(onClick={viewModel.newBoard()}){Text("Создать новую")}
             }
         }
-        Text("Два пальца — масштаб и перемещение · ластик удаляет объект целиком",style=MaterialTheme.typography.labelSmall,modifier=Modifier.padding(horizontal=12.dp,vertical=4.dp))
+        Text("Два пальца — масштаб и перемещение · задержите палец после штриха карандашом — выровняется в фигуру · ластик удаляет объект целиком",style=MaterialTheme.typography.labelSmall,modifier=Modifier.padding(horizontal=12.dp,vertical=4.dp))
         CanvasToolbar {
             Button(enabled=!state.busy&&state.doc!=null&&sessionReady,onClick={publish=true}){Text("Отправить в чат")}
             OutlinedButton(enabled=!state.busy&&state.doc!=null,onClick={viewModel.save()}){Text("Сохранить")}
@@ -145,4 +152,4 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     },confirmButton={TextButton(onClick={recent=null}){Text("Закрыть")}})}
 }
 @Composable
-private fun CanvasToolbar(content:@Composable RowScope.()->Unit){Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=8.dp,vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically,content=content)}
+internal fun CanvasToolbar(content:@Composable RowScope.()->Unit){Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=8.dp,vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically,content=content)}

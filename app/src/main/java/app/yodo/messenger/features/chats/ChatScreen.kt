@@ -241,6 +241,8 @@ fun ChatScreen(
     onOpenChannelStats: (String) -> Unit = {},
     onShareContactQr: (String) -> Unit = {},
     onOpenCanvas: (String?, Int, String?) -> Unit = { _, _, _ -> },
+    // Общая доска чата: живая карточка в чате; нажатие открывает редактор.
+    onOpenSharedBoard: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -998,6 +1000,10 @@ fun ChatScreen(
                         )
                     }
                 }
+                // Живая общая доска чата (видна, только если она создана и включена в настройках).
+                app.yodo.messenger.features.canvas.ChatBoardCard(
+                    chatId = chatId, chatType = uiState.chatType, onOpen = { onOpenSharedBoard(chatId) }
+                )
             }
         },
         bottomBar = {
@@ -1378,6 +1384,7 @@ fun ChatScreen(
                             onImageQualitySelected = { selectedImageQuality = it },
                             onDismiss = { showAttachMenu = false },
                             onPickCanvas = { showAttachMenu = false; onOpenCanvas(null, 0, null) },
+                            onPickSharedBoard = if (uiState.chatType == "PRIVATE" || uiState.chatType == "GROUP") ({ showAttachMenu = false; onOpenSharedBoard(chatId) }) else null,
                             onPickPhoto = {
                                 showAttachMenu = false
                                 pendingImageIsViewOnce = false
@@ -4563,6 +4570,7 @@ private fun AttachMenuDialog(
     onImageQualitySelected: (ChatImageQuality) -> Unit,
     onDismiss: () -> Unit,
     onPickCanvas: () -> Unit,
+    onPickSharedBoard: (() -> Unit)? = null,
     onPickPhoto: () -> Unit,
     onPickViewOncePhoto: () -> Unit,
     onPickFile: () -> Unit,
@@ -4584,6 +4592,7 @@ private fun AttachMenuDialog(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 )
                 AttachMenuRow(icon = Icons.Filled.Edit, label = "Интерактивная доска", onClick = onPickCanvas)
+                onPickSharedBoard?.let { AttachMenuRow(icon = Icons.Filled.Edit, label = "Общая доска чата", onClick = it) }
                 AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото (можно несколько)", onClick = onPickPhoto)
                 Text(
                     stringResource(R.string.chat_photo_quality),

@@ -50,6 +50,12 @@ object CanvasRenderer {
                 canvas.drawLine(b.x, b.y, legs.first.x, legs.first.y, paint); canvas.drawLine(b.x, b.y, legs.second.x, legs.second.y, paint) }
             CanvasObjectKind.RECTANGLE -> canvas.drawRect(min(a.x,b.x), min(a.y,b.y), max(a.x,b.x), max(a.y,b.y), paint)
             CanvasObjectKind.CIRCLE -> canvas.drawCircle(a.x, a.y, hypot(b.x-a.x,b.y-a.y), paint)
+            CanvasObjectKind.ELLIPSE -> canvas.drawOval(RectF(min(a.x,b.x), min(a.y,b.y), max(a.x,b.x), max(a.y,b.y)), paint)
+            CanvasObjectKind.ROUNDED_RECT -> { val r = canvasCornerRadius(a, b)
+                canvas.drawRoundRect(RectF(min(a.x,b.x), min(a.y,b.y), max(a.x,b.x), max(a.y,b.y)), r, r, paint) }
+            CanvasObjectKind.TRIANGLE, CanvasObjectKind.DIAMOND -> { val polygon = canvasPolygon(obj.kind, a, b)
+                val path = Path().apply { moveTo(polygon[0].x, polygon[0].y); for (i in 1 until polygon.size) lineTo(polygon[i].x, polygon[i].y); close() }
+                canvas.drawPath(path, paint) }
             CanvasObjectKind.FORMULA -> CanvasMathNative.drawObject(canvas,obj)
             CanvasObjectKind.TEXT -> {
                 paint.style = Paint.Style.FILL; paint.textSize = obj.fontSize; paint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)

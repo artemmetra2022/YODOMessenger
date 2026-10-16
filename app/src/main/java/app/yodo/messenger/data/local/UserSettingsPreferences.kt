@@ -500,4 +500,47 @@ class UserSettingsPreferences @Inject constructor(
     suspend fun setScreenshotProtection(enabled: Boolean) { context.settingsDataStore.edit { it[screenshotProtectionKey] = enabled } }
     suspend fun setEmojiStatus(value: String) { context.settingsDataStore.edit { it[emojiStatusKey] = value } }
     suspend fun setCustomStatus(value: String) { context.settingsDataStore.edit { it[customStatusKey] = value } }
+
+    // ---- Интерактивная доска: показ в чате и параметры рисования по умолчанию ----
+    private val boardShowInChatKey = booleanPreferencesKey("board_show_in_chat")
+    private val boardPreviewHeightKey = stringPreferencesKey("board_preview_height")
+    private val boardCollapsedKey = booleanPreferencesKey("board_collapsed_in_chat")
+    private val boardInkColorKey = intPreferencesKey("board_ink_color")
+    private val boardInkWidthKey = intPreferencesKey("board_ink_width")
+    private val boardShapeAssistKey = booleanPreferencesKey("board_shape_assist")
+    private val boardSnapGridKey = booleanPreferencesKey("board_snap_grid")
+    private val boardDefaultGridKey = stringPreferencesKey("board_default_grid")
+    private val boardHapticsKey = booleanPreferencesKey("board_haptics")
+
+    /** Сырые значения настроек доски; в осмысленные (BoardSettings) их превращает CanvasSettingsStore. */
+    val boardPrefs: Flow<BoardPrefs> = context.settingsDataStore.data.map { p ->
+        BoardPrefs(
+            showInChat = p[boardShowInChatKey] ?: true, previewHeight = p[boardPreviewHeightKey],
+            collapsedInChat = p[boardCollapsedKey] ?: false, inkColor = p[boardInkColorKey],
+            inkWidth = p[boardInkWidthKey], shapeAssist = p[boardShapeAssistKey] ?: true,
+            snapToGrid = p[boardSnapGridKey] ?: false, defaultGrid = p[boardDefaultGridKey],
+            haptics = p[boardHapticsKey] ?: true
+        )
+    }
+    suspend fun setBoardShowInChat(value: Boolean) { context.settingsDataStore.edit { it[boardShowInChatKey] = value } }
+    suspend fun setBoardPreviewHeight(value: String) { context.settingsDataStore.edit { it[boardPreviewHeightKey] = value } }
+    suspend fun setBoardCollapsedInChat(value: Boolean) { context.settingsDataStore.edit { it[boardCollapsedKey] = value } }
+    suspend fun setBoardInkColor(value: Int) { context.settingsDataStore.edit { it[boardInkColorKey] = value } }
+    suspend fun setBoardInkWidth(value: Int) { context.settingsDataStore.edit { it[boardInkWidthKey] = value } }
+    suspend fun setBoardShapeAssist(value: Boolean) { context.settingsDataStore.edit { it[boardShapeAssistKey] = value } }
+    suspend fun setBoardSnapToGrid(value: Boolean) { context.settingsDataStore.edit { it[boardSnapGridKey] = value } }
+    suspend fun setBoardDefaultGrid(value: String) { context.settingsDataStore.edit { it[boardDefaultGridKey] = value } }
+    suspend fun setBoardHaptics(value: Boolean) { context.settingsDataStore.edit { it[boardHapticsKey] = value } }
+    suspend fun resetBoardSettings() {
+        context.settingsDataStore.edit {
+            listOf(boardShowInChatKey, boardCollapsedKey, boardShapeAssistKey, boardSnapGridKey, boardHapticsKey).forEach { k -> it.remove(k) }
+            it.remove(boardPreviewHeightKey); it.remove(boardInkColorKey); it.remove(boardInkWidthKey); it.remove(boardDefaultGridKey)
+        }
+    }
 }
+
+/** Сырые настройки доски из DataStore (null — значение по умолчанию). */
+data class BoardPrefs(
+    val showInChat: Boolean, val previewHeight: String?, val collapsedInChat: Boolean, val inkColor: Int?,
+    val inkWidth: Int?, val shapeAssist: Boolean, val snapToGrid: Boolean, val defaultGrid: String?, val haptics: Boolean
+)

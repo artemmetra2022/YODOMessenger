@@ -53,7 +53,7 @@ class CanvasCollaboration(private val transport:CanvasTransport,private val scop
                             }
                         } } }
                     }
-                    CanvasLinkPhase.CONNECTING,CanvasLinkPhase.VERIFYING-> { timeout=scope.launch{delay(30000);if(linkEpoch==transport.epoch)transport.stop("Время подключения или сверки кода истекло")}}
+                    CanvasLinkPhase.CONNECTING,CanvasLinkPhase.VERIFYING-> { timeout=scope.launch{delay(transport.connectTimeoutMs);if(linkEpoch==transport.epoch)transport.stop("Время подключения или сверки кода истекло")}}
                     CanvasLinkPhase.IDLE->{
                         val hadSession=wireDoc!=null
                         authority=null;wireDoc=null;session=null;pendingId=null;cursorJob?.cancel();nextCursor=null

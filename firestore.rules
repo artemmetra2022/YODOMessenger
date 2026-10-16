@@ -53,6 +53,16 @@ service cloud.firestore {
         request.resource.data.deletedBy == request.auth.uid;
     }
 
+    // ИСПРАВЛЕНО (индикатор «доставлено/прочитано» не работал): получатель не является
+    // автором сообщения, поэтому ни одна ветка allow update не разрешала ему менять
+    // поле status — SENT никогда не переходил в DELIVERED/READ (ошибка PERMISSION_DENIED
+    // молча глотается клиентом). Участник чата теперь может менять ТОЛЬКО status,
+    // и только на DELIVERED или READ.
+    function messageStatusOnlyUpdate(chatId) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+        request.resource.data.status in ['DELIVERED', 'READ'] &&
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []);
+    }
     // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
     // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
     // сразу после полноэкранного просмотра — иначе фото так и останется читаемым на
@@ -1085,6 +1095,7 @@ service cloud.firestore {
             isOfficialChannelAdmin() ||
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||
             isViewOnceOpenUpdate() ||
+            messageStatusOnlyUpdate(chatId) ||
             // Модератор: только форма «удаления» сообщения (isDeleted + очистка
             // медиа-полей), произвольно менять текст/автора/время нельзя.
             // НОВОЕ (баг 10): в whitelist добавлен deletedByAdmin — пометка
@@ -1146,6 +1157,165 @@ service cloud.firestore {
           allow update: if false;
         }
       }
+    }
+
+    // ============================================================
+    // ОНЛАЙН-ДОСКА (этап 5): совместное рисование через интернет.
+    // Приглашение → сессия → пакеты протокола доски (кадры CanvasFrames).
+    // Содержимое НЕ шифруется сквозным шифрованием: его видят участники и владелец проекта Firebase.
+    // Рекомендуется включить TTL-политику Firestore по полю expireAt для коллекций
+    // canvasSessions, canvasInvites, toGuest, toHost, cursors (остатки удаляются автоматически).
+    // ============================================================
+    function canvasUuid(id) {
+      return id.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+    }
+    function canvasSessionData(sid) {
+      return get(/databases/$(database)/documents/canvasSessions/$(sid)).data;
+    }
+    function canvasParticipant(sid) {
+      let s = canvasSessionData(sid);
+      return isSignedIn() && (s.hostUid == request.auth.uid || s.guestUid == request.auth.uid);
+    }
+    // Пакет может создать только нужная сторона, и только пока сессия активна.
+    function canvasPacketWriter(sid, role) {
+      let s = canvasSessionData(sid);
+      return isSignedIn() && s.status == 'active' &&
+        (role == 'host' ? s.hostUid == request.auth.uid : s.guestUid == request.auth.uid);
+    }
+    function canvasPacketShape(n) {
+      return n.matches('^[0-9]{10}$') &&
+        request.resource.data.keys().hasOnly(['frame', 'expireAt']) &&
+        request.resource.data.frame is string &&
+        request.resource.data.frame.size() > 0 && request.resource.data.frame.size() <= 40000 &&
+        request.resource.data.expireAt is timestamp &&
+        request.resource.data.expireAt > request.time &&
+        request.resource.data.expireAt <= request.time + duration.value(1, 'd');
+    }
+
+    // Одноразовое приглашение: код -> id сессии. Получить можно только по точному коду, списка нет.
+    match /canvasInvites/{code} {
+      allow get: if isSignedIn() && code.matches('^[A-HJ-NP-Z2-9]{8}$');
+      allow list: if false;
+      allow create: if isSignedIn() && code.matches('^[A-HJ-NP-Z2-9]{8}$') &&
+        request.resource.data.keys().hasOnly(['sid', 'hostUid', 'expireAt']) &&
+        request.resource.data.hostUid == request.auth.uid &&
+        request.resource.data.sid is string && canvasUuid(request.resource.data.sid) &&
+        request.resource.data.expireAt is timestamp &&
+        request.resource.data.expireAt > request.time &&
+        request.resource.data.expireAt <= request.time + duration.value(15, 'm') &&
+        getAfter(/databases/$(database)/documents/canvasSessions/$(request.resource.data.sid)).data.hostUid == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/canvasSessions/$(request.resource.data.sid)).data.inviteCode == code;
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+    }
+
+    // Сессия двух участников. status: open -> joined (гость вошёл по коду) -> active (ведущий разрешил) -> ended.
+    match /canvasSessions/{sid} {
+      function canvasChangedKeys() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+      allow get: if canvasUuid(sid) && isSignedIn() &&
+        (resource.data.hostUid == request.auth.uid || resource.data.guestUid == request.auth.uid);
+      allow list: if false;
+      allow create: if isSignedIn() && canvasUuid(sid) &&
+        request.resource.data.keys().hasOnly(['hostUid', 'hostName', 'guestUid', 'guestName', 'status',
+          'inviteCode', 'createdAt', 'expireAt', 'hostSeen', 'guestSeen']) &&
+        request.resource.data.hostUid == request.auth.uid &&
+        request.resource.data.status == 'open' &&
+        request.resource.data.guestUid == null && request.resource.data.guestName == null &&
+        request.resource.data.guestSeen == null &&
+        request.resource.data.hostName is string && request.resource.data.hostName.size() <= 40 &&
+        request.resource.data.inviteCode is string &&
+        request.resource.data.inviteCode.matches('^[A-HJ-NP-Z2-9]{8}$') &&
+        request.resource.data.createdAt == request.time && request.resource.data.hostSeen == request.time &&
+        request.resource.data.expireAt is timestamp &&
+        request.resource.data.expireAt > request.time &&
+        request.resource.data.expireAt <= request.time + duration.value(1, 'd');
+      allow update: if isSignedIn() && canvasUuid(sid) && (
+        // 1) Вход гостя по действующему приглашению (одно место).
+        (resource.data.status == 'open' && resource.data.guestUid == null &&
+          request.auth.uid != resource.data.hostUid &&
+          canvasChangedKeys().hasOnly(['guestUid', 'guestName', 'status', 'guestSeen']) &&
+          request.resource.data.guestUid == request.auth.uid &&
+          request.resource.data.status == 'joined' &&
+          request.resource.data.guestName is string && request.resource.data.guestName.size() <= 40 &&
+          request.resource.data.guestSeen == request.time &&
+          exists(/databases/$(database)/documents/canvasInvites/$(resource.data.inviteCode)) &&
+          get(/databases/$(database)/documents/canvasInvites/$(resource.data.inviteCode)).data.sid == sid &&
+          get(/databases/$(database)/documents/canvasInvites/$(resource.data.inviteCode)).data.expireAt > request.time) ||
+        // 2) Ведущий: разрешить вход, завершить сессию, обновить «пульс».
+        (resource.data.hostUid == request.auth.uid &&
+          canvasChangedKeys().hasOnly(['status', 'hostSeen']) &&
+          (!('status' in canvasChangedKeys()) ||
+            (resource.data.status == 'joined' && request.resource.data.status == 'active') ||
+            request.resource.data.status == 'ended') &&
+          (!('hostSeen' in canvasChangedKeys()) || request.resource.data.hostSeen == request.time)) ||
+        // 3) Гость: завершить сессию, обновить «пульс».
+        (resource.data.guestUid == request.auth.uid &&
+          canvasChangedKeys().hasOnly(['status', 'guestSeen']) &&
+          (!('status' in canvasChangedKeys()) || request.resource.data.status == 'ended') &&
+          (!('guestSeen' in canvasChangedKeys()) || request.resource.data.guestSeen == request.time))
+      );
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+    }
+
+    // Пакеты: ведущий пишет в toGuest, гость — в toHost. Пакет создаётся один раз и не меняется.
+    match /canvasSessions/{sid}/toGuest/{n} {
+      allow read, delete: if canvasUuid(sid) && canvasParticipant(sid);
+      allow create: if canvasUuid(sid) && canvasPacketWriter(sid, 'host') && canvasPacketShape(n);
+      allow update: if false;
+    }
+    match /canvasSessions/{sid}/toHost/{n} {
+      allow read, delete: if canvasUuid(sid) && canvasParticipant(sid);
+      allow create: if canvasUuid(sid) && canvasPacketWriter(sid, 'guest') && canvasPacketShape(n);
+      allow update: if false;
+    }
+    // Курсор: один документ на участника, перезаписывается.
+    match /canvasSessions/{sid}/cursors/{uid} {
+      allow read, delete: if canvasUuid(sid) && canvasParticipant(sid);
+      allow create, update: if canvasUuid(sid) && isSignedIn() && request.auth.uid == uid &&
+        canvasParticipant(sid) &&
+        request.resource.data.keys().hasOnly(['b', 'expireAt']) &&
+        request.resource.data.b is string && request.resource.data.b.size() > 0 && request.resource.data.b.size() <= 3000 &&
+        request.resource.data.expireAt is timestamp && request.resource.data.expireAt <= request.time + duration.value(1, 'd');
+    }
+
+    // ============================================================
+    // ОБЩАЯ ДОСКА ЧАТА (этап 6): одна постоянная доска на личный чат или группу.
+    //   chats/{chatId}/sharedBoard/meta          — название, сетка, кто и когда менял
+    //   chats/{chatId}/sharedBoardObjects/{id}   — один объект рисунка (JSON), неизменяемый
+    // Читать и писать могут только участники чата. Содержимое НЕ шифруется сквозным шифрованием.
+    // ============================================================
+    function sharedBoardAllowed(chatId) {
+      let c = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return isSignedIn() && c.type in ['PRIVATE', 'GROUP'] && request.auth.uid in c.get('participantIds', []);
+    }
+
+    match /chats/{chatId}/sharedBoard/{docId} {
+      allow read: if docId == 'meta' && sharedBoardAllowed(chatId);
+      allow create: if docId == 'meta' && sharedBoardAllowed(chatId) &&
+        request.resource.data.keys().hasOnly(['title', 'width', 'height', 'grid', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.createdBy == request.auth.uid && request.resource.data.updatedBy == request.auth.uid &&
+        request.resource.data.width == 1200 && request.resource.data.height == 900 &&
+        request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'] &&
+        request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 100 &&
+        request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if docId == 'meta' && sharedBoardAllowed(chatId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['grid', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time &&
+        request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'];
+      allow delete: if false;
+    }
+
+    match /chats/{chatId}/sharedBoardObjects/{objectId} {
+      allow read: if sharedBoardAllowed(chatId);
+      allow create: if canvasUuid(objectId) && sharedBoardAllowed(chatId) &&
+        request.resource.data.keys().hasOnly(['json', 'authorUid', 'at']) &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.json is string && request.resource.data.json.size() > 0 && request.resource.data.json.size() <= 120000 &&
+        request.resource.data.at == request.time;
+      allow update: if false;
+      allow delete: if sharedBoardAllowed(chatId);
     }
   }
 }

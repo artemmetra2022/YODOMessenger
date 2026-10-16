@@ -29,7 +29,7 @@ class CanvasNearbyTransport @Inject constructor(@ApplicationContext context:Cont
     private var generation=0L
     override val epoch:Long get()=generation
     private fun now()=System.nanoTime()/1_000_000
-    private val service="app.yodo.messenger.CANVAS_V3"
+    private val service="app.yodo.messenger.CANVAS_V4"
     override fun host(){ start(true) }
     override fun discover(){ start(false) }
     private fun start(host:Boolean){

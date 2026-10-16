@@ -81,8 +81,35 @@ class ChatRepositoryImpl @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
     // НОВОЕ (закрепление официального канала): локальный пин канала — правила
     // Firestore не позволяют обычному пользователю писать в его документ.
-    private val userSettingsPreferences: app.yodo.messenger.data.local.UserSettingsPreferences
+    private val userSettingsPreferences: app.yodo.messenger.data.local.UserSettingsPreferences,
+    // Локальная расшифровка превью последнего сообщения в личных чатах.
+    private val cryptoManager: app.yodo.messenger.core.crypto.CryptoManager
 ) : ChatRepository {
+
+    /** Превью последнего сообщения личного чата, собранное на устройстве (E2EE-текст расшифровывается локально). */
+    private fun buildLocalPreview(msg: DocumentSnapshot, uid: String): String? {
+        if (!msg.exists() || msg.getBoolean("isDeleted") == true) return null
+        if (msg.getBoolean("encrypted") == true) {
+            val cipher = (msg.get("encByUid") as? Map<*, *>)?.get(uid) as? String ?: return null
+            val raw = cryptoManager.decrypt(cipher) ?: return null
+            val version = (msg.getLong("encryptedPayloadVersion") ?: 1L).toInt()
+            val text = runCatching {
+                app.yodo.messenger.core.crypto.ProtectedTextPayload.decode(raw, version).text
+            }.getOrNull() ?: return null
+            return text.replace('\n', ' ').takeIf { it.isNotBlank() }
+        }
+        msg.getString("text")?.takeIf { it.isNotBlank() }?.let { return it.replace('\n', ' ') }
+        return when {
+            msg.contains("checklistTitle") -> "☑ ${msg.getString("checklistTitle")}"
+            msg.contains("voiceBase64") -> "🎤 Голосовое сообщение"
+            msg.getBoolean("isViewOnce") == true -> "📷 Фото (один просмотр)"
+            msg.contains("imagesBase64") -> "📷 Фото (${(msg.get("imagesBase64") as? List<*>)?.size ?: 1})"
+            msg.contains("imageBase64") -> "📷 Фото"
+            msg.contains("locationLat") -> "📍 Геопозиция"
+            msg.contains("fileBase64") -> "📎 ${msg.getString("fileName") ?: "Файл"}"
+            else -> null
+        }
+    }
 
     override fun observeChatList(): Flow<ChatListResult> = callbackFlow {
         val currentUser = firebaseAuth.currentUser
@@ -121,6 +148,11 @@ class ChatRepositoryImpl @Inject constructor(
         val pendingRequestsCache = mutableMapOf<String, Int>()
         val joinRequestListeners = mutableMapOf<String, com.google.firebase.firestore.ListenerRegistration>()
         var latestChats = emptyList<ChatPreview>()
+        // Превью личных чатов, расшифрованные НА УСТРОЙСТВЕ (ключ chatId:messageId).
+        // На сервер открытый текст по-прежнему не пишется.
+        val localPreviews = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val resolvingPreviews = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        fun previewKey(chat: ChatPreview) = "${chat.chatId}:${chat.lastMessageId}"
         var officialChannel: ChatPreview? = null
 
         fun isEffectivelyOnline(data: PresenceData?): Boolean {
@@ -148,6 +180,7 @@ class ChatRepositoryImpl @Inject constructor(
                     // (PresenceStatusText/OnlineStatusDot), не дожидаясь новых событий Firestore.
                     val lastSeen = if (presence == null || presence.hidden) 0L else presence.lastSeen
                     chat.copy(
+                        lastMessage = if (chat.lastMessageId != null) (localPreviews[previewKey(chat)] ?: chat.lastMessage) else chat.lastMessage,
                         avatarUrl = cached?.first ?: chat.avatarUrl,
                         avatarBase64 = cached?.second ?: chat.avatarBase64,
                         username = cached?.third ?: chat.username,
@@ -313,6 +346,7 @@ class ChatRepositoryImpl @Inject constructor(
                             lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
                             lastMessageSenderId = doc.getString("lastMessageSenderId"),
                             lastMessageStatus = doc.getString("lastMessageStatus"),
+                            lastMessageId = doc.getString("lastMessageId"),
                             unreadCount = unreadForMe,
                             isOnline = false,
                             isVerified = doc.getBoolean("isVerified") ?: false,
@@ -328,6 +362,27 @@ class ChatRepositoryImpl @Inject constructor(
                         )
                     } catch (e: Exception) { null }
                 }
+            // Расшифровываем превью последнего сообщения личных чатов локально.
+            if (localPreviews.size > 500) localPreviews.clear()
+            val toResolve = latestChats.filter { c ->
+                c.lastMessageId != null && c.type == ChatType.PRIVATE &&
+                    (c.isEncryptedPreview || c.lastMessage == "Личное сообщение") &&
+                    localPreviews[previewKey(c)] == null && resolvingPreviews.add(previewKey(c))
+            }
+            if (toResolve.isNotEmpty()) {
+                launch(Dispatchers.IO) {
+                    toResolve.map { c ->
+                        async {
+                            try {
+                                val msg = firestore.collection("chats").document(c.chatId)
+                                    .collection("messages").document(c.lastMessageId!!).get().await()
+                                buildLocalPreview(msg, uid)?.let { localPreviews[previewKey(c)] = it }
+                            } catch (e: Exception) { } finally { resolvingPreviews.remove(previewKey(c)) }
+                        }
+                    }.awaitAll()
+                    emitList()
+                }
+            }
             emitList()
 
             // НОВОЕ (админ-функции групп): обновляем набор live-подписок на заявки —

@@ -29,6 +29,10 @@ sealed class Routes(val route: String) {
             return "canvas/${android.net.Uri.encode(chatId)}?${args.joinToString("&") }"
         }
     }
+    // Общая доска чата (этап 6): живая карточка в чате, редактор по нажатию.
+    data object SharedBoard : Routes("shared_board/{chatId}") {
+        fun createRoute(chatId: String) = "shared_board/${android.net.Uri.encode(chatId)}"
+    }
     data object ChatList : Routes("chat_list")
     data object Weather : Routes("weather")
     // НОВОЕ (каталог/рекомендации каналов): витрина каналов без поискового запроса.
@@ -58,6 +62,12 @@ sealed class Routes(val route: String) {
     data object SettingsChats : Routes("settings_chats?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
             if (anchor.isNullOrBlank()) "settings_chats" else "settings_chats?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    // Раздел настроек «Интерактивная доска».
+    data object SettingsBoard : Routes("settings_board?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_board" else "settings_board?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
     data object SettingsPrivacy : Routes("settings_privacy?anchor={anchor}") {
