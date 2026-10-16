@@ -180,8 +180,8 @@ object SettingsSearchIndex {
         ),
         SettingsSearchItem(
             id = "weather_card", anchorId = ANCHOR_CHATS,
-            title = "Погода", subtitle = "Показывать прогноз OpenWeatherMap на главном экране",
-            keywords = listOf("погода", "температура", "прогноз", "город", "openweather"),
+            title = "Погода", subtitle = "Показывать прогноз met.no на главном экране",
+            keywords = listOf("погода", "температура", "прогноз", "город", "met.no", "мет но"),
             sectionTitle = SEC_CHATS, categoryRoute = ROUTE_CHATS
         ),
         SettingsSearchItem(

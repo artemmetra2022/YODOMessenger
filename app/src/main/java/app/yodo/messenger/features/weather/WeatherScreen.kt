@@ -103,7 +103,7 @@ fun WeatherCompactCard(
                 }
                 is WeatherUiState.Ready -> {
                     val weather = current.data.current
-                    Text(weatherEmoji(weather.weather.firstOrNull()?.id ?: 800), fontSize = 32.sp)
+                    Text(weatherEmoji(weather.weather.firstOrNull()?.symbol ?: "cloudy"), fontSize = 32.sp)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(weather.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -187,7 +187,7 @@ fun WeatherScreen(
                             val representative = values.minByOrNull { kotlin.math.abs((it.dt % 86400) - 43200) } ?: values.first()
                             ForecastDay(
                                 day = date.format(formatter).replaceFirstChar { it.titlecase(Locale("ru")) },
-                                icon = weatherEmoji(representative.weather.firstOrNull()?.id ?: 800),
+                                icon = weatherEmoji(representative.weather.firstOrNull()?.symbol ?: "cloudy"),
                                 description = representative.weather.firstOrNull()?.description.orEmpty(),
                                 min = values.minOf { it.main.tempMin }.roundToInt(),
                                 max = values.maxOf { it.main.tempMax }.roundToInt()
@@ -196,7 +196,7 @@ fun WeatherScreen(
                     items(days) { day -> ForecastDayRow(day, experimental, dark) }
                     item {
                         Text(
-                            "Данные предоставлены OpenWeatherMap · обновление кешируется на 30 минут",
+                            "Данные предоставлены MET Norway (met.no) и OpenStreetMap · обновление кешируется на 30 минут",
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.labelSmall,
@@ -220,7 +220,7 @@ private fun CurrentWeatherCard(weather: CurrentWeatherResponse, experimental: Bo
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(weatherEmoji(weather.weather.firstOrNull()?.id ?: 800), fontSize = 54.sp)
+                Text(weatherEmoji(weather.weather.firstOrNull()?.symbol ?: "cloudy"), fontSize = 54.sp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(weather.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

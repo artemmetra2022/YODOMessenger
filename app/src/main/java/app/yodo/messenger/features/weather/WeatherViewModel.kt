@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
+import java.io.IOException
 import javax.inject.Inject
 
 sealed class WeatherUiState {
@@ -58,12 +59,13 @@ class WeatherViewModel @Inject constructor(
             } catch (error: Throwable) {
                 WeatherUiState.Error(
                     when (error) {
+                        is CityNotFoundException -> error.message ?: "Город не найден"
                         is HttpException -> when (error.code()) {
-                            401 -> "Ключ OpenWeatherMap не принят"
-                            404 -> "Город не найден"
+                            in 500..599 -> "Сервис погоды недоступен. Попробуйте позже"
                             429 -> "Слишком много запросов. Попробуйте позже"
                             else -> "Ошибка сервиса погоды: ${error.code()}"
                         }
+                        is IOException -> "Нет соединения с сервисом погоды"
                         else -> error.message ?: "Не удалось загрузить погоду"
                     }
                 )

@@ -309,7 +309,7 @@ fun ChatsSettingsScreen(
                     SettingsToggleRow(
                         icon = Icons.Filled.Cloud,
                         title = "Погода на главном экране",
-                        subtitle = "OpenWeatherMap · $weatherCity",
+                        subtitle = "met.no · $weatherCity",
                         checked = weatherCardEnabled,
                         onCheckedChange = { viewModel.setWeatherCardEnabled(it) },
                         colorTheme = colorTheme
