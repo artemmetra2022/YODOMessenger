@@ -30,6 +30,7 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.MenuItemColors
 import androidx.compose.material3.NavigationBarItemColors
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationBarItem as materialNavigationBarItem
 import androidx.compose.material3.RadioButtonColors
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.SelectableChipColors
@@ -510,7 +511,7 @@ fun RowScope.NavigationBarItem(
     colors: NavigationBarItemColors = NavigationBarItemDefaults.colors(),
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
 ) {
-    androidx.compose.material3.NavigationBarItem(
+    materialNavigationBarItem(
         selected = selected,
         onClick = onClick,
         icon = icon,
