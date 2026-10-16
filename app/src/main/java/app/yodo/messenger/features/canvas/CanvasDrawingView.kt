@@ -72,20 +72,30 @@ class CanvasDrawingView(context: Context) : View(context) {
     fun resetViewport(){zoom=1f;pan=CanvasPoint(0f,0f);cancelDraft();invalidate()}
     private fun cancelDraft(){removeCallbacks(holdRunnable);snapped=false;holdAnchor=null;activeGesture=false;draft=null;erasedIds.clear();erasedPreview=null;eraserPoint=null;gestureTooLong=false}
     override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas);canvas.drawColor(0xffe9edf3.toInt())
-        val base=document?:return
-        val doc=if(erasedPreview!=null)base.copy(objects=base.objects.filterNot{it.id in erasedIds})else base;val transform=transform()?:return
-        canvas.save();canvas.translate(transform.offsetX,transform.offsetY);canvas.scale(transform.scale,transform.scale)
-        CanvasRenderer.draw(canvas,doc,backgroundImage,draft)
-        remoteCursor?.let { cursor ->
-            val p=cursor.point;val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=cursor.color;style=Paint.Style.FILL}
-            val size=14f*resources.displayMetrics.density/transform.scale
-            val path=android.graphics.Path().apply{moveTo(p.x,p.y);lineTo(p.x+size*.3f,p.y+size);lineTo(p.x+size*.6f,p.y+size*.6f);lineTo(p.x+size,p.y+size*.3f);close()}
-            canvas.drawPath(path,paint);paint.textSize=12f*resources.displayMetrics.scaledDensity/transform.scale;canvas.drawText("Собеседник",p.x+size,p.y+size,paint)
+        // AndroidView does not guarantee clipping to its layout bounds in Compose.
+        // Clip before drawColor: otherwise the board can paint over sibling toolbars.
+        val saved = canvas.save()
+        try {
+            canvas.clipRect(0, 0, width, height)
+            super.onDraw(canvas)
+            canvas.drawColor(0xffe9edf3.toInt())
+            val base=document?:return
+            val doc=if(erasedPreview!=null)base.copy(objects=base.objects.filterNot{it.id in erasedIds})else base;val transform=transform()?:return
+            canvas.save();canvas.translate(transform.offsetX,transform.offsetY);canvas.scale(transform.scale,transform.scale)
+            CanvasRenderer.draw(canvas,doc,backgroundImage,draft)
+            remoteCursor?.let { cursor ->
+                val p=cursor.point;val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=cursor.color;style=Paint.Style.FILL}
+                val size=14f*resources.displayMetrics.density/transform.scale
+                val path=android.graphics.Path().apply{moveTo(p.x,p.y);lineTo(p.x+size*.3f,p.y+size);lineTo(p.x+size*.6f,p.y+size*.6f);lineTo(p.x+size,p.y+size*.3f);close()}
+                canvas.drawPath(path,paint);paint.textSize=12f*resources.displayMetrics.scaledDensity/transform.scale;canvas.drawText("Собеседник",p.x+size,p.y+size,paint)
+            }
+            eraserPoint?.let { p -> val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xff2563eb.toInt();style=Paint.Style.STROKE;strokeWidth=2f/transform.scale};canvas.drawCircle(p.x,p.y,max(12f,18f/transform.scale),paint) }
+            canvas.restore()
+        } finally {
+            canvas.restoreToCount(saved)
         }
-        eraserPoint?.let { p -> val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xff2563eb.toInt();style=Paint.Style.STROKE;strokeWidth=2f/transform.scale};canvas.drawCircle(p.x,p.y,max(12f,18f/transform.scale),paint) }
-        canvas.restore()
     }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val doc=document?:return false
         if(!isEnabled){cancelDraft();return false}

@@ -24,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -107,7 +108,7 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
             FilterChip(selected=shapeAssist,onClick={shapeAssist=!shapeAssist},label={Text("Умные фигуры")})
             FilterChip(selected=snapGrid,onClick={snapGrid=!snapGrid},label={Text("К сетке")})
         }
-        Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xffe9edf3))) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().background(Color(0xffe9edf3))) {
             val doc=state.doc
             if(doc!=null) AndroidView(modifier=Modifier.fillMaxSize(),factory={context->CanvasDrawingView(context).also{drawingView=it}},update={view->
                 val changed=view.document?.id!=doc.id
