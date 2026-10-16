@@ -108,13 +108,18 @@ jobs:
               f.write(f"version_code={version_code}\n")
           EOF
 
+      # Ключ OpenWeatherMap передаём из секрета, а не из файла репозитория:
+      # gradle.properties с ключом не проходит GitHub Push Protection, а без
+      # -POPENWEATHER_API_KEY BuildConfig.OPENWEATHER_API_KEY пустой и карточка
+      # погоды на главном экране не загружается.
       - name: Build release APK
         env:
           YODO_KEYSTORE_PATH: ${{ runner.temp }}/yodo-release.jks
           YODO_KEYSTORE_PASSWORD: ${{ secrets.YODO_KEYSTORE_PASSWORD }}
           YODO_KEY_ALIAS: ${{ secrets.YODO_KEY_ALIAS }}
           YODO_KEY_PASSWORD: ${{ secrets.YODO_KEY_PASSWORD }}
-        run: gradle assembleRelease -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: gradle assembleRelease -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} -POPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" --stacktrace
 
       - name: Prepare APK for release
         id: apk
