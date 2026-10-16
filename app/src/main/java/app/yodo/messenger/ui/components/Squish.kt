@@ -39,6 +39,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -83,6 +84,12 @@ object SquishDefaults {
 }
 
 /**
+ * Множитель силы сжатия для целого поддерева (например, контекстного меню сообщения,
+ * где пункты хотелось сделать отзывчивее). По умолчанию 1f — ничего не меняется.
+ */
+val LocalSquishScale = compositionLocalOf { 1f }
+
+/**
  * Рисует содержимое элемента сжатым, пока он нажат.
  * Только отрисовка: размеры и зона нажатия не меняются, поэтому палец
  * на краю кнопки не «срывает» нажатие.
@@ -98,6 +105,7 @@ fun Modifier.squish(
     // 0f — покой, 1f — полностью вдавлено. Пружина на отпускании даёт перелёт (<0) = лёгкое растяжение.
     val progress = remember { Animatable(0f) }
     val pressStart = remember { longArrayOf(0L) }
+    val scale = LocalSquishScale.current
 
     LaunchedEffect(pressed) {
         if (pressed) {
@@ -125,9 +133,9 @@ fun Modifier.squish(
             val w = size.width.coerceAtLeast(1f)
             val h = size.height.coerceAtLeast(1f)
             val fx = ((SquishDefaults.INSET_X_DP * density) / w)
-                .coerceIn(SquishDefaults.MIN_FRACTION, SquishDefaults.MAX_FRACTION_X) * strength
+                .coerceIn(SquishDefaults.MIN_FRACTION, SquishDefaults.MAX_FRACTION_X) * strength * scale
             val fy = ((SquishDefaults.INSET_Y_DP * density) / h)
-                .coerceIn(SquishDefaults.MIN_FRACTION, SquishDefaults.MAX_FRACTION_Y) * strength
+                .coerceIn(SquishDefaults.MIN_FRACTION, SquishDefaults.MAX_FRACTION_Y) * strength * scale
             withTransform({
                 scale(
                     scaleX = 1f - fx * p,

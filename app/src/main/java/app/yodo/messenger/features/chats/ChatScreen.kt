@@ -49,6 +49,12 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import app.yodo.messenger.ui.components.squish
+import app.yodo.messenger.ui.components.LocalSquishScale
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -2138,6 +2144,9 @@ private fun MessageBubble(
         }
     }
     var tapCount by remember { mutableIntStateOf(0) }
+    // Тактильный отклик пузыря: сжатие при нажатии + лёгкая вибрация при долгом нажатии.
+    val bubbleSource = remember { MutableInteractionSource() }
+    val bubbleHaptics = LocalHapticFeedback.current
     LaunchedEffect(tapCount) {
         if (tapCount > 0) {
             kotlinx.coroutines.delay(450)
@@ -2213,6 +2222,7 @@ private fun MessageBubble(
                 Column(
                     modifier = Modifier
                         .widthIn(max = maxWidth * 0.78f)
+                        .squish(bubbleSource, strength = 0.5f)
                         .shadow(
                             elevation = 1.dp,
                             shape = bubbleShape,
@@ -2235,7 +2245,18 @@ private fun MessageBubble(
                         } else Modifier)
                         .pointerInput(message.id, isSelectionMode) {
                             detectTapGestures(
-                                onLongPress = { if (!isSelectionMode) showMenu = true },
+                                onPress = { offset ->
+                                    val press = PressInteraction.Press(offset)
+                                    bubbleSource.emit(press)
+                                    if (tryAwaitRelease()) bubbleSource.emit(PressInteraction.Release(press))
+                                    else bubbleSource.emit(PressInteraction.Cancel(press))
+                                },
+                                onLongPress = {
+                                    if (!isSelectionMode) {
+                                        bubbleHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showMenu = true
+                                    }
+                                },
                                 onTap = {
                                     // НОВОЕ (выделение сообщений): если уже включён режим
                                     // множественного выбора (есть хотя бы одно выделенное
@@ -2681,6 +2702,7 @@ private fun MessageBubble(
         // упираться в край и быть недоступны. Ограничиваем высоту и добавляем
         // вертикальную прокрутку — меню остаётся компактным, а все пункты доступны.
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                CompositionLocalProvider(LocalSquishScale provides 1.6f) {
                 Column(
                     modifier = Modifier
                         .heightIn(max = 350.dp)
@@ -2763,6 +2785,7 @@ private fun MessageBubble(
                         }
                     }
                 }
+                }   // CompositionLocalProvider
                 }
 
         // НОВОЕ (модерация): подтверждение удаления чужого сообщения.
@@ -3419,6 +3442,8 @@ private fun MessageInputBar(
     val inputGlassAlpha = (0.04f + glassFraction * 0.78f).coerceIn(0.04f, 0.84f)
     var showEmojiPicker by remember { mutableStateOf(false) }
     Surface(
+        // Панель ввода (смайлики, поле, вложения, отправка/микрофон) приподнята над нижним краем.
+        modifier = Modifier.padding(bottom = 12.dp),
         color = Color.Transparent,
         shadowElevation = 0.dp
     ) {
@@ -3504,17 +3529,24 @@ private fun MessageInputBar(
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 if (text.isBlank() && !isSending) {
+                    // Тактильный отклик микрофона: кнопка «вдавливается», пока зажата запись.
+                    val micSource = remember { MutableInteractionSource() }
                     Box(
                         modifier = Modifier
                             .size(if (experimentalInterface) 46.dp else 50.dp)
+                            .squish(micSource, strength = 1.2f)
                             .clip(CircleShape)
                             .background(colorTheme.primary)
                             .pointerInput(Unit) {
                                 detectTapGestures(
-                                    onPress = {
+                                    onPress = { offset ->
+                                        val press = PressInteraction.Press(offset)
+                                        micSource.emit(press)
                                         onMicPressStart()
-                                        tryAwaitRelease()
+                                        val released = tryAwaitRelease()
                                         onMicPressEnd()
+                                        if (released) micSource.emit(PressInteraction.Release(press))
+                                        else micSource.emit(PressInteraction.Cancel(press))
                                     }
                                 )
                             },
