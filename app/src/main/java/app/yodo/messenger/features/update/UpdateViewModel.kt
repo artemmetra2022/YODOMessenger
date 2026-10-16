@@ -24,6 +24,8 @@ data class UpdateUiState(
     val update: AppUpdate? = null,
     /** Прогресс загрузки APK в процентах; null — размер неизвестен. */
     val progressPercent: Int? = null,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long? = null,
     val downloadedFile: File? = null,
     val message: String? = null
 )
@@ -89,11 +91,11 @@ class UpdateViewModel @Inject constructor(
         if (_state.value.phase == UpdatePhase.DOWNLOADING) return
 
         viewModelScope.launch {
-            _state.update { it.copy(phase = UpdatePhase.DOWNLOADING, progressPercent = 0, message = null) }
+            _state.update { it.copy(phase = UpdatePhase.DOWNLOADING, progressPercent = null, downloadedBytes = 0L, totalBytes = null, downloadedFile = null, message = null) }
             try {
                 val file = updateRepository.downloadApk(url, update.versionName) { done, total ->
-                    val percent = if (total > 0L) ((done * 100) / total).toInt() else null
-                    _state.update { it.copy(progressPercent = percent) }
+                    val percent = if (total > 0L) ((done.toDouble() / total) * 100).toInt().coerceIn(0, 100) else null
+                    _state.update { it.copy(progressPercent = percent, downloadedBytes = done.coerceAtLeast(0), totalBytes = total.takeIf { size -> size > 0 }) }
                 }
                 _state.update {
                     it.copy(phase = UpdatePhase.READY_TO_INSTALL, progressPercent = null, downloadedFile = file)

@@ -408,6 +408,10 @@ function startSettings() {
   const settingsRef = doc(db, "config/appSettings");
 
   onSnapshot(settingsRef, (snap) => {
+    const interval = snap.get("boardSyncIntervalMs");
+    const validInterval = Number.isInteger(interval) && interval >= 0 && interval <= 5000 ? interval : 0;
+    if (document.activeElement !== $("board-sync-ms")) $("board-sync-ms").value = String(validInterval);
+    $("board-sync-status").textContent = validInterval === 0 ? "Сейчас: в реальном времени" : `Сейчас: каждые ${validInterval} мс`;
     const hidden = snap.get("schoolSectionHidden") === true;
     $("toggle-school-hidden").checked = hidden;
 
@@ -445,6 +449,23 @@ function startSettings() {
     $("banner-start-at").value = toDatetimeLocal(snap.get("bannerStartAt"));
     $("banner-end-at").value = toDatetimeLocal(snap.get("bannerEndAt"));
   }, handleErr("Не удалось загрузить настройки"));
+
+  $("form-board-sync").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("board-sync-ms");
+    const interval = input.valueAsNumber;
+    if (!Number.isInteger(interval) || interval < 0 || interval > 5000) {
+      toast("Введите целое число от 0 до 5000 мс"); return;
+    }
+    const button = e.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await setDoc(settingsRef, { boardSyncIntervalMs: interval }, { merge: true });
+      toast("Интервал синхронизации досок сохранён");
+      logAdminAction("BOARD_SYNC_INTERVAL_CHANGED", `${interval} мс`);
+    } catch (err) { handleErr("Не удалось сохранить интервал")(err); }
+    finally { button.disabled = false; }
+  });
 
   $("toggle-school-hidden").addEventListener("change", async (e) => {
     try {

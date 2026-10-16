@@ -173,8 +173,7 @@ private fun StatusLine(state: UpdateUiState, colorTheme: ColorTheme) {
             fontWeight = FontWeight.SemiBold
         )
         UpdatePhase.DOWNLOADING -> Text(
-            state.progressPercent?.let { stringResource(R.string.update_downloading_format, it) }
-                ?: stringResource(R.string.update_downloading_unknown),
+            formatDownloadProgress(state.downloadedBytes, state.totalBytes, state.progressPercent),
             style = MaterialTheme.typography.bodyMedium,
             color = colorTheme.primary
         )

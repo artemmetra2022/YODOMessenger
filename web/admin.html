@@ -110,6 +110,17 @@
           <p class="card-hint" id="activity-summary"></p>
         </div>
 
+        <div class="card overview-card" data-admin-area="messenger">
+          <h2>Синхронизация досок</h2>
+          <p class="card-hint">Интервал обновления общей доски и отправки правок интерактивной онлайн-доски. 0 — в реальном времени. На общей доске свои правки отображаются сразу; настройка не сокращает число чтений Firestore. Nearby не затрагивается.</p>
+          <form id="form-board-sync" class="form-row">
+            <label for="board-sync-ms">Интервал, мс (0–5000)</label>
+            <input id="board-sync-ms" type="number" min="0" max="5000" step="1" value="0" required>
+            <button type="submit" class="btn-primary">Сохранить</button>
+          </form>
+          <p class="card-hint" id="board-sync-status" role="status"></p>
+        </div>
+
         <div class="card overview-card" data-admin-area="school">
           <h2>Раздел «Школа»</h2>
           <p class="card-hint">Скрытие действует глобально для всех пользователей (кроме админов).</p>

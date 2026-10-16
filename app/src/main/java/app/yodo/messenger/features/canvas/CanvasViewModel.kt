@@ -143,6 +143,25 @@ class CanvasViewModel @Inject constructor(
     }
     }
     fun save(onSaved:()->Unit={})=task { saveCurrent(); onSaved() }
+    fun clearBoard() = task {
+        check(!collab.running) { "Сначала завершите совместную сессию" }
+        val doc = _state.value.doc ?: return@task
+        val cleared = doc.copy(objects = emptyList(), backgroundBase64 = null, template = CanvasTemplate.NONE)
+        history = CanvasHistory(cleared)
+        _state.update { it.copy(doc = cleared, background = null, saved = false, canUndo = false, canRedo = false) }
+        saveCurrent()
+    }
+    fun deleteBoard(id: String, onDeleted: () -> Unit = {}) = task {
+        check(!collab.running) { "Сначала завершите совместную сессию" }
+        store.delete(owner, chat, id)
+        checkAccount()
+        if (_state.value.doc?.id == id) {
+            history = null
+            savedState.remove<String>("activeCanvasId")
+            _state.value = CanvasUiState(busy = true)
+        }
+        onDeleted()
+    }
     fun newBoard()=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); install(newBoardDocument()); _state.update{it.copy(busy=true)}; saveCurrent() }
     fun openBoard(id:String)=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); install(requireNotNull(store.load(owner,chat,id))); _state.update{it.copy(busy=true)}; saveCurrent() }
     fun recent(onLoaded:(List<CanvasRecent>)->Unit)=task {check(!collab.running) { "Сначала завершите совместную сессию" }; saveCurrent(); onLoaded(store.recent(owner,chat)) }

@@ -6,6 +6,9 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.QuerySnapshot
+import com.google.firebase.firestore.Source
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import com.google.firebase.firestore.DocumentSnapshot.ServerTimestampBehavior
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
@@ -38,7 +41,7 @@ sealed interface SharedBoardState {
 
 data class SharedBoard(
     val chatId: String, val title: String, val grid: CanvasGrid, val objects: List<CanvasObject>,
-    val updatedAtMs: Long?, val truncated: Boolean
+    val updatedAtMs: Long?, val truncated: Boolean, val generation: Long = 0L, val clearing: Boolean = false
 ) {
     /** Стабильный id документа для редактора: один и тот же для одного чата. */
     fun toDocument(): CanvasDocument = CanvasDocument(
@@ -85,18 +88,43 @@ object CanvasSharedCodec {
 }
 
 @Singleton
-class SharedBoardRepository @Inject constructor(private val firestore: FirebaseFirestore, private val auth: FirebaseAuth) {
+class SharedBoardRepository @Inject constructor(private val firestore: FirebaseFirestore, private val auth: FirebaseAuth, private val syncSettings: BoardSyncSettings) {
     private fun meta(chatId: String) = firestore.collection("chats").document(chatId).collection("sharedBoard").document("meta")
     private fun objects(chatId: String) = firestore.collection("chats").document(chatId).collection("sharedBoardObjects")
 
     fun observe(chatId: String): Flow<SharedBoardState> = callbackFlow {
         var metaSnap: DocumentSnapshot? = null
         var objectsSnap: QuerySnapshot? = null
+        var pending: Job? = null
+        var lastPublish = 0L
+        var firstReady = true
+        var lastGeneration = -1L
         fun publish() {
             val m = metaSnap ?: return
-            if (!m.exists()) { if (!m.metadata.isFromCache) trySend(SharedBoardState.Missing); return }
+            if (!m.exists() || m.getBoolean("deleted") == true) {
+                pending?.cancel(); pending = null
+                if (m.exists() || !m.metadata.isFromCache) trySend(SharedBoardState.Missing)
+                return
+            }
             val o = objectsSnap ?: return
-            trySend(SharedBoardState.Ready(build(chatId, m, o)))
+            val generation = m.getLong("generation") ?: 0L
+            val immediate = firstReady || generation != lastGeneration || m.getBoolean("clearing") == true ||
+                m.metadata.hasPendingWrites() || o.metadata.hasPendingWrites()
+            fun emitLatest() {
+                val latestMeta = metaSnap ?: return
+                val latestObjects = objectsSnap ?: return
+                if (!latestMeta.exists() || latestMeta.getBoolean("deleted") == true) return
+                firstReady = false
+                lastGeneration = latestMeta.getLong("generation") ?: 0L
+                lastPublish = android.os.SystemClock.elapsedRealtime()
+                trySend(SharedBoardState.Ready(build(chatId, latestMeta, latestObjects)))
+            }
+            val wait = syncSettings.intervalMs.value - (android.os.SystemClock.elapsedRealtime() - lastPublish)
+            if (immediate || wait <= 0) {
+                pending?.cancel(); pending = null; emitLatest()
+            } else if (pending?.isActive != true) {
+                pending = launch { delay(wait); emitLatest() }
+            }
         }
         val r1 = meta(chatId).addSnapshotListener { snap, error ->
             if (error != null) { trySend(SharedBoardState.Failed(describe(error))); return@addSnapshotListener }
@@ -106,11 +134,15 @@ class SharedBoardRepository @Inject constructor(private val firestore: FirebaseF
             if (error != null) { trySend(SharedBoardState.Failed(describe(error))); return@addSnapshotListener }
             objectsSnap = snap; publish()
         }
-        awaitClose { r1.remove(); r2.remove() }
+        val configJob = launch { syncSettings.intervalMs.collect { publish() } }
+        awaitClose { pending?.cancel(); configJob.cancel(); r1.remove(); r2.remove() }
     }.distinctUntilChanged()
 
     private fun build(chatId: String, m: DocumentSnapshot, o: QuerySnapshot): SharedBoard {
-        val decoded = o.documents.mapNotNull { d ->
+        val epoch = m.getLong("generation") ?: 0L
+        val clearing = m.getBoolean("clearing") == true
+        val current = o.documents.filter { (it.getLong("generation") ?: 0L) == epoch }
+        val decoded = if (clearing) emptyList() else current.mapNotNull { d ->
             d.getString("json")?.let(CanvasSharedCodec::decodeObject)?.takeIf { it.id == d.id }
         }
         return SharedBoard(
@@ -118,17 +150,65 @@ class SharedBoardRepository @Inject constructor(private val firestore: FirebaseF
             grid = m.getString("grid")?.let { runCatching { CanvasGrid.valueOf(it) }.getOrNull() } ?: CanvasGrid.SQUARES,
             objects = decoded.take(CanvasLimits.MAX_OBJECTS),
             updatedAtMs = m.getTimestamp("updatedAt", ServerTimestampBehavior.ESTIMATE)?.toDate()?.time,
-            truncated = o.documents.size > CanvasLimits.MAX_OBJECTS
+            truncated = o.documents.size > CanvasLimits.MAX_OBJECTS,
+            generation = epoch, clearing = clearing
         )
     }
 
-    suspend fun create(chatId: String, grid: CanvasGrid) {
+    /** Only an explicit user action revives a tombstone; existing listeners never recreate it. */
+    suspend fun create(chatId: String, grid: CanvasGrid, revive: Boolean = false) {
         val uid = requireNotNull(auth.currentUser?.uid) { "Войдите в аккаунт" }
         withTimeout(20_000) {
-            meta(chatId).set(mapOf(
-                "title" to "Общая доска", "width" to CanvasSharedCodec.WIDTH, "height" to CanvasSharedCodec.HEIGHT, "grid" to grid.name,
-                "createdBy" to uid, "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid
-            )).await()
+            firestore.runTransaction { tx ->
+                val ref = meta(chatId); val old = tx.get(ref)
+                if (old.exists() && !(revive && old.getBoolean("deleted") == true)) return@runTransaction
+                check(old.getBoolean("clearing") != true) { "Очистка ещё не завершена. Повторите удаление." }
+                val fields = mapOf(
+                    "title" to "Общая доска", "width" to CanvasSharedCodec.WIDTH, "height" to CanvasSharedCodec.HEIGHT, "grid" to grid.name,
+                    "createdBy" to uid, "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid,
+                    "generation" to ((old.getLong("generation") ?: -1L) + 1L), "deleted" to false, "clearing" to false
+                )
+                if (old.exists()) tx.update(ref, mapOf("grid" to grid.name, "deleted" to false, "clearing" to false,
+                    "generation" to ((old.getLong("generation") ?: 0L) + 1L), "updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid))
+                else tx.set(ref, fields)
+            }.await()
+        }
+    }
+
+    /** Generation fence immediately invalidates old gestures/undo, including objects beyond the UI limit. */
+    suspend fun reset(chatId: String, deleteBoard: Boolean) {
+        val uid = requireNotNull(auth.currentUser?.uid) { "Войдите в аккаунт" }
+        val token = UUID.randomUUID().toString()
+        val epoch = withTimeout(20_000) {
+            firestore.runTransaction { tx ->
+                val ref = meta(chatId); val old = tx.get(ref)
+                check(old.exists()) { "Доска не найдена" }
+                val next = (old.getLong("generation") ?: 0L) + 1L
+                tx.update(ref, mapOf("generation" to next, "clearing" to true, "deleted" to deleteBoard,
+                    "resetToken" to token, "updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid))
+                next
+            }.await()
+        }
+        // Read the entire collection, not the limited preview. New-generation objects are never deleted.
+        var after: DocumentSnapshot? = null
+        while (true) {
+            var query = objects(chatId).orderBy(com.google.firebase.firestore.FieldPath.documentId()).limit(100)
+            after?.let { query = query.startAfter(it) }
+            val page = withTimeout(30_000) { query.get(Source.SERVER).await() }
+            if (page.isEmpty) break
+            for (group in page.documents.filter { (it.getLong("generation") ?: 0L) < epoch }.chunked(10)) {
+                val batch = firestore.batch()
+                group.forEach { batch.delete(it.reference) }
+                withTimeout(30_000) { batch.commit().await() }
+            }
+            after = page.documents.last()
+        }
+        withTimeout(20_000) {
+            firestore.runTransaction { tx ->
+                val ref = meta(chatId); val latest = tx.get(ref)
+                check(latest.getString("resetToken") == token) { "Доска уже изменена другим участником" }
+                tx.update(ref, mapOf("clearing" to false, "updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid))
+            }.await()
         }
     }
 
@@ -138,16 +218,19 @@ class SharedBoardRepository @Inject constructor(private val firestore: FirebaseF
     }
 
     /** Добавляет и удаляет объекты. Записи идут группами ≤ 10: у правил Firestore есть лимит обращений get() на запрос. */
-    suspend fun apply(chatId: String, adds: List<CanvasObject>, removes: List<String>) {
+    suspend fun apply(chatId: String, adds: List<CanvasObject>, removes: List<String>, expectedGeneration: Long) {
         val uid = requireNotNull(auth.currentUser?.uid) { "Войдите в аккаунт" }
         require(adds.isNotEmpty() || removes.isNotEmpty())
+        val current = withTimeout(20_000) { meta(chatId).get(Source.SERVER).await() }
+        check(current.exists() && current.getBoolean("deleted") != true && current.getBoolean("clearing") != true &&
+            (current.getLong("generation") ?: 0L) == expectedGeneration) { "Доска была очищена или удалена. Повторите действие." }
         val encoded = adds.map { it.id to CanvasSharedCodec.encodeObject(it) }
         val ops = encoded.map { WriteOp(add = it) } + removes.map { WriteOp(remove = it) }
         val groups = ops.chunked(10)
         groups.forEachIndexed { index, group ->
             val batch = firestore.batch()
             group.forEach { op ->
-                op.add?.let { (id, json) -> batch.set(objects(chatId).document(id), mapOf("json" to json, "authorUid" to uid, "at" to FieldValue.serverTimestamp())) }
+                op.add?.let { (id, json) -> batch.set(objects(chatId).document(id), mapOf("json" to json, "authorUid" to uid, "at" to FieldValue.serverTimestamp(), "generation" to expectedGeneration)) }
                 op.remove?.let { id -> batch.delete(objects(chatId).document(id)) }
             }
             if (index == groups.lastIndex) batch.update(meta(chatId), mapOf("updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid))

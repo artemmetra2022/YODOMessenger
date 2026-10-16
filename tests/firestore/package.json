@@ -2,7 +2,7 @@
   "name": "yodo-checklist-rules-tests",
   "private": true,
   "scripts": {
-    "test": "node checklists.cjs && node private-text-security.cjs && node canvas.cjs"
+    "test": "node checklists.cjs && node private-text-security.cjs && node canvas.cjs && node shared-board.cjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "4.0.1",

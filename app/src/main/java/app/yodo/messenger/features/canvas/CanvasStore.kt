@@ -59,6 +59,13 @@ class CanvasStore @Inject constructor(@ApplicationContext private val context: C
                 ?.mapNotNull { runCatching { loadLocked(owner,chat,it.name.removeSuffix(".enc")).let { doc -> CanvasRecent(doc.id, doc.title) } }.getOrNull() } ?: emptyList()
         }
     }
+    suspend fun delete(owner: String, chat: String, id: String) = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val target = file(owner, chat, id)
+            AtomicFile(target).delete()
+            check(!target.exists() && !File(target.path + ".bak").exists() && !File(target.path + ".new").exists()) { "Не удалось удалить доску" }
+        }
+    }
     suspend fun save(owner: String, chat: String, doc: CanvasDocument) = withContext(Dispatchers.IO) {
         synchronized(lock) {
             val plain = CanvasCodec.encode(doc).toByteArray(); require(plain.size <= CanvasLimits.MAX_JSON_BYTES)

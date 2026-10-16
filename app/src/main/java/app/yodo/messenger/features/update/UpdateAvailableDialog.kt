@@ -67,9 +67,7 @@ fun UpdateAvailableDialog(
                 if (state.phase == UpdatePhase.DOWNLOADING) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        state.progressPercent?.let {
-                            stringResource(R.string.update_downloading_format, it)
-                        } ?: stringResource(R.string.update_downloading_unknown),
+                        formatDownloadProgress(state.downloadedBytes, state.totalBytes, state.progressPercent),
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(modifier = Modifier.height(8.dp))

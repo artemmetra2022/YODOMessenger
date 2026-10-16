@@ -383,7 +383,9 @@ service cloud.firestore {
     // "подтвердите почту". Менять могут только 2 доверенных email.
     match /config/appSettings {
       allow read: if true;
-      allow write: if isOfficialChannelAdmin();
+      allow write: if isOfficialChannelAdmin() &&
+        (!('boardSyncIntervalMs' in request.resource.data) ||
+          (request.resource.data.boardSyncIntervalMs is int && request.resource.data.boardSyncIntervalMs >= 0 && request.resource.data.boardSyncIntervalMs <= 5000));
     }
 
     // НОВОЕ (FAQ-бот поддержки): редактируемый из веб-админки (раздел
@@ -1291,26 +1293,52 @@ service cloud.firestore {
       return isSignedIn() && c.type in ['PRIVATE', 'GROUP'] && request.auth.uid in c.get('participantIds', []);
     }
 
+    // A generation fence prevents stale/offline clients from restoring a cleared board.
+    function sharedBoardWritable(chatId, data) {
+      let board = get(/databases/$(database)/documents/chats/$(chatId)/sharedBoard/meta).data;
+      return !board.get('deleted', false) && !board.get('clearing', false) &&
+        data.get('generation', 0) == board.get('generation', 0);
+    }
+
     match /chats/{chatId}/sharedBoard/{docId} {
       allow read: if docId == 'meta' && sharedBoardAllowed(chatId);
       allow create: if docId == 'meta' && sharedBoardAllowed(chatId) &&
-        request.resource.data.keys().hasOnly(['title', 'width', 'height', 'grid', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.keys().hasOnly(['title', 'width', 'height', 'grid', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy', 'generation', 'deleted', 'clearing']) &&
         request.resource.data.createdBy == request.auth.uid && request.resource.data.updatedBy == request.auth.uid &&
         request.resource.data.width == 1200 && request.resource.data.height == 900 &&
         request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'] &&
         request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 100 &&
+        request.resource.data.get('generation', 0) == 0 && request.resource.data.get('deleted', false) == false && request.resource.data.get('clearing', false) == false &&
         request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
       allow update: if docId == 'meta' && sharedBoardAllowed(chatId) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['grid', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['grid', 'updatedAt', 'updatedBy', 'generation', 'deleted', 'clearing', 'resetToken']) &&
         request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time &&
-        request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'];
+        request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'] &&
+        request.resource.data.get('generation', 0) is int &&
+        request.resource.data.get('deleted', false) is bool && request.resource.data.get('clearing', false) is bool &&
+        (
+          // Regular edits/completion retain the generation and deletion state.
+          (request.resource.data.get('generation', 0) == resource.data.get('generation', 0) &&
+            request.resource.data.get('deleted', false) == resource.data.get('deleted', false) &&
+            request.resource.data.get('resetToken', '') == resource.data.get('resetToken', '') &&
+            (request.resource.data.get('clearing', false) == resource.data.get('clearing', false) ||
+              (resource.data.get('clearing', false) && request.resource.data.get('clearing', false) == false))) ||
+          // Reset invalidates all previous-generation objects; explicit recreation is separate.
+          (request.resource.data.get('generation', 0) == resource.data.get('generation', 0) + 1 &&
+            ((request.resource.data.get('clearing', false) == true &&
+              request.resource.data.get('resetToken', '') is string && request.resource.data.get('resetToken', '').size() == 36) ||
+             (resource.data.get('deleted', false) == true && resource.data.get('clearing', false) == false &&
+              request.resource.data.get('deleted', false) == false && request.resource.data.get('clearing', false) == false)))
+        );
+      // Keep a tombstone: active editors must not silently recreate a deleted board.
       allow delete: if false;
     }
 
     match /chats/{chatId}/sharedBoardObjects/{objectId} {
       allow read: if sharedBoardAllowed(chatId);
       allow create: if canvasUuid(objectId) && sharedBoardAllowed(chatId) &&
-        request.resource.data.keys().hasOnly(['json', 'authorUid', 'at']) &&
+        request.resource.data.keys().hasOnly(['json', 'authorUid', 'at', 'generation']) &&
+        sharedBoardWritable(chatId, request.resource.data) &&
         request.resource.data.authorUid == request.auth.uid &&
         request.resource.data.json is string && request.resource.data.json.size() > 0 && request.resource.data.json.size() <= 120000 &&
         request.resource.data.at == request.time;

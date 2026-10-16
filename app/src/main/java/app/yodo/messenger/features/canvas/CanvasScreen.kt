@@ -58,6 +58,8 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     var title by remember { mutableStateOf("") }
     var publish by remember { mutableStateOf(false) }
     var createNew by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<CanvasRecent?>(null) }
     var confirmImport by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf<List<CanvasRecent>?>(null) }
     val snack=remember { SnackbarHostState() }
@@ -137,6 +139,8 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
             OutlinedButton(enabled=!state.busy&&state.doc!=null,onClick={export.launch("yodo-canvas.png")}){Text("Экспорт PNG")}
             TextButton(enabled=!state.busy&&localSettings,onClick={viewModel.recent{recent=it}}){Text("Мои доски")}
             TextButton(enabled=!state.busy&&localSettings,onClick={createNew=true}){Text("Новая")}
+            TextButton(enabled=!state.busy&&state.doc!=null&&localSettings,onClick={confirmClear=true}){Text("Очистить всё")}
+            TextButton(enabled=!state.busy&&state.doc!=null&&localSettings,onClick={state.doc?.let{deleting=CanvasRecent(it.id,it.title)}}){Text("Удалить доску")}
         }
     } }
     formulaPoint?.let { point -> CanvasFormulaDialog(editingFormula,fontSize,editingFormula?.color?:color,
@@ -152,10 +156,12 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
         confirmButton={TextButton(enabled=title.isNotBlank(),onClick={viewModel.rename(title);rename=false}){Text("Сохранить")}},dismissButton={TextButton(onClick={rename=false}){Text("Отмена")}})
     if(publish)AlertDialog(onDismissRequest={publish=false},title={Text("Отправить PNG-превью?")},text={Text("В чат отправится картинка, а не редактируемый проект. Получатель сможет открыть её как фон новой доски. Изображения пока не защищены сквозным шифрованием. Совместная сессия Nearby этой картинкой не передаётся.")},
         confirmButton={TextButton(onClick={publish=false;viewModel.publish()}){Text("Отправить")}},dismissButton={TextButton(onClick={publish=false}){Text("Отмена")}})
+    if(confirmClear) AlertDialog(onDismissRequest={confirmClear=false},title={Text("Очистить доску?")},text={Text("Все рисунки, текст, формулы, фон и шаблон будут удалены без возможности отмены. Название и сетка сохранятся.")},confirmButton={TextButton(onClick={confirmClear=false;formulaPoint=null;editingFormula=null;textPoint=null;viewModel.clearBoard()}){Text("Очистить всё")}},dismissButton={TextButton(onClick={confirmClear=false}){Text("Отмена")}})
+    deleting?.let { target -> AlertDialog(onDismissRequest={deleting=null},title={Text("Удалить доску?")},text={Text("«${target.title}» будет удалена с этого устройства без возможности восстановления. Отправленные в чат изображения останутся.")},confirmButton={TextButton(onClick={val isCurrent=state.doc?.id==target.id;deleting=null;recent=null;viewModel.deleteBoard(target.id){if(isCurrent)onBackClick()}}){Text("Удалить")}},dismissButton={TextButton(onClick={deleting=null}){Text("Отмена")}}) }
     if(confirmImport)AlertDialog(onDismissRequest={confirmImport=false},title={Text("Открыть картинку")},text={Text("Картинка заменит текущий фон. Рисунок останется сверху. Это действие можно отменить.")},confirmButton={TextButton(onClick={confirmImport=false;gallery.launch(arrayOf("image/*"))}){Text("Выбрать")}},dismissButton={TextButton(onClick={confirmImport=false}){Text("Отмена")}})
     if(createNew)AlertDialog(onDismissRequest={createNew=false},title={Text("Создать новую доску?")},text={Text("Текущая доска сохранится в «Мои доски» для этого чата на этом устройстве.")},confirmButton={TextButton(onClick={createNew=false;viewModel.newBoard()}){Text("Создать")}},dismissButton={TextButton(onClick={createNew=false}){Text("Отмена")}})
     recent?.let{docs->AlertDialog(onDismissRequest={recent=null},title={Text("Мои доски · этот чат")},text={
-        if(docs.isEmpty())Text("Сохранённых досок пока нет") else LazyColumn(Modifier.heightIn(max=320.dp)){items(docs,key={it.id}){doc->TextButton(modifier=Modifier.fillMaxWidth(),onClick={recent=null;viewModel.openBoard(doc.id)}){Text(doc.title,maxLines=2,overflow=TextOverflow.Ellipsis)}}}
+        if(docs.isEmpty())Text("Сохранённых досок пока нет") else LazyColumn(Modifier.heightIn(max=320.dp)){items(docs,key={it.id}){doc->Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){TextButton(modifier=Modifier.weight(1f),onClick={recent=null;viewModel.openBoard(doc.id)}){Text(doc.title,maxLines=2,overflow=TextOverflow.Ellipsis)};TextButton(onClick={deleting=doc}){Text("Удалить")}}}}
     },confirmButton={TextButton(onClick={recent=null}){Text("Закрыть")}})}
 }
 @Composable

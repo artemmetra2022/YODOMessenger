@@ -31,7 +31,7 @@ import javax.inject.Inject
  * Содержимое доски идёт через сервер и НЕ шифруется сквозным шифрованием.
  */
 class CanvasOnlineTransport @Inject constructor(
-    private val auth: FirebaseAuth, private val firestore: FirebaseFirestore
+    private val auth: FirebaseAuth, private val firestore: FirebaseFirestore, private val syncSettings: BoardSyncSettings
 ) : CanvasTransport {
     private val _state = MutableStateFlow(CanvasLinkState()); override val state = _state.asStateFlow()
     private val packets = Channel<ByteArray>(16); override val incoming = packets.receiveAsFlow()
@@ -48,6 +48,7 @@ class CanvasOnlineTransport @Inject constructor(
     @Volatile private var peer: String? = null
     @Volatile private var hosting = false
     private var invite: String? = null
+    private var lastEditSend = 0L
     @Volatile private var nextOut = 1L
     private var reorder = CanvasPacketReorder()
     private val assembler = CanvasFrames.Assembler()
@@ -126,7 +127,7 @@ class CanvasOnlineTransport @Inject constructor(
         synchronized(lock) {
             me = uid; hosting = host; peer = null; sid = null; invite = null
             reorder = CanvasPacketReorder(); assembler.clear(); nextOut = 1L
-            lastPeerSeen = null; lastPeerChange = now(); lastCursorWrite = 0L
+            lastPeerSeen = null; lastPeerChange = now(); lastCursorWrite = 0L; lastEditSend = 0L
             sessionJob = SupervisorJob()
         }
         return generation
@@ -254,6 +255,13 @@ class CanvasOnlineTransport @Inject constructor(
     override suspend fun send(bytes: ByteArray) = sendMutex.withLock {
         check(_state.value.phase == CanvasLinkPhase.CONNECTED) { "Нет подключения" }
         val id = requireNotNull(sid); val gen = generation
+        val message = CanvasCollabWire.decode(bytes)
+        if (message is CanvasWire.Propose || message is CanvasWire.Committed) {
+            val wait = syncSettings.intervalMs.value - (now() - lastEditSend)
+            if (lastEditSend != 0L && wait > 0) delay(wait)
+            check(gen == generation && _state.value.phase == CanvasLinkPhase.CONNECTED) { "Соединение закрыто" }
+            lastEditSend = now()
+        }
         val frames = CanvasFrames.split(bytes)
         val outbox = sessionRef(id).collection(if (hosting) "toGuest" else "toHost")
         val expire = expiry(SESSION_TTL_MS)

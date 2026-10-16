@@ -147,6 +147,7 @@ class UpdateRepositoryImpl @Inject constructor(
             }
             val body = response.body ?: throw IllegalStateException("Пустой ответ сервера")
             val total = body.contentLength()
+            onProgress(0L, total)
             body.byteStream().use { input ->
                 target.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
