@@ -1015,6 +1015,12 @@ fun YodoNavGraph(
             app.yodo.messenger.features.settings.BoardSettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsBoard.ARG_ANCHOR),
+                onOpenLibrary = { navController.navigate(Routes.SavedBoards.route) { launchSingleTop = true } }
+            )
+        }
+        composable(route = Routes.SavedBoards.route) {
+            app.yodo.messenger.features.settings.CanvasLibraryScreen(
+                onBackClick = { navController.popBackStack() },
                 onOpenBoard = { chatId, boardId -> navController.navigate(Routes.Canvas.createRoute(chatId, boardId=boardId)) }
             )
         }

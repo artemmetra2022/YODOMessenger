@@ -65,6 +65,7 @@ sealed class Routes(val route: String) {
         const val ARG_ANCHOR = "anchor"
     }
     // Раздел настроек «Интерактивная доска».
+    data object SavedBoards : Routes("saved_boards")
     data object SettingsBoard : Routes("settings_board?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
             if (anchor.isNullOrBlank()) "settings_board" else "settings_board?anchor=$anchor"

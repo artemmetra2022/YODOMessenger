@@ -15,20 +15,21 @@ import javax.inject.Inject
 
 data class CanvasLibraryState(
     val boards: List<CanvasSavedBoard> = emptyList(), val loading: Boolean = false,
-    val busy: Boolean = false, val error: String? = null
+    val busy: Boolean = false, val error: String? = null,
+    val accountKey: String? = null, val deleteDone: Int = 0, val deleteTotal: Int = 0, val notice: String? = null
 )
 
 @HiltViewModel
 class CanvasLibraryViewModel @Inject constructor(
     private val store: CanvasStore, private val auth: FirebaseAuth, private val firestore: FirebaseFirestore
 ) : ViewModel() {
-    private val _state=MutableStateFlow(CanvasLibraryState())
+    private val _state=MutableStateFlow(CanvasLibraryState(accountKey=auth.currentUser?.uid))
     val state=_state.asStateFlow()
     private var owner=auth.currentUser?.uid
     private var job: Job?=null
     private val authListener=FirebaseAuth.AuthStateListener {
         if(owner!=it.currentUser?.uid) {
-            job?.cancel();owner=it.currentUser?.uid;_state.value=CanvasLibraryState();refresh()
+            job?.cancel();owner=it.currentUser?.uid;_state.value=CanvasLibraryState(accountKey=owner);refresh()
         }
     }
     init { auth.addAuthStateListener(authListener);refresh() }
@@ -61,13 +62,38 @@ class CanvasLibraryViewModel @Inject constructor(
         }
     }
     fun rename(entry: CanvasSavedBoard, title: String) = mutate { uid -> store.renameSaved(uid,entry,title) }
-    fun delete(entry: CanvasSavedBoard) = mutate { uid -> store.deleteSaved(uid,entry) }
+    fun delete(entry: CanvasSavedBoard) { deleteSelected(listOf(entry)) }
+    fun deleteSelected(entries: List<CanvasSavedBoard>, expectedAccount: String? = owner) {
+        if(_state.value.busy)return
+        val uid=owner?:return
+        if(expectedAccount!=uid)return
+        val available=_state.value.boards.associateBy { "${it.storageChatHash}/${it.id}" }
+        val selected=entries.distinctBy { "${it.storageChatHash}/${it.id}" }.mapNotNull { available["${it.storageChatHash}/${it.id}"] }
+        if(selected.isEmpty())return
+        job?.cancel()
+        _state.update { it.copy(busy=true,loading=false,error=null,notice=null,deleteDone=0,deleteTotal=selected.size) }
+        job=viewModelScope.launch {
+            try {
+                val result=deleteCanvasLibraryBatch(selected,{checkOwner(uid)},{store.deleteSaved(uid,it)},{done,total ->
+                    _state.update { it.copy(deleteDone=done,deleteTotal=total) }
+                })
+                checkOwner(uid)
+                val boards=store.listAll(uid);checkOwner(uid)
+                _state.update { it.copy(boards=boards,
+                    notice=if(result.deleted.isNotEmpty())"Удалено досок: ${result.deleted.size}" else null,
+                    error=if(result.failed.isEmpty())null else "Не удалось удалить ${result.failed.size} из ${selected.size}. ${result.firstError.orEmpty().take(150)}") }
+            } catch(e: Exception) {
+                if(e is CancellationException)throw e
+                if(owner==uid)_state.update { it.copy(error=e.message?:"Не удалось удалить выбранные доски") }
+            } finally { if(owner==uid)_state.update { it.copy(busy=false) } }
+        }
+    }
     fun clearError() { _state.update { it.copy(error=null) } }
     private fun mutate(block: suspend (String)->Unit) {
         if(_state.value.busy)return
         val uid=owner?:return
         job?.cancel()
-        _state.update { it.copy(busy=true,loading=false,error=null) }
+        _state.update { it.copy(busy=true,loading=false,error=null,notice=null,deleteDone=0,deleteTotal=0) }
         job=viewModelScope.launch {
             try {
                 checkOwner(uid);block(uid);checkOwner(uid)
