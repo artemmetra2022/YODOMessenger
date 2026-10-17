@@ -606,6 +606,16 @@
          Обновления раздаются через GitHub Releases, не через Google Play. -->
     <string name="about_title">О приложении</string>
     <string name="about_current_version_format">Установленная версия: %1$s</string>
+    <string name="about_release_date_format">Дата релиза: %1$s</string>
+    <string name="about_release_date_unknown">Дата релиза не указана</string>
+    <string name="about_brand_image_description">YodoMessenger: буква Y в облаке диалога</string>
+    <string name="about_brand_tagline">Общайтесь. Делитесь. Создавайте вместе.</string>
+    <string name="about_history_title">История версий</string>
+    <string name="about_history_empty">История пока недоступна. Релизы можно посмотреть на GitHub.</string>
+    <string name="about_history_version">Версия %1$s</string>
+    <string name="about_history_installed">Установлена у вас</string>
+    <string name="about_history_expand">Показать предыдущие версии</string>
+    <string name="about_history_collapse">Свернуть историю</string>
     <string name="about_check_button">Проверить обновления</string>
     <string name="about_check_hint">Нажмите, чтобы проверить наличие новой версии</string>
     <string name="about_checking">Проверяем обновления…</string>

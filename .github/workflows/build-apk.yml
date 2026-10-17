@@ -84,12 +84,15 @@ jobs:
           import json, os, re, urllib.request
 
           tag = ""
+          release_date = ""
           try:
               with urllib.request.urlopen(
                   "https://api.github.com/repos/artemmetra2022/YODOMessenger/releases/latest",
                   timeout=15,
               ) as resp:
-                  tag = json.load(resp).get("tag_name", "")
+                  release = json.load(resp)
+                  tag = release.get("tag_name", "")
+                  release_date = (release.get("published_at") or "")[:10]
           except Exception:
               pass
 
@@ -101,12 +104,18 @@ jobs:
           else:
               version_name = "0.1.0-mvp"
               version_code = 1
+              release_date = ""
           print(f"Latest release tag: {tag!r} -> versionName={version_name}, versionCode={version_code}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"tag={tag}\n")
               f.write(f"version_name={version_name}\n")
               f.write(f"version_code={version_code}\n")
+              f.write(f"release_date={release_date}\n")
           EOF
+
+      # Offline About history ships inside the APK. Keep the bundled copy if GitHub is unavailable.
+      - name: Refresh short release history
+        run: python3 tools/update-release-history.py || echo "Using bundled release history"
 
       - name: Build release APK
         env:
@@ -114,7 +123,7 @@ jobs:
           YODO_KEYSTORE_PASSWORD: ${{ secrets.YODO_KEYSTORE_PASSWORD }}
           YODO_KEY_ALIAS: ${{ secrets.YODO_KEY_ALIAS }}
           YODO_KEY_PASSWORD: ${{ secrets.YODO_KEY_PASSWORD }}
-        run: gradle assembleRelease -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} --stacktrace
+        run: gradle assembleRelease -PversionName=${{ steps.release.outputs.version_name }} -PversionCode=${{ steps.release.outputs.version_code }} -PreleaseDate=${{ steps.release.outputs.release_date }} --stacktrace
 
       - name: Prepare APK for release
         id: apk

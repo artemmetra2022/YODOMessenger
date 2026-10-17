@@ -396,8 +396,8 @@ object SettingsSearchIndex {
         // НОВОЕ (OTA-обновления): пункт «О приложении» в поиске настроек.
         SettingsSearchItem(
             id = "about_app", anchorId = ANCHOR_ABOUT,
-            title = "О приложении", subtitle = "Версия приложения и проверка обновлений",
-            keywords = listOf("о приложении", "версия", "обновление", "обновить", "апдейт", "update", "version", "github", "сборка"),
+            title = "О приложении", subtitle = "Версия, дата релиза и история изменений",
+            keywords = listOf("о приложении", "версия", "обновление", "обновить", "апдейт", "update", "version", "github", "сборка", "дата релиза", "история версий", "история изменений"),
             sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         // НОВОЕ (раздел «Школа»): пункты школьного раздела в поиске настроек.

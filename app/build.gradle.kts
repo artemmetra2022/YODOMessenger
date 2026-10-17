@@ -41,6 +41,11 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0-mvp"
 
+        // Publication date of this exact release; not a build or installation timestamp.
+        val releaseDate = (project.findProperty("releaseDate") as String?).orEmpty()
+            .takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }.orEmpty()
+        buildConfigField("String", "RELEASE_DATE", "\"$releaseDate\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // НОВОЕ (OTA-обновления): репозиторий GitHub, из последнего релиза которого
         // приложение проверяет новую версию и откуда скачивает APK (см. UpdateRepositoryImpl).

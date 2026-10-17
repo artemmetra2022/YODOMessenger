@@ -52,6 +52,7 @@ fun UpdateScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val colorTheme = LocalColorTheme.current
+    val releaseHistory = rememberReleaseHistory()
 
     HandleUpdateEvents(viewModel)
 
@@ -80,21 +81,7 @@ fun UpdateScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            SettingsCard {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.about_current_version_format, state.currentVersionName),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            AboutIdentityCard(state.currentVersionName, releaseHistory)
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -128,6 +115,10 @@ fun UpdateScreen(
                     ActionButtons(state = state, viewModel = viewModel)
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AboutReleaseHistory(releaseHistory, state.currentVersionName)
 
             Spacer(modifier = Modifier.height(12.dp))
 

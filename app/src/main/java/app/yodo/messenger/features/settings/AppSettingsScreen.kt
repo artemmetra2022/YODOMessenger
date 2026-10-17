@@ -170,7 +170,7 @@ fun AppSettingsScreen(
                     SettingsNavigateRow(
                         icon = Icons.Filled.Info,
                         title = "О приложении",
-                        subtitle = "Версия приложения и проверка обновлений",
+                        subtitle = "Версия, дата релиза и история изменений",
                         colorTheme = colorTheme,
                         onClick = onOpenAbout
                     )
