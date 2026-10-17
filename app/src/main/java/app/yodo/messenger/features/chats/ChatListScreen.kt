@@ -1354,7 +1354,7 @@ private fun ChatListItem(
     // Непрочитанный чат должен читаться с одного взгляда — не только по бейджу
     // с числом, но и по весу заголовка и цвету превью. Прочитанные чаты уходят
     // на второй план, чтобы глаз сам находил, куда нужно вернуться.
-    val hasUnread = !isChannel && chat.unreadCount > 0
+    val hasUnread = chat.unreadCount > 0
     val titleColor = MaterialTheme.colorScheme.onSurface
     val previewColor = if (hasUnread) {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
@@ -1655,7 +1655,7 @@ private fun ChatListItem(
                         )
                     }
                 }
-                if (!isChannel) {
+                run {
                     // НОВОЕ (motion): бейдж непрочитанных появляется/меняет число с лёгким
                     // всплытием — сообщает "здесь что-то изменилось" тем же языком,
                     // которым бейджи говорят на иконке приложения и в уведомлениях.
@@ -1764,23 +1764,10 @@ private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier)
  */
 @Composable
 private fun LastMessageStatusIcon(rawStatus: String?) {
-    // Тик не влияет на сам статус (он приходит из Firestore), но гарантирует, что
-    // строка списка чатов перерисовывается каждую секунду — так же, как "в сети".
-    rememberNowTick()
-    val (icon, description, tint) = when (rawStatus) {
-        "SENDING" -> Triple(Icons.Filled.Schedule, "Отправка…", Color.Gray)
-        "FAILED" -> Triple(Icons.Filled.ErrorOutline, "Не отправлено", Color(0xFFFF5A5A))
-        "DELIVERED" -> Triple(Icons.Filled.DoneAll, "Доставлено", Color.Gray)
-        "READ" -> Triple(Icons.Filled.DoneAll, "Прочитано", Color(0xFF60E6FF))
-        // "SENT" и любые неизвестные/устаревшие значения — одна серая галочка.
-        else -> Triple(Icons.Filled.Done, "Отправлено", Color.Gray)
-    }
-    Icon(
-        imageVector = icon,
-        contentDescription = description,
-        modifier = Modifier.size(14.dp).padding(top = 2.dp),
-        tint = tint
-    )
+    val status = app.yodo.messenger.domain.model.MessageStatus.entries.firstOrNull { it.name == rawStatus }
+        ?: app.yodo.messenger.domain.model.MessageStatus.SENDING
+    MessageReceiptIndicator(status, compact = true, neutralColor = MaterialTheme.colorScheme.onSurfaceVariant)
+
 }
 
 @Composable

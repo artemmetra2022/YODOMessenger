@@ -1,10 +1,5 @@
 package app.yodo.messenger.domain.model
 
-// ИСПРАВЛЕНО (индикатор прочитано/доставлено): добавлено промежуточное состояние
-// DELIVERED. Раньше статус прыгал сразу SENT -> READ, из-за чего получатель не мог
-// увидеть, что сообщение дошло до сервера/устройства собеседника, но ещё не прочитано.
-enum class MessageStatus { SENDING, SENT, DELIVERED, READ, FAILED }
-
 data class Message(
     val id: String,
     val chatId: String,
@@ -54,7 +49,9 @@ data class Message(
     val checklist: SharedChecklist? = null,
     val isTextEncrypted: Boolean = false,
     val textDecryptionFailed: Boolean = false,
-    val canvasLocalId: String? = null
+    val canvasLocalId: String? = null,
+    val receiptRecipientCount: Int = 0,
+    val receiptReadCount: Int = 0
 ) {
     fun previewText(): String = when {
         isDeleted -> "Сообщение удалено"

@@ -1,26 +1,19 @@
 package app.yodo.messenger.features.canvas
 
 import app.yodo.messenger.ui.components.TextButton
-import app.yodo.messenger.ui.components.OutlinedButton
-import app.yodo.messenger.ui.components.IconButton
-import app.yodo.messenger.ui.components.FilterChip
 import app.yodo.messenger.ui.components.DropdownMenuItem
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -45,6 +38,11 @@ fun SharedBoardScreen(onBackClick: () -> Unit, viewModel: SharedBoardViewModel =
     var enteredText by remember { mutableStateOf("") }
     var confirmReset by remember { mutableStateOf<Boolean?>(null) }
     val editable = ui.doc != null && !ui.loading && !ui.busy && !ui.clearing
+    var moreMenu by remember { mutableStateOf(false) }
+    var boardOptions by remember { mutableStateOf(false) }
+    var help by remember { mutableStateOf(false) }
+    val workspaceColor = MaterialTheme.colorScheme.surfaceVariant
+    val paperEdgeColor = MaterialTheme.colorScheme.outlineVariant
     val snack = remember { SnackbarHostState() }
     BackHandler(enabled = ui.busy) { /* Finish the destructive operation before leaving. */ }
     // Значения по умолчанию из настроек применяются при их загрузке и при изменении.
@@ -54,58 +52,37 @@ fun SharedBoardScreen(onBackClick: () -> Unit, viewModel: SharedBoardViewModel =
         topBar = {
             TopAppBar(
                 title = { Column {
-                    Text(ui.doc?.title ?: "Общая доска", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Онлайн · изменения видят все участники чата", style = MaterialTheme.typography.labelSmall)
+                    Text(ui.doc?.title ?: "Общая доска", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                    Text(if(ui.clearing) "Очистка…" else "Общая · для участников чата", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 } },
-                navigationIcon = { IconButton(enabled = !ui.busy, onClick = onBackClick) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } }
+                navigationIcon = { CanvasActionIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", !ui.busy, onBackClick) },
+                actions = { Box {
+                    CanvasActionIcon(Icons.Default.MoreVert, "Действия с общей доской") { moreMenu=true }
+                    DropdownMenu(expanded=moreMenu,onDismissRequest={moreMenu=false}) {
+                        DropdownMenuItem(text={Text("Настройки холста")},onClick={moreMenu=false;boardOptions=true})
+                        DropdownMenuItem(text={Text("Как рисовать")},onClick={moreMenu=false;help=true})
+                        HorizontalDivider()
+                        DropdownMenuItem(text={Text(if(ui.clearing) "Повторить очистку" else "Очистить всё",color=MaterialTheme.colorScheme.error)},enabled=!ui.busy&&ui.doc!=null,onClick={moreMenu=false;confirmReset=false})
+                        DropdownMenuItem(text={Text("Удалить доску",color=MaterialTheme.colorScheme.error)},enabled=!ui.busy,onClick={moreMenu=false;confirmReset=true})
+                    }
+                } }
             )
         },
         snackbarHost = { SnackbarHost(snack) }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (ui.loading || ui.busy || ui.clearing) LinearProgressIndicator(Modifier.fillMaxWidth())
-            CanvasToolbar {
-                CanvasTool.entries.forEach { option ->
-                    FilterChip(selected = tool == option, onClick = { tool = option }, enabled = editable,
-                        label = { Text(when (option) {
-                            CanvasTool.PEN -> "Карандаш"; CanvasTool.HIGHLIGHTER -> "Маркер"; CanvasTool.LINE -> "Линия"; CanvasTool.ARROW -> "Стрелка"
-                            CanvasTool.RECTANGLE -> "Прямоугольник"; CanvasTool.ROUNDED_RECT -> "Скруглённый"; CanvasTool.CIRCLE -> "Окружность"
-                            CanvasTool.ELLIPSE -> "Эллипс"; CanvasTool.TRIANGLE -> "Треугольник"; CanvasTool.DIAMOND -> "Ромб"
-                            CanvasTool.TEXT -> "Текст"; CanvasTool.FORMULA -> "Формула"; CanvasTool.ERASER -> "Ластик"; CanvasTool.HAND -> "Рука"
-                        }) })
-                }
+            CanvasHistoryBar(editable&&ui.canUndo,editable&&ui.canRedo,editable,
+                {viewModel.undo()},{viewModel.undo(true)},{drawingView?.resetViewport()}) {
+                CanvasActionIcon(Icons.Default.Tune,"Настройки холста") { boardOptions=true }
             }
-            CanvasToolbar {
-                BoardColors.palette.forEach { (name, value) ->
-                    Box(Modifier.size(44.dp).semantics { contentDescription = "Цвет: $name" }.clickable { color = value }, contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(28.dp).background(Color(value), CircleShape).border(if (color == value) 3.dp else 0.dp, MaterialTheme.colorScheme.onSurface, CircleShape))
-                    }
-                }
-                if (tool == CanvasTool.TEXT || tool == CanvasTool.FORMULA) listOf(24f, 32f, 48f).forEach { v -> FilterChip(selected = fontSize == v, onClick = { fontSize = v }, label = { Text("${v.toInt()} px") }) }
-                else BoardInkWidths.forEach { v -> FilterChip(selected = width == v.toFloat(), onClick = { width = v.toFloat() }, label = { Text("$v px") }) }
-            }
-            CanvasToolbar {
-                var gridMenu by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(enabled = editable, onClick = { gridMenu = true }) { Text(when (ui.doc?.grid) { CanvasGrid.SQUARES -> "Клетка 24 px"; CanvasGrid.DOTS -> "Точки"; else -> "Без сетки" }) }
-                    DropdownMenu(expanded = gridMenu, onDismissRequest = { gridMenu = false }) {
-                        CanvasGrid.entries.forEach { item -> DropdownMenuItem(text = { Text(when (item) { CanvasGrid.NONE -> "Без сетки"; CanvasGrid.SQUARES -> "Клетка 24 px"; CanvasGrid.DOTS -> "Точки" }) }, onClick = { gridMenu = false; viewModel.updateGrid(item) }) }
-                    }
-                }
-                OutlinedButton(enabled = editable && ui.canUndo, onClick = { viewModel.undo() }) { Text("Отмена") }
-                OutlinedButton(enabled = editable && ui.canRedo, onClick = { viewModel.undo(true) }) { Text("Повтор") }
-                TextButton(enabled = editable, onClick = { drawingView?.resetViewport() }) { Text("Вписать") }
-                FilterChip(selected = shapeAssist, onClick = { shapeAssist = !shapeAssist }, label = { Text("Умные фигуры") })
-                FilterChip(selected = snapGrid, onClick = { snapGrid = !snapGrid }, label = { Text("К сетке") })
-                TextButton(enabled = !ui.busy && ui.doc != null, onClick = { confirmReset = false }) { Text(if (ui.clearing) "Повторить очистку" else "Очистить всё") }
-                TextButton(enabled = !ui.busy, onClick = { confirmReset = true }) { Text("Удалить доску") }
-            }
-            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().background(Color(0xffe9edf3))) {
+            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().background(workspaceColor)) {
                 val doc = ui.doc
                 if (doc != null) AndroidView(modifier = Modifier.fillMaxSize(), factory = { context -> CanvasDrawingView(context).also { drawingView = it } }, update = { view ->
                     val changed = view.document?.id != doc.id
                     if (view.documentRevision != ui.generation) view.cancelRemoteConflict()
                     view.documentRevision = ui.generation
+                    view.workspaceColor=workspaceColor.toArgb();view.paperEdgeColor=paperEdgeColor.toArgb()
                     view.document = doc; view.backgroundImage = null; view.tool = tool; view.inkColor = color; view.inkWidth = width; view.fontSize = fontSize
                     view.shapeAssist = shapeAssist; view.snapToGrid = snapGrid; view.haptics = settings.haptics
                     view.isEnabled = editable
@@ -124,12 +101,17 @@ fun SharedBoardScreen(onBackClick: () -> Unit, viewModel: SharedBoardViewModel =
                 }
             }
             Text(
-                if (ui.truncated) "Объектов больше предела: показаны первые ${CanvasLimits.MAX_OBJECTS}. Содержимое идёт через сервер без сквозного шифрования."
-                else "Рисунок идёт через сервер без сквозного шифрования · ластик удаляет объект целиком",
-                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                if (ui.truncated) "Показаны первые ${CanvasLimits.MAX_OBJECTS} объектов · без сквозного шифрования"
+                else "Без сквозного шифрования",
+                style = MaterialTheme.typography.bodyMedium, color=MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
+            CanvasEditorDock(tool,{tool=it},color,{color=it},width,{width=it},fontSize,{fontSize=it},enabled=editable)
         }
     }
+    if(boardOptions) CanvasBoardOptions(ui.doc?.grid,viewModel::updateGrid,editable,
+        shapeAssist,{shapeAssist=it},snapGrid,{snapGrid=it},{boardOptions=false})
+    if(help) CanvasHelp { help=false }
     LaunchedEffect(ui.generation, ui.doc?.id) {
         textPoint = null; formulaPoint = null; editingFormula = null
     }

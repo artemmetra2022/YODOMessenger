@@ -5,28 +5,34 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MessageStatusResolverTest {
-
-    @Test
-    fun `pending Firestore write is shown as sending`() {
-        assertEquals(MessageStatus.SENDING, resolveMessageStatus("SENT", hasPendingWrites = true))
+    @Test fun `new local write is sending until acknowledged`() {
+        assertEquals(MessageStatus.SENDING, resolveMessageStatus("SENT", true))
+        assertEquals(MessageStatus.SENT, resolveMessageStatus("SENT", false))
     }
-
-    @Test
-    fun `acknowledged Firestore write uses stored status`() {
-        assertEquals(MessageStatus.SENT, resolveMessageStatus("SENT", hasPendingWrites = false))
-        assertEquals(MessageStatus.DELIVERED, resolveMessageStatus("DELIVERED", hasPendingWrites = false))
-        assertEquals(MessageStatus.READ, resolveMessageStatus("READ", hasPendingWrites = false))
+    @Test fun `pending reaction does not regress acknowledged receipt`() {
+        assertEquals(MessageStatus.DELIVERED, resolveMessageStatus("DELIVERED", true))
+        assertEquals(MessageStatus.READ, resolveMessageStatus("READ", true))
+        assertEquals(MessageStatus.SENT, resolveMessageStatus("SENT", true, serverAcknowledged = true))
     }
-
-    @Test
-    fun `pending write always shows sending even if stored status is more advanced`() {
-        assertEquals(MessageStatus.SENDING, resolveMessageStatus("DELIVERED", hasPendingWrites = true))
-        assertEquals(MessageStatus.SENDING, resolveMessageStatus("READ", hasPendingWrites = true))
+    @Test fun `incoming receipt write is never outgoing sending`() {
+        assertEquals(MessageStatus.SENT, resolveMessageStatus("SENT", true, isOwnMessage = false))
     }
-
-    @Test
-    fun `missing or unknown stored status falls back to sent`() {
-        assertEquals(MessageStatus.SENT, resolveMessageStatus(null, hasPendingWrites = false))
-        assertEquals(MessageStatus.SENT, resolveMessageStatus("UNKNOWN", hasPendingWrites = false))
+    @Test fun `unknown legacy status is safe`() {
+        assertEquals(MessageStatus.SENT, resolveMessageStatus(null, false))
+        assertEquals(MessageStatus.SENT, resolveMessageStatus("UNKNOWN", false))
+        assertEquals(MessageStatus.FAILED, resolveMessageStatus("FAILED", false))
+    }
+    @Test fun `group receipt means every recipient not just first reader`() {
+        val recipients = listOf("a", "b")
+        assertEquals(MessageStatus.SENT, aggregateReceiptStatus(recipients, listOf("a"), listOf("a")))
+        assertEquals(MessageStatus.DELIVERED, aggregateReceiptStatus(recipients, recipients, listOf("a")))
+        assertEquals(MessageStatus.READ, aggregateReceiptStatus(recipients, recipients, recipients))
+    }
+    @Test fun `read also counts as delivery`() {
+        assertEquals(MessageStatus.DELIVERED, aggregateReceiptStatus(listOf("a", "b"), listOf("a"), listOf("b")))
+        assertEquals(MessageStatus.READ, aggregateReceiptStatus(listOf("a"), emptyList(), listOf("a")))
+    }
+    @Test fun `saved messages without recipients do not claim read`() {
+        assertEquals(MessageStatus.SENT, aggregateReceiptStatus(emptyList(), emptyList(), emptyList()))
     }
 }

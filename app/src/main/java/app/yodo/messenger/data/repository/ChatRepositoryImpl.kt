@@ -263,7 +263,9 @@ class ChatRepositoryImpl @Inject constructor(
                         lastMessageTimestamp = channelSnapshot.getLong("lastMessageTimestamp") ?: 0L,
                         lastMessageSenderId = channelSnapshot.getString("lastMessageSenderId"),
                         lastMessageStatus = channelSnapshot.getString("lastMessageStatus"),
-                        unreadCount = 0,
+                        lastMessageId = channelSnapshot.getString("lastMessageId"),
+                        unreadCount = app.yodo.messenger.domain.model.normalizedUnreadCount(
+                            (channelSnapshot.get("unreadCounts") as? Map<*, *>)?.get(uid)),
                         isOnline = false,
                         isVerified = channelSnapshot.getBoolean("isVerified") ?: true,
                         type = ChatType.CHANNEL,
@@ -313,7 +315,7 @@ class ChatRepositoryImpl @Inject constructor(
                     try {
                         val participantIds = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                         val unreadCounts = doc.get("unreadCounts") as? Map<*, *>
-                        val unreadForMe = (unreadCounts?.get(uid) as? Long)?.toInt() ?: 0
+                        val unreadForMe = app.yodo.messenger.domain.model.normalizedUnreadCount(unreadCounts?.get(uid))
                         val titles = doc.get("titles") as? Map<*, *>
                         val personalizedTitle = titles?.get(uid) as? String
                         val title = personalizedTitle ?: doc.getString("title") ?: "Без названия"
@@ -1683,7 +1685,7 @@ class ChatRepositoryImpl @Inject constructor(
                         isPinned = (uid != null && pinnedMap?.get(uid) as? Boolean == true),
                         lastMessage = doc.getString("lastMessage") ?: "",
                         lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
-                        unreadCount = (uid?.let { unreadMap?.get(it) as? Long } ?: 0L).toInt()
+                        unreadCount = app.yodo.messenger.domain.model.normalizedUnreadCount(uid?.let { unreadMap?.get(it) })
                     )
                 }
                     // Закреплённые темы — сверху списка, дальше как раньше по свежести сообщений.

@@ -28,6 +28,11 @@ async function main() {
         encByUid: { alice: 'old-a', bob: 'old-b' } });
     });
     await test('v2 encrypted personal message allowed', () => assertSucceeds(setDoc(messageRef(alice), cipher())));
+    await test('modern encrypted personal send with receipts allowed', () => assertSucceeds(setDoc(messageRef(alice, 'modern'), {
+      ...cipher(), recipientIds: ['bob'], deliveredTo: [], readBy: [], sentAt: serverTimestamp()
+    })));
+    await test('encrypted message delivery receipt allowed', () => assertSucceeds(updateDoc(messageRef(bob, 'modern'), { deliveredTo: ['bob'], status: 'DELIVERED' })));
+    await test('encrypted message read receipt allowed', () => assertSucceeds(updateDoc(messageRef(bob, 'modern'), { readBy: ['bob'], status: 'READ' })));
     await test('plaintext personal send rejected', () => assertFails(setDoc(messageRef(alice, 'plain'), { senderId: 'alice', text: 'SECRET' })));
     await test('plaintext caption rejected', () => assertFails(setDoc(messageRef(alice, 'caption'), { senderId: 'alice', text: 'SECRET', imageBase64: 'image' })));
     await test('plaintext reply rejected', () => assertFails(setDoc(messageRef(alice, 'reply'), { ...cipher(), replyToText: 'SECRET' })));
@@ -44,7 +49,7 @@ async function main() {
     await test('encrypted edit cannot add quote', () => assertFails(updateDoc(messageRef(alice), { replyToText: 'SECRET' })));
     await test('sender identity cannot change', () => assertFails(updateDoc(messageRef(alice), { senderId: 'bob' })));
     await test('legacy text can upgrade to encrypted', () => assertSucceeds(updateDoc(messageRef(alice, 'legacy'), { text: '', encrypted: true, encryptedPayloadVersion: 2, encByUid: { alice: 'a', bob: 'b' } })));
-    await test('legacy ciphertext metadata update still allowed', () => assertSucceeds(updateDoc(messageRef(alice, 'legacy-cipher'), { status: 'READ' })));
+    await test('legacy ciphertext recipient receipt still allowed', () => assertSucceeds(updateDoc(messageRef(bob, 'legacy-cipher'), { status: 'READ' })));
     await test('legacy ciphertext soft deletion still allowed', () => assertSucceeds(updateDoc(messageRef(alice, 'legacy-cipher'), { isDeleted: true, text: '' })));
     await test('legacy preview deletion allowed', () => assertSucceeds(updateDoc(doc(alice, 'chats/private'), { lastMessagePlain: deleteField(), lastMessage: 'Личное сообщение' })));
     await test('plaintext preview rewrite rejected', () => assertFails(updateDoc(doc(alice, 'chats/private'), { lastMessagePlain: 'SECRET' })));

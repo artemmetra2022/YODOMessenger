@@ -19,7 +19,8 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 data class CanvasUiState(val doc: CanvasDocument?=null,val background: Bitmap?=null,val busy:Boolean=true,
-    val saved:Boolean=false,val canUndo:Boolean=false,val canRedo:Boolean=false,val error:String?=null,val notice:String?=null)
+    val saved:Boolean=false,val canUndo:Boolean=false,val canRedo:Boolean=false,val error:String?=null,val notice:String?=null,
+    val publishSent:Boolean=false)
 
 @HiltViewModel
 class CanvasViewModel @Inject constructor(
@@ -172,14 +173,17 @@ class CanvasViewModel @Inject constructor(
         checkAccount(); val h=history?:return@task; h.commit(doc.copy(backgroundBase64=encoded,grid=CanvasGrid.NONE))
         _state.update{it.copy(doc=h.current,background=bitmap,saved=false,canUndo=h.canUndo,canRedo=h.canRedo)}; saveCurrent()
     }
+    fun dismissPublishConfirmation(){_state.update{it.copy(publishSent=false)}}
     fun publish()=task {
+        _state.update{it.copy(publishSent=false)}
         val doc=_state.value.doc?:return@task; saveCurrent()
         val background=_state.value.background
         val image=withContext(Dispatchers.Default){Base64.encodeToString(CanvasImages.png(doc,background,true),Base64.NO_WRAP)}
         checkAccount()
         when(val result=messages.sendCanvasSnapshot(chat,image,doc.title,doc.id,topic)){
             is SendMessageResult.Error -> error(result.message)
-            is SendMessageResult.Success -> _state.update{it.copy(notice="Превью отправлено в чат. Редактируемая доска осталась на устройстве.")}
+            // Keep confirmation in UI state until the user dismisses it, not in a short snackbar.
+            is SendMessageResult.Success -> _state.update{it.copy(publishSent=true)}
         }
     }
     fun export(uri:Uri)=task {

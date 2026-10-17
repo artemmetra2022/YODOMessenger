@@ -2,32 +2,23 @@ package app.yodo.messenger.features.canvas
 
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
-import app.yodo.messenger.ui.components.OutlinedButton
-import app.yodo.messenger.ui.components.IconButton
-import app.yodo.messenger.ui.components.FilterChip
 import app.yodo.messenger.ui.components.DropdownMenuItem
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import app.yodo.messenger.ui.components.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -62,6 +53,12 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     var deleting by remember { mutableStateOf<CanvasRecent?>(null) }
     var confirmImport by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf<List<CanvasRecent>?>(null) }
+    var moreMenu by remember { mutableStateOf(false) }
+    var boardOptions by remember { mutableStateOf(false) }
+    var help by remember { mutableStateOf(false) }
+    var collaborationMenu by remember { mutableStateOf(false) }
+    val workspaceColor = MaterialTheme.colorScheme.surfaceVariant
+    val paperEdgeColor = MaterialTheme.colorScheme.outlineVariant
     val snack=remember { SnackbarHostState() }
     val boardSettings by viewModel.boardSettings.collectAsState()
     // Значения по умолчанию из настроек раздела «Интерактивная доска».
@@ -77,43 +74,51 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     }
     Scaffold(
         topBar={TopAppBar(title={Column {
-            Text(state.doc?.title?:"Интерактивная доска",maxLines=1,overflow=TextOverflow.Ellipsis)
-            Text(if(state.busy) "Подождите…" else if(state.saved) "Локально · сохранено" else "Локально · не сохранено",style=MaterialTheme.typography.labelSmall)
-        }},navigationIcon={IconButton(enabled=!state.busy,onClick={leave()}){Icon(Icons.AutoMirrored.Filled.ArrowBack,"Назад")}},
-            actions={TextButton(enabled=!state.busy && state.doc!=null && localSettings,onClick={title=state.doc?.title.orEmpty();rename=true}){Text("Имя")}})},
+            Text(state.doc?.title?:"Интерактивная доска",maxLines=1,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.titleMedium)
+            Text(if(state.busy) "Подождите…" else if(sessionRunning) {
+                if(collab.syncing) "Совместно · синхронизация…" else if(collab.pending) "Совместно · подтверждение…"
+                else if(collab.active) "Совместно · версия ${collab.revision}" else "Совместно · подключение…"
+            } else if(state.saved) "Локально · сохранено" else "Есть изменения",style=MaterialTheme.typography.bodyMedium,maxLines=1,overflow=TextOverflow.Ellipsis)
+        }},navigationIcon={CanvasActionIcon(Icons.AutoMirrored.Filled.ArrowBack,"Назад",!state.busy){leave()}},
+            actions={
+                CanvasActionIcon(Icons.Default.Group,"Рисовать вместе",!state.busy&&state.doc!=null){collaborationMenu=true}
+                Box {
+                    CanvasActionIcon(Icons.Default.MoreVert,"Действия с доской"){moreMenu=true}
+                    DropdownMenu(expanded=moreMenu,onDismissRequest={moreMenu=false}) {
+                        DropdownMenuItem(text={Text("Настройки холста")},onClick={moreMenu=false;boardOptions=true})
+                        DropdownMenuItem(text={Text("Мои доски")},enabled=!state.busy&&localSettings,onClick={moreMenu=false;viewModel.recent{recent=it}})
+                        DropdownMenuItem(text={Text("Новая доска")},enabled=!state.busy&&localSettings,onClick={moreMenu=false;createNew=true})
+                        DropdownMenuItem(text={Text("Переименовать")},enabled=!state.busy&&state.doc!=null&&localSettings,onClick={moreMenu=false;title=state.doc?.title.orEmpty();rename=true})
+                        DropdownMenuItem(text={Text("Добавить картинку")},enabled=!state.busy&&state.doc!=null&&localSettings,onClick={moreMenu=false;confirmImport=true})
+                        DropdownMenuItem(text={Text("Экспорт PNG")},enabled=!state.busy&&state.doc!=null,onClick={moreMenu=false;export.launch("yodo-canvas.png")})
+                        HorizontalDivider()
+                        DropdownMenuItem(text={Text("Очистить всё",color=MaterialTheme.colorScheme.error)},enabled=!state.busy&&state.doc!=null&&localSettings,onClick={moreMenu=false;confirmClear=true})
+                        DropdownMenuItem(text={Text("Удалить доску",color=MaterialTheme.colorScheme.error)},enabled=!state.busy&&state.doc!=null&&localSettings,onClick={moreMenu=false;state.doc?.let{deleting=CanvasRecent(it.id,it.title)}})
+                        HorizontalDivider()
+                        DropdownMenuItem(text={Text("Как рисовать")},onClick={moreMenu=false;help=true})
+                    }
+                }
+            })},
         snackbarHost={SnackbarHost(snack)}
     ) { padding -> Column(Modifier.fillMaxSize().padding(padding)) {
         if(state.busy || collab.syncing) LinearProgressIndicator(Modifier.fillMaxWidth())
-        CanvasCollabPanel(viewModel,collab,enabled=!state.busy&&state.doc!=null)
-        CanvasToolbar {
-            CanvasTool.entries.forEach { option -> FilterChip(selected=tool==option,onClick={tool=option},enabled=!state.busy,
-                label={Text(when(option){CanvasTool.PEN->"Карандаш";CanvasTool.HIGHLIGHTER->"Маркер";CanvasTool.LINE->"Линия";CanvasTool.ARROW->"Стрелка";CanvasTool.RECTANGLE->"Прямоугольник";CanvasTool.ROUNDED_RECT->"Скруглённый";CanvasTool.CIRCLE->"Окружность";CanvasTool.ELLIPSE->"Эллипс";CanvasTool.TRIANGLE->"Треугольник";CanvasTool.DIAMOND->"Ромб";CanvasTool.TEXT->"Текст";CanvasTool.FORMULA->"Формула";CanvasTool.ERASER->"Ластик";CanvasTool.HAND->"Рука"})}) }
-        }
-        CanvasToolbar {
-            listOf("Чёрный" to 0xff1e293b.toInt(),"Синий" to 0xff2563eb.toInt(),"Красный" to 0xffdc2626.toInt(),"Зелёный" to 0xff16a34a.toInt(),"Фиолетовый" to 0xff9333ea.toInt(),"Жёлтый" to 0xffeab308.toInt(),"Оранжевый" to 0xfff97316.toInt()).forEach { (name,value) ->
-                Box(Modifier.size(44.dp).semantics { contentDescription="Цвет: $name" }.clickable(enabled=!state.busy){color=value},contentAlignment=Alignment.Center) {
-                    Box(Modifier.size(28.dp).background(Color(value),CircleShape).border(if(color==value)3.dp else 0.dp,MaterialTheme.colorScheme.onSurface,CircleShape))
-                }
+        // Keep permission launchers and incoming verification dialogs composed while the sheet is closed.
+        CanvasCollabPanel(viewModel,collab,enabled=!state.busy&&state.doc!=null,
+            controlsExpanded=collaborationMenu,onDismiss={collaborationMenu=false})
+        CanvasHistoryBar(
+            canUndo=(if(sessionRunning)collab.canUndo else state.canUndo)&&!state.busy&&sessionReady,
+            canRedo=(if(sessionRunning)collab.canRedo else state.canRedo)&&!state.busy&&sessionReady,
+            enabled=state.doc!=null,onUndo={viewModel.undo()},onRedo={viewModel.undo(true)},onFit={drawingView?.resetViewport()}) {
+            CanvasActionIcon(Icons.Default.Save,"Сохранить доску",!state.busy&&state.doc!=null){viewModel.save()}
+            Button(enabled=!state.busy&&state.doc!=null&&sessionReady,onClick={publish=true},contentPadding=PaddingValues(horizontal=12.dp),modifier=Modifier.heightIn(min=48.dp)){
+                Text("В чат")
             }
-            if(tool==CanvasTool.TEXT||tool==CanvasTool.FORMULA) listOf(24f,32f,48f).forEach { value->FilterChip(selected=fontSize==value,onClick={fontSize=value},label={Text("${value.toInt()} px")}) }
-            else listOf(2f,4f,8f,12f).forEach{value->FilterChip(selected=width==value,onClick={width=value},label={Text("${value.toInt()} px")})}
         }
-        CanvasToolbar {
-            var gridMenu by remember{mutableStateOf(false)}; var templateMenu by remember{mutableStateOf(false)}
-            Box { OutlinedButton(enabled=!state.busy&&localSettings,onClick={gridMenu=true}){Text(when(state.doc?.grid){CanvasGrid.SQUARES->"Клетка 24 px";CanvasGrid.DOTS->"Точки";else->"Без сетки"})}
-                DropdownMenu(expanded=gridMenu,onDismissRequest={gridMenu=false}){CanvasGrid.entries.forEach{item->DropdownMenuItem(text={Text(when(item){CanvasGrid.NONE->"Без сетки";CanvasGrid.SQUARES->"Клетка 24 px";CanvasGrid.DOTS->"Точки"})},onClick={gridMenu=false;viewModel.updateGrid(item)})}} }
-            Box { OutlinedButton(enabled=!state.busy&&localSettings,onClick={templateMenu=true}){Text("Шаблон")}
-                DropdownMenu(expanded=templateMenu,onDismissRequest={templateMenu=false}){CanvasTemplate.entries.forEach{item->DropdownMenuItem(text={Text(when(item){CanvasTemplate.NONE->"Без шаблона";CanvasTemplate.AXES->"Оси X/Y";CanvasTemplate.TRIANGLE->"Треугольник";CanvasTemplate.RIGHT_TRIANGLE->"Прямоугольный треугольник"})},onClick={templateMenu=false;viewModel.updateTemplate(item)})}} }
-            OutlinedButton(enabled=(if(sessionRunning)collab.canUndo else state.canUndo)&&!state.busy&&sessionReady,onClick={viewModel.undo()}){Text("Отмена")}
-            OutlinedButton(enabled=(if(sessionRunning)collab.canRedo else state.canRedo)&&!state.busy&&sessionReady,onClick={viewModel.undo(true)}){Text("Повтор")}
-            TextButton(onClick={drawingView?.resetViewport()}){Text("Вписать")}
-            FilterChip(selected=shapeAssist,onClick={shapeAssist=!shapeAssist},label={Text("Умные фигуры")})
-            FilterChip(selected=snapGrid,onClick={snapGrid=!snapGrid},label={Text("К сетке")})
-        }
-        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().background(Color(0xffe9edf3))) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().background(workspaceColor)) {
             val doc=state.doc
             if(doc!=null) AndroidView(modifier=Modifier.fillMaxSize(),factory={context->CanvasDrawingView(context).also{drawingView=it}},update={view->
                 val changed=view.document?.id!=doc.id
+                view.workspaceColor=workspaceColor.toArgb();view.paperEdgeColor=paperEdgeColor.toArgb()
                 view.document=doc;view.backgroundImage=state.background;view.tool=tool;view.inkColor=color;view.inkWidth=width;view.fontSize=fontSize;view.shapeAssist=shapeAssist;view.snapToGrid=snapGrid;view.haptics=boardSettings.haptics
                 view.isEnabled=!state.busy&&sessionReady
                 view.remoteCursor=collab.cursor
@@ -131,18 +136,19 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
                 if(!state.busy) TextButton(onClick={viewModel.newBoard()}){Text("Создать новую")}
             }
         }
-        Text("Два пальца — масштаб и перемещение · задержите палец после штриха карандашом — выровняется в фигуру · ластик удаляет объект целиком",style=MaterialTheme.typography.labelSmall,modifier=Modifier.padding(horizontal=12.dp,vertical=4.dp))
-        CanvasToolbar {
-            Button(enabled=!state.busy&&state.doc!=null&&sessionReady,onClick={publish=true}){Text("Отправить в чат")}
-            OutlinedButton(enabled=!state.busy&&state.doc!=null,onClick={viewModel.save()}){Text("Сохранить")}
-            OutlinedButton(enabled=!state.busy&&state.doc!=null&&localSettings,onClick={confirmImport=true}){Text("Картинка")}
-            OutlinedButton(enabled=!state.busy&&state.doc!=null,onClick={export.launch("yodo-canvas.png")}){Text("Экспорт PNG")}
-            TextButton(enabled=!state.busy&&localSettings,onClick={viewModel.recent{recent=it}}){Text("Мои доски")}
-            TextButton(enabled=!state.busy&&localSettings,onClick={createNew=true}){Text("Новая")}
-            TextButton(enabled=!state.busy&&state.doc!=null&&localSettings,onClick={confirmClear=true}){Text("Очистить всё")}
-            TextButton(enabled=!state.busy&&state.doc!=null&&localSettings,onClick={state.doc?.let{deleting=CanvasRecent(it.id,it.title)}}){Text("Удалить доску")}
-        }
+        CanvasEditorDock(tool,{tool=it},color,{color=it},width,{width=it},fontSize,{fontSize=it},
+            enabled=!state.busy&&state.doc!=null, onImage=if(localSettings) ({confirmImport=true}) else null)
     } }
+    if(boardOptions) CanvasBoardOptions(state.doc?.grid,viewModel::updateGrid,!state.busy&&localSettings,
+        shapeAssist,{shapeAssist=it},snapGrid,{snapGrid=it},{boardOptions=false},state.doc?.template,viewModel::updateTemplate)
+    if(help) CanvasHelp { help=false }
+    if(state.publishSent) AlertDialog(
+        onDismissRequest={viewModel.dismissPublishConfirmation()},
+        title={Text("Отправлено в чат")},
+        text={Text("Превью доски успешно отправлено. Редактируемая доска сохранена на этом устройстве.")},
+        confirmButton={TextButton(enabled=!state.busy,onClick={viewModel.dismissPublishConfirmation()}){Text("Продолжить рисовать")}},
+        dismissButton={TextButton(enabled=!state.busy,onClick={viewModel.dismissPublishConfirmation();onBackClick()}){Text("В чат")}}
+    )
     formulaPoint?.let { point -> CanvasFormulaDialog(editingFormula,fontSize,editingFormula?.color?:color,
         enabled=!state.busy&&sessionReady,onDismiss={formulaPoint=null;editingFormula=null},onInsert={source,size->
             if(viewModel.putFormula(point,source,size,editingFormula?.color?:color,editingFormula))null else viewModel.state.value.error?:"Формулу не удалось добавить"
@@ -164,5 +170,3 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
         if(docs.isEmpty())Text("Сохранённых досок пока нет") else LazyColumn(Modifier.heightIn(max=320.dp)){items(docs,key={it.id}){doc->Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){TextButton(modifier=Modifier.weight(1f),onClick={recent=null;viewModel.openBoard(doc.id)}){Text(doc.title,maxLines=2,overflow=TextOverflow.Ellipsis)};TextButton(onClick={deleting=doc}){Text("Удалить")}}}}
     },confirmButton={TextButton(onClick={recent=null}){Text("Закрыть")}})}
 }
-@Composable
-internal fun CanvasToolbar(content:@Composable RowScope.()->Unit){Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=8.dp,vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically,content=content)}

@@ -8,19 +8,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 
 @Composable
-fun CanvasCollabPanel(vm:CanvasViewModel,state:CanvasCollabState,enabled:Boolean){
+fun CanvasCollabPanel(vm:CanvasViewModel,state:CanvasCollabState,enabled:Boolean,controlsExpanded:Boolean=false,onDismiss:()->Unit={}){
     val context=LocalContext.current
     var explain by remember{mutableStateOf(false)}
     var desiredHost by remember{mutableStateOf<Boolean?>(null)}
@@ -46,11 +40,12 @@ fun CanvasCollabPanel(vm:CanvasViewModel,state:CanvasCollabState,enabled:Boolean
         else{desiredHost=host;request.launch(permissions)}
     }
     val link=state.link
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=8.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically){
+    LaunchedEffect(link.phase) { if(link.phase==CanvasLinkPhase.VERIFYING) onDismiss() }
+    if(controlsExpanded) CanvasPickerSheet("Рисовать вместе",onDismiss){
         when(link.phase){
             CanvasLinkPhase.IDLE->{
-                OutlinedButton(enabled=enabled,onClick={explain=true}){Text("Рисовать вместе · рядом")}
-                OutlinedButton(enabled=enabled,onClick={onlineInfo=true}){Text("Рисовать вместе · онлайн")}
+                OutlinedButton(enabled=enabled,onClick={onDismiss();explain=true}){Text("Рисовать вместе · рядом")}
+                OutlinedButton(enabled=enabled,onClick={onDismiss();onlineInfo=true}){Text("Рисовать вместе · онлайн")}
             }
             CanvasLinkPhase.HOSTING->if(link.online){
                 Text("Код приглашения: ${link.code.orEmpty()}")

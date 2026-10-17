@@ -53,15 +53,40 @@ service cloud.firestore {
         request.resource.data.deletedBy == request.auth.uid;
     }
 
-    // ИСПРАВЛЕНО (индикатор «доставлено/прочитано» не работал): получатель не является
-    // автором сообщения, поэтому ни одна ветка allow update не разрешала ему менять
-    // поле status — SENT никогда не переходил в DELIVERED/READ (ошибка PERMISSION_DENIED
-    // молча глотается клиентом). Участник чата теперь может менять ТОЛЬКО status,
-    // и только на DELIVERED или READ.
-    function messageStatusOnlyUpdate(chatId) {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
-        request.resource.data.status in ['DELIVERED', 'READ'] &&
-        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []);
+    // Receipt writers may acknowledge only themselves, never the sender or another device's user.
+    function messageReceiptCreateAllowed(chatId) {
+      let d = request.resource.data;
+      return !('recipientIds' in d) || (
+        d.recipientIds is list &&
+        d.recipientIds.toSet() == get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []).toSet().difference([request.auth.uid].toSet()) &&
+        d.deliveredTo == [] && d.readBy == [] && d.status == 'SENT' && d.sentAt == request.time
+      );
+    }
+    function receiptStatus(d) {
+      return d.recipientIds.size() > 0 && d.readBy.hasAll(d.recipientIds) ? 'READ' :
+        (d.recipientIds.size() > 0 && d.deliveredTo.hasAll(d.recipientIds) ? 'DELIVERED' : 'SENT');
+    }
+    function ownReceiptList(oldList, newList) {
+      return newList is list && newList.size() == newList.toSet().size() &&
+        newList.hasAll(oldList) && newList.toSet().difference(oldList.toSet()).hasOnly([request.auth.uid]);
+    }
+    function validReceiptChange(chatId) {
+      let old = resource.data;
+      let d = request.resource.data;
+      let member = request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []);
+      return member && request.auth.uid != old.senderId &&
+        d.diff(old).affectedKeys().hasOnly(['status', 'deliveredTo', 'readBy']) &&
+        (('recipientIds' in old) ? (
+          request.auth.uid in old.recipientIds &&
+          ownReceiptList(old.get('deliveredTo', []), d.deliveredTo) &&
+          ownReceiptList(old.get('readBy', []), d.readBy) &&
+          d.deliveredTo.hasAll(d.readBy) && d.status == receiptStatus(d)
+        ) : (
+          d.diff(old).affectedKeys().hasOnly(['status']) &&
+          ((old.get('status', 'SENT') == 'SENT' && d.status in ['DELIVERED', 'READ']) ||
+           (old.get('status', 'SENT') == 'DELIVERED' && d.status == 'READ') ||
+           old.get('status', 'SENT') == d.status)
+        ));
     }
     // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
     // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
@@ -795,6 +820,13 @@ service cloud.firestore {
       //  НОВОЕ (передача владения): поле createdBy теперь защищено явно —
       //  менять его может только нынешний владелец, и только на пользователя,
       //  который уже состоит в группе (see transferOwnership()).
+      // A reader of the public official channel may reset only their own badge, not edit posts/settings.
+      allow update: if isSignedIn() && chatId == 'yodo_official_channel' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadCounts']) &&
+        request.resource.data.get('unreadCounts', {}).diff(resource.data.get('unreadCounts', {}))
+          .affectedKeys().hasOnly([request.auth.uid]) &&
+        request.resource.data.get('unreadCounts', {}).get(request.auth.uid, -1) == 0;
+
       allow update: if isSignedIn() && previewUpdateAllowed(chatId) &&
         (isSupportChat(chatId)
           ? canAccessSupportChat(chatId)
@@ -928,7 +960,7 @@ service cloud.firestore {
             // участников одновременно — это законное совместное обновление любым
             // участником чата (не только владельцем/админом).
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['lastMessage', 'lastMessageTimestamp', 'lastMessageSenderId', 'unreadCounts'])
+              .hasOnly(['lastMessage', 'lastMessageTimestamp', 'lastMessageSenderId', 'lastMessageId', 'unreadCounts'])
           );
 
         allow delete: if isSignedIn() &&
@@ -1054,7 +1086,7 @@ service cloud.firestore {
             (isSupportChat(chatId) && canAccessSupportChat(chatId)) ||
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           );
-        allow create: if isSignedIn() && privateMessageCreateAllowed(chatId) && checklistCreationAllowed(chatId) && canvasCreationAllowed() &&
+        allow create: if isSignedIn() && messageReceiptCreateAllowed(chatId) && privateMessageCreateAllowed(chatId) && checklistCreationAllowed(chatId) && canvasCreationAllowed() &&
           (chatId != 'yodo_official_channel' || isOfficialChannelAdmin()) &&
           (
             // Отправитель сообщения обязан совпадать с текущим пользователем —
@@ -1090,14 +1122,16 @@ service cloud.firestore {
         // ветка update сужена только до «мягкого удаления» (полей, которые
         // трогает deleteMessage/deleteMessages) — полный произвольный rewrite
         // чужого сообщения остаётся доступным лишь глобальным админам.
-        allow update: if isSignedIn() && privateMessageUpdateAllowed(chatId) && checklistUpdateGuard(chatId) && canvasUpdateAllowed() &&
+        allow update: if isSignedIn() && (
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'recipientIds', 'deliveredTo', 'readBy', 'sentAt'])
+          ? validReceiptChange(chatId)
+          : (privateMessageUpdateAllowed(chatId) && checklistUpdateGuard(chatId) && canvasUpdateAllowed() &&
           (
             checklistCompletionAllowed(chatId) ||
             // ИСПРАВЛЕНО (AS): админы могут модерировать сообщения в любом чате.
             isOfficialChannelAdmin() ||
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||
             isViewOnceOpenUpdate() ||
-            messageStatusOnlyUpdate(chatId) ||
             // Модератор: только форма «удаления» сообщения (isDeleted + очистка
             // медиа-полей), произвольно менять текст/автора/время нельзя.
             // НОВОЕ (баг 10): в whitelist добавлен deletedByAdmin — пометка
@@ -1119,7 +1153,7 @@ service cloud.firestore {
               .hasOnly(['isPinned']) ||
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['commentsCount'])
-          );
+          )));
 
         // ИСПРАВЛЕНО (AS): раньше админ мог удалить сообщение только в официальном
         // канале, поэтому удаление жалобного сообщения из раздела «Жалобы» падало с

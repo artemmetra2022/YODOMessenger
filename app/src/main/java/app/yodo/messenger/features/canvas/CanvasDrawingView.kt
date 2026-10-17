@@ -17,6 +17,9 @@ class CanvasDrawingView(context: Context) : View(context) {
     var inkColor = 0xff1e293b.toInt()
     var inkWidth = 4f
     var fontSize = 32f
+    var workspaceColor = 0xffe9edf3.toInt()
+    var paperEdgeColor = 0xffcbd5e1.toInt()
+    private val paperEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     // Этап 4: «умные фигуры» (удержание пальца после штриха карандашом выравнивает его)
     // и привязка точек фигур к узлам сетки.
     var shapeAssist = true
@@ -78,11 +81,14 @@ class CanvasDrawingView(context: Context) : View(context) {
         try {
             canvas.clipRect(0, 0, width, height)
             super.onDraw(canvas)
-            canvas.drawColor(0xffe9edf3.toInt())
+            canvas.drawColor(workspaceColor)
             val base=document?:return
             val doc=if(erasedPreview!=null)base.copy(objects=base.objects.filterNot{it.id in erasedIds})else base;val transform=transform()?:return
             canvas.save();canvas.translate(transform.offsetX,transform.offsetY);canvas.scale(transform.scale,transform.scale)
             CanvasRenderer.draw(canvas,doc,backgroundImage,draft)
+            paperEdgePaint.color=paperEdgeColor
+            paperEdgePaint.strokeWidth=resources.displayMetrics.density/transform.scale
+            canvas.drawRect(0f,0f,doc.width.toFloat(),doc.height.toFloat(),paperEdgePaint)
             remoteCursor?.let { cursor ->
                 val p=cursor.point;val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=cursor.color;style=Paint.Style.FILL}
                 val size=14f*resources.displayMetrics.density/transform.scale

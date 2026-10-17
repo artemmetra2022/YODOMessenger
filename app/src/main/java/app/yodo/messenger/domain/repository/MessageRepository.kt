@@ -33,7 +33,8 @@ interface MessageRepository {
         hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null,
         // НОВОЕ (секретная фича «тихие публикации»): не триггерит push-уведомление.
         silent: Boolean = false,
-        topicId: String? = null
+        topicId: String? = null,
+        clientMessageId: String? = null
     ): SendMessageResult
     suspend fun sendCanvasSnapshot(chatId: String, imageBase64: String, title: String, localId: String, topicId: String? = null): SendMessageResult
     suspend fun sendImageMessage(
@@ -102,7 +103,10 @@ interface MessageRepository {
     // НОВОЕ (баг 10): «тихое удаление» — документ сообщения удаляется из Firestore целиком,
     // поэтому у всех участников сообщение исчезает бесследно (без заглушки «удалено»).
     suspend fun hardDeleteMessage(chatId: String, messageId: String): SendMessageResult
+    fun observeUnreadBadge(chatId: String, topicId: String? = null): Flow<app.yodo.messenger.domain.model.UnreadBadgeSnapshot>
+    suspend fun clearUnreadForVisibleMessages(chatId: String, visibleIds: List<String>, topicId: String? = null): Boolean
     suspend fun markChatAsRead(chatId: String)
+    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>, topicId: String? = null)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
     // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).
     suspend fun registerPostView(chatId: String, messageId: String)

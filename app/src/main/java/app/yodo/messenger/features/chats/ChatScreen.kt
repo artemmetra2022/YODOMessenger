@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.chats
 
+import kotlinx.coroutines.flow.collectLatest
+
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -154,6 +156,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -278,6 +281,14 @@ fun ChatScreen(
     }
     // НОВОЕ (система жало): сообщени, на которое сейчас ткрыт диалог "Пожаловаться".
     var reportTargetMessage by remember { mutableStateOf<app.yodo.messenger.domain.model.Message?>(null) }
+    var confirmDiscardOutbox by remember { mutableStateOf(false) }
+    if (confirmDiscardOutbox) {
+        AlertDialog(onDismissRequest = { confirmDiscardOutbox = false },
+            title = { Text("Убрать неотправленные сообщения?") },
+            text = { Text("Удалятся только сообщения с ошибкой из локальной очереди этого чата. Остальные сообщения продолжат отправляться.") },
+            confirmButton = { TextButton(onClick = { confirmDiscardOutbox = false; viewModel.discardFailedMessages() }) { Text("Убрать") } },
+            dismissButton = { TextButton(onClick = { confirmDiscardOutbox = false }) { Text("Отмена") } })
+    }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -346,19 +357,6 @@ fun ChatScreen(
     // 2) делаем немедленный (без анимации) scrollToItem, а затем ещё раз после то��о, как
     //    Compose пересчитает layout — на случай, если высота последнего айтема изменилась
     //    у��е после первого скролла (д��грузилась картинка и т.п.).
-    LaunchedEffect(uiState.messages.lastOrNull()?.id, uiState.messages.size) {
-        if (uiState.messages.isNotEmpty() && viewModel.initialMessageId == null) {
-            val lastIndex = uiState.messages.size - 1
-            listState.scrollToItem(lastIndex)
-            // Даём Compose кадр на пересчёт реальных высот (��артинки/медиа догружаются
-            // асинхронно), затем ещё раз докручиваем — теперь уже с анимацией.
-            kotlinx.coroutines.delay(50L)
-            val currentLastIndex = uiState.messages.size - 1
-            if (currentLastIndex >= 0) {
-                listState.animateScrollToItem(currentLastIndex)
-            }
-        }
-    }
     LaunchedEffect(uiState.noticeMessage) {
         uiState.noticeMessage?.let { snackbarHostState.showSnackbar(it); viewModel.consumeNotice() }
     }
@@ -543,6 +541,52 @@ fun ChatScreen(
         uiState.messages.filter { it.text.contains(uiState.searchQuery, ignoreCase = true) }
     } else {
         uiState.messages
+    }
+    var previousTail by remember(viewModel) { mutableStateOf<String?>(null) }
+    var firstListPositioned by remember(viewModel) { mutableStateOf(false) }
+    LaunchedEffect(displayedMessages.lastOrNull()?.id, displayedMessages.size) {
+        val tail = displayedMessages.lastOrNull() ?: return@LaunchedEffect
+        val wasNearBottom = !listState.canScrollForward ||
+            (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= listState.layoutInfo.totalItemsCount - 4
+        val ownNewMessage = previousTail != tail.id && tail.senderId == viewModel.currentUserId
+        if (!uiState.isSearchActive && viewModel.initialMessageId == null && (!firstListPositioned || wasNearBottom || ownNewMessage)) {
+            val lastIndex = app.yodo.messenger.data.outbox.lastMessageItemIndex(displayedMessages, ::formatDateSeparator)
+            listState.scrollToItem(lastIndex)
+            // The final bubble can be taller than the viewport (images/long messages).
+            kotlinx.coroutines.delay(80)
+            listState.scrollToItem(lastIndex)
+            firstListPositioned = true
+        }
+        previousTail = tail.id
+    }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    var chatResumed by remember(lifecycleOwner) { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, _ ->
+            chatResumed = lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+            if (!chatResumed) viewModel.onMessagesVisible(emptyList())
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.onMessagesVisible(emptyList())
+        }
+    }
+    LaunchedEffect(chatResumed, listState, viewModel) {
+        if (!chatResumed) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            layout.visibleItemsInfo.filter { item ->
+                val visiblePixels = minOf(item.offset + item.size, layout.viewportEndOffset) - maxOf(item.offset, layout.viewportStartOffset)
+                visiblePixels >= minOf(item.size / 2, 96)
+            }.mapNotNull { it.key as? String }.filterNot { it.startsWith("date_") }
+        }.collectLatest { ids ->
+            kotlinx.coroutines.delay(350)
+            while (true) {
+                viewModel.onMessagesVisible(ids)
+                kotlinx.coroutines.delay(3_000)
+            }
+        }
     }
     val selectedMessages = displayedMessages.filter { it.id in selectedMessageIds.value }
     val isChannel = uiState.chatType == "CHANNEL"
@@ -1319,7 +1363,19 @@ fun ChatScreen(
                                         )
                                     }
                                 }
-                                MessageInputBar(
+                                if (uiState.failedTextCount > 0) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(uiState.outboxError ?: "Не отправлено: ${uiState.failedTextCount}",
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f), maxLines = 2)
+                    TextButton(onClick = viewModel::retryQueuedMessages) { Text("Повторить") }
+                    TextButton(onClick = { confirmDiscardOutbox = true }) { Text("Убрать") }
+                }
+            } else if (uiState.queuedTextCount > 0) {
+                Text("В очереди: ${uiState.queuedTextCount}", modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            MessageInputBar(
                                     text = inputText,
                                     onTextChange = { inputText = it; viewModel.onInputTextChanged(it) },
                                     onSendClick = { trySend() },
@@ -2129,20 +2185,6 @@ private fun MessageBubble(
         if (isOwnMessage) sendAppearance.animateTo(1f, animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f))
     }
     var showMenu by remember { mutableStateOf(false) }
-    // ИСПРАВЛЕНО (индикатор доставлено/прочитано "виснет"): статус сообщения приходит
-    // из Firestore-листенера и обычно обновляется мгновенно, но при долгом простое между
-    // снапшотами (не открывали чат — не долетело DELIVERED/READ соседних сообщений)
-    // галочка могла визуально "застревать" до следующего события. Как и с "в сети" в
-    // списке чатов, добавлен посекундный тик, который просто форсирует перекомпозицию —
-    // источником истины по-прежнему остаётся message.status.
-    var bubbleNowTick by remember { mutableStateOf(0L) }
-    LaunchedEffect(isOwnMessage) {
-        if (!isOwnMessage) return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(1_000L)
-            bubbleNowTick = System.currentTimeMillis()
-        }
-    }
     var tapCount by remember { mutableIntStateOf(0) }
     // Тактильный отклик пузыря: сжатие при нажатии + лёгкая вибрация при долгом нажатии.
     val bubbleSource = remember { MutableInteractionSource() }
@@ -2495,34 +2537,7 @@ private fun MessageBubble(
                         // выделения текста запускается отдельно — кнопкой "Копировать фрагмент"
                         // в этом меню (см. showTextSelectionDialog ниже).
                         run {
-                            val inlineText = buildAnnotatedString {
-                                append(displayBody)
-                                append("  ")
-                                pushStyle(SpanStyle(color = timeColor, fontSize = 11.sp))
-                                append(formatMessageTime(message.timestamp))
-                                if (isOwnMessage) {
-                                    append("  ")
-                                    // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше
-                                    // здесь было только два варианта ("✓✓" для READ, "✓" для всего
-                                    // остального), поэтому SENDING/FAILED/DELIVERED выглядели
-                                    // одинаково как "отправлено". Теперь текстовые галочки
-                                    // синхронизированы по смыслу и по цвету с иконкой статуса ниже.
-                                    // Посекундный тик — как у статуса "в сети" — гарантирует
-                                    // перерисовку раз в секунду, а не только по приходу снапшота.
-                                    @Suppress("UNUSED_EXPRESSION") bubbleNowTick
-                                    val (statusText, statusColor) = when (message.status) {
-                                        MessageStatus.SENDING -> "🕓" to timeColor
-                                        MessageStatus.FAILED -> "⚠" to Color(0xFFFF5A5A)
-                                        MessageStatus.SENT -> "✓" to timeColor
-                                        MessageStatus.DELIVERED -> "✓✓" to timeColor
-                                        MessageStatus.READ -> "✓✓" to Color(0xFF60E6FF)
-                                    }
-                                    pushStyle(SpanStyle(color = statusColor, fontSize = 11.sp))
-                                    append(statusText)
-                                    pop()
-                                }
-                                pop()
-                            }
+                            val inlineText = displayBody
                             Text(
                                 text = inlineText,
                                 color = textColor,
@@ -2591,7 +2606,7 @@ private fun MessageBubble(
                                 modifier = Modifier.size(12.dp).padding(end = 3.dp)
                             )
                         }
-                        if (message.text.isBlank()) {
+                        run {
                             Text(
                                 formatMessageTime(message.timestamp),
                                 color = timeColor,
@@ -2609,31 +2624,10 @@ private fun MessageBubble(
                             )
                             Text("${message.viewCount}", color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
                         }
-                        // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше было
-                        // только два визуальных состояния (READ vs всё остальное), из-за
-                        // чего SENDING/FAILED выглядели неотличимо от обычного "отправлено",
-                        // а промежуточного "доставлено" не было вовсе. Теперь все статусы
-                        // отражены отдельной иконкой/цветом.
-                        if (isOwnMessage && message.text.isBlank()) {
-                            // ИСПРАВЛЕНО (статус "виснет"): статус и так реактивно приходит
-                            // из Firestore-листенера, но как и статус "в сети" — читаем
-                            // посекундный тик (bubbleNowTick, локальный для MessageBubble),
-                            // чтобы гарантированно перерисовываться раз в секунду, а не
-                            // полагаться на то, что снапшот придёт вовремя.
-                            @Suppress("UNUSED_EXPRESSION") bubbleNowTick
-                            val (statusIcon, statusDescription, statusTint) = when (message.status) {
-                                MessageStatus.SENDING -> Triple(Icons.Filled.Schedule, "Отправка…", textColor.copy(alpha = 0.5f))
-                                MessageStatus.FAILED -> Triple(Icons.Filled.ErrorOutline, "Не отправлено", Color(0xFFFF5A5A))
-                                MessageStatus.SENT -> Triple(Icons.Filled.Done, "Отправлено", textColor.copy(alpha = 0.7f))
-                                MessageStatus.DELIVERED -> Triple(Icons.Filled.DoneAll, "Доставлено", textColor.copy(alpha = 0.7f))
-                                MessageStatus.READ -> Triple(Icons.Filled.DoneAll, "Прочитано", Color(0xFF60E6FF))
-                            }
-                            Icon(
-                                imageVector = statusIcon,
-                                contentDescription = statusDescription,
-                                tint = statusTint,
-                                modifier = Modifier.size(14.dp).padding(start = 4.dp)
-                            )
+                        if (isOwnMessage) {
+                            Spacer(Modifier.width(6.dp))
+                            MessageReceiptIndicator(message.status, neutralColor = timeColor,
+                                recipientCount = message.receiptRecipientCount, readCount = message.receiptReadCount)
                         }
                     }
                     // ИСПРАВЛЕНО (кнопка "Комментарии" вылезала за пределы сообщения и
