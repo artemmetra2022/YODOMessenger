@@ -2260,10 +2260,10 @@ private fun MessageBubble(
                 scaleY = sendAppearance.value
                 alpha = sendAppearance.value
             },
-            // В каналах строку-обёртку всё равно растягиваем на всю ширину (так пузырь
-            // можно выровнять по alignment), но саму Column с пузырём — нет, см. ниже:
-            // там убрали weight(1f)/fillMaxWidth, чтобы пузырь не "раздувался" под пустое
-            // сообщение.
+            // В каналах строку-обёртку всё равно растягиваем на всю ширину, но содержимое
+            // прижимаем к нужному краю сами: иначе Row (а с ней и пузырь) оставалась слева
+            // независимо от alignment внешнего Box — он выравнивает только саму Row.
+            horizontalArrangement = if (isOwnMessage) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Bottom
         ) {
             // Каналы: у постов нет аватарки автора (канал — это одна «лента»), поэтому
