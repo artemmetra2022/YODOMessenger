@@ -63,6 +63,7 @@ data class ChatUiState(
     // (в приватных чатах используется isOtherUserTyping, здесь — для GROUP/CHANNEL).
     val typingUserNames: List<String> = emptyList(),
     val authorNames: Map<String, String> = emptyMap(),
+    val mentionMembers: List<app.yodo.messenger.domain.model.YodoUser> = emptyList(),
     val replyingTo: Message? = null,
     val editingMessage: Message? = null,
     // НОВОЕ (лента новостей): это официальный канал YodoMessenger (режим новостной ленты).
@@ -520,8 +521,9 @@ class ChatViewModel @Inject constructor(
                         info.otherUserId?.let { observeSecurity(it) }
                     }
                     if (info.type == "GROUP" || info.type == "CHANNEL") {
-                        val names = chatRepository.getGroupInfo(chatId)?.members?.associate { it.uid to it.displayName }.orEmpty()
-                        _uiState.value = _uiState.value.copy(authorNames = names)
+                        val members = chatRepository.getGroupInfo(chatId)?.members.orEmpty()
+                        val names = members.associate { it.uid to it.displayName }
+                        _uiState.value = _uiState.value.copy(authorNames = names, mentionMembers = members)
                         // НОВОЕ (модерация): права текущего пользователя (владелец/роль) —
                         // по ним UI решает, показывать ли удаление чужих сообщений.
                         if (myUid != null) {

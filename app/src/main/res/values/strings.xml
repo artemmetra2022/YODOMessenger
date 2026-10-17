@@ -598,6 +598,12 @@
 
     <!-- НОВОЕ: быстрые действия в push-уведомлении о сообщении (только личные чаты) -->
     <string name="notification_action_mark_read">Прочитано</string>
+    <string name="notification_action_unmute">Включить звук</string>
+    <string name="notification_chat_sound_restored">Отключение звука этого чата отменено</string>
+    <string name="notification_action_mute">Отключить звук</string>
+    <string name="notification_chat_silenced">Звук и вибрация этого чата отключены</string>
+    <string name="notification_action_failed">Не удалось выполнить действие. Откройте чат и повторите.</string>
+    <string name="notification_reply_queued">Ответ добавлен в очередь отправки</string>
     <string name="notification_action_reply">Ответить</string>
     <string name="notification_reply_sent">Ответ отправлен</string>
     <string name="notification_reply_failed">Не удалось отправить ответ</string>

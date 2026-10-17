@@ -30,18 +30,22 @@ data class StoredNotificationMessage(
  */
 @Singleton
 class NotificationMessageStore @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val auth: com.google.firebase.auth.FirebaseAuth
 ) {
     companion object {
         private const val MAX_MESSAGES_PER_CHAT = 5
     }
 
-    private fun keyForChat(chatId: String) = stringPreferencesKey("chat_messages_$chatId")
+    private fun keyForChat(chatId: String,uid: String,mention: Boolean=false) = stringPreferencesKey("account_${uid}_chat_${chatId}_${if(mention)"mention"else "message"}")
 
-    suspend fun addMessage(chatId: String, senderName: String, text: String, timestampMillis: Long): List<StoredNotificationMessage> {
-        val key = keyForChat(chatId)
+    suspend fun addMessage(chatId: String, senderName: String, text: String, timestampMillis: Long, accountId: String?=auth.currentUser?.uid, mention: Boolean=false): List<StoredNotificationMessage> {
+        val uid=accountId ?: return emptyList()
+        if(auth.currentUser?.uid!=uid)return emptyList()
+        val key = keyForChat(chatId,uid,mention)
         var updated: List<StoredNotificationMessage> = emptyList()
         context.notificationStoreDataStore.edit { prefs ->
+            if(auth.currentUser?.uid!=uid)return@edit
             val existing = decode(prefs[key])
             updated = (existing + StoredNotificationMessage(senderName, text, timestampMillis))
                 .takeLast(MAX_MESSAGES_PER_CHAT)
@@ -51,14 +55,19 @@ class NotificationMessageStore @Inject constructor(
     }
 
     suspend fun getMessages(chatId: String): List<StoredNotificationMessage> {
-        val key = keyForChat(chatId)
+        val uid=auth.currentUser?.uid ?: return emptyList()
+        val key = keyForChat(chatId,uid)
         val prefs = context.notificationStoreDataStore.data.first()
+        if(auth.currentUser?.uid!=uid)return emptyList()
         return decode(prefs[key])
     }
 
-    suspend fun clear(chatId: String) {
-        val key = keyForChat(chatId)
-        context.notificationStoreDataStore.edit { prefs -> prefs.remove(key) }
+    suspend fun clear(chatId: String,accountId: String?=auth.currentUser?.uid) {
+        val uid=accountId ?: return
+        context.notificationStoreDataStore.edit { prefs ->
+            prefs.remove(keyForChat(chatId,uid));prefs.remove(keyForChat(chatId,uid,true))
+            prefs.remove(stringPreferencesKey("chat_messages_$chatId")) // discard legacy unscoped history
+        }
     }
 
     private fun encode(messages: List<StoredNotificationMessage>): String {

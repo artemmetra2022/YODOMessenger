@@ -27,6 +27,8 @@ object NotificationHelper {
     const val CHANNEL_ID_MESSAGES_VIBRO_ONLY = "yodo_messages_vibro_only"
     const val CHANNEL_ID_MESSAGES_MUTED = "yodo_messages_muted"
 
+    private const val MENTION_PREFIX = "yodo_mentions_"
+
     // НОВОЕ (push о модерации): отдельный канал для уведомлений о модерации
     // (глобальный бан/разбан). Не завязан на настройки звука/вибрации сообщений —
     // такие уведомления всегда со звуком, так как они важны и редки.
@@ -40,6 +42,16 @@ object NotificationHelper {
     // Старые каналы (для миграции — удаляем, чтобы не засорять настройки приложения).
     private const val LEGACY_CHANNEL_ID_MESSAGES_SOUND = "yodo_messages_sound"
     private const val LEGACY_CHANNEL_ID_MESSAGES_SILENT = "yodo_messages_silent"
+
+    fun openMentionSettings(context: Context,sound: Boolean,vibration: Boolean) {
+        createNotificationChannel(context)
+        val intent=Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,context.packageName)
+            putExtra(android.provider.Settings.EXTRA_CHANNEL_ID,mentionChannelId(sound,vibration))
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }
+    }
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -93,6 +105,17 @@ object NotificationHelper {
         manager.createNotificationChannel(vibroOnly)
         manager.createNotificationChannel(muted)
 
+        // Separate system controls for mentions, including independent sound/vibration combinations.
+        listOf(true to true,true to false,false to true,false to false).forEach { (sound,vibration) ->
+            manager.createNotificationChannel(NotificationChannel(mentionChannelId(sound,vibration),
+                "Упоминания @ · "+when {sound&&vibration->"звук и вибрация";sound->"звук";vibration->"вибрация";else->"без звука"},
+                NotificationManager.IMPORTANCE_HIGH).apply {
+                    description="Сообщения, в которых упомянуто ваше имя пользователя"
+                    enableVibration(vibration)
+                    if(!sound)setSound(null,null)
+                })
+        }
+
         // НОВОЕ (push о модерации): отдельный канал, всегда со звуком и вибрацией —
         // не зависит от пользовательских настроек звука/вибрации для обычных сообщений.
         val moderation = NotificationChannel(
@@ -127,21 +150,10 @@ object NotificationHelper {
         else -> CHANNEL_ID_MESSAGES_MUTED
     }
 
-    /**
-     * Показывает rich-уведомление о новом сообщении в стиле MessagingStyle:
-     * заголовок — имя чата/отправителя, тело — история последних сообщений
-     * (переданных в [history]), при нескольких подряд — сворачиваются в один стек
-     * вместо отдельных уведомлений. При тапе открывает приложение
-     * (переход сразу в конкретный чат подключим, когда появится deep-link парсинг в NavGraph).
-     *
-     * НОВОЕ (быстрые действия "Прочитано"/"Ответить"): для личных чатов (1 на 1)
-     * добавляются две кнопки прямо в уведомлении — "Прочитано" (отмечает чат
-     * прочитанным без открытия приложения) и "Ответить" (открывает системную
-     * форму ввода текста прямо в уведомлении через RemoteInput и отправляет
-     * ответ в фоне). Для групп/каналов кнопки не показываются, так как там нет
-     * единого "собеседника", а "Прочитано" по клику одного пользователя не должно
-     * молча помечать всё как прочитанное для всех сценариев.
-     */
+    private fun mentionChannelId(sound: Boolean,vibration: Boolean) = MENTION_PREFIX+"${if(sound)1 else 0}_${if(vibration)1 else 0}"
+    private fun notificationTag(uid: String,chat: String,mention: Boolean)="yodo:$uid:$chat:${if(mention)"mention" else "message"}"
+
+    /** One ordinary stack and a separate mention stack per account/chat. Rights come from verified chat context. */
     fun showMessageNotification(
         context: Context,
         chatId: String,
@@ -150,11 +162,21 @@ object NotificationHelper {
         history: List<StoredNotificationMessage> = emptyList(),
         soundEnabled: Boolean = true,
         vibrationEnabled: Boolean = true,
-        isPrivateChat: Boolean = false
+        isPrivateChat: Boolean = false,
+        accountId: String? = null,
+        chatType: String = if(isPrivateChat)"PRIVATE"else "",
+        canMarkRead: Boolean = isPrivateChat,
+        canReply: Boolean = isPrivateChat,
+        canMute: Boolean = false,
+        topicId: String? = null,
+        conversationTitle: String? = null,
+        isMention: Boolean = false,
+        soundMuted: Boolean = false
     ) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_CHAT_ID, chatId)
+            data=android.net.Uri.Builder().scheme("yodo-notification").authority("open").appendPath(accountId.orEmpty()).appendPath(chatId).build()
         }
 
         val pendingIntent = PendingIntent.getActivity(
@@ -164,12 +186,13 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val channelId = channelIdFor(soundEnabled, vibrationEnabled)
+        val channelId = if(isMention)mentionChannelId(soundEnabled,vibrationEnabled) else channelIdFor(soundEnabled, vibrationEnabled)
 
         // Собеседник/автор текущего сообщения — от его лица уведомление и "приходит".
         val me = Person.Builder().setName("Вы").build()
         val messagingStyle = NotificationCompat.MessagingStyle(me)
-            .setConversationTitle(senderName)
+            .setConversationTitle(if(isMention)"@ Упоминание · ${conversationTitle ?: senderName}" else conversationTitle ?: senderName)
+            .setGroupConversation(chatType=="GROUP"||chatType=="CHANNEL")
 
         val effectiveHistory = if (history.isNotEmpty()) {
             history
@@ -196,76 +219,54 @@ object NotificationHelper {
             if (!vibrationEnabled) builder.setVibrate(longArrayOf(0L))
         }
 
-        // НОВОЕ (быстрые действия): только для личных чатов (1 на 1) — см. комментарий
-        // к функции выше. Оба действия обрабатывает NotificationActionReceiver в фоне,
-        // без открытия приложения (никакого showsUserInterface).
-        if (isPrivateChat) {
-            val markReadIntent = Intent(context, NotificationActionReceiver::class.java).apply {
-                action = NotificationActionReceiver.ACTION_MARK_READ
-                putExtra(NotificationActionReceiver.EXTRA_CHAT_ID, chatId)
+        if(accountId!=null) {
+            fun actionIntent(action: String): Intent = Intent(context,NotificationActionReceiver::class.java).apply {
+                this.action=action
+                data=android.net.Uri.Builder().scheme("yodo-notification").authority("action")
+                    .appendPath(accountId).appendPath(chatId).appendPath(action).appendQueryParameter("topic",topicId.orEmpty()).build()
+                putExtra(NotificationActionReceiver.EXTRA_CHAT_ID,chatId)
+                putExtra(NotificationActionReceiver.EXTRA_ACCOUNT_ID,accountId)
+                putExtra(NotificationActionReceiver.EXTRA_TOPIC_ID,topicId)
             }
-            val markReadPendingIntent = PendingIntent.getBroadcast(
-                context,
-                chatId.hashCode(), // reuse chat-specific request code so PendingIntents don't collide across chats
-                markReadIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val markReadAction = NotificationCompat.Action.Builder(
-                R.drawable.ic_notification,
-                context.getString(R.string.notification_action_mark_read),
-                markReadPendingIntent
-            ).setShowsUserInterface(false).build()
-
-            val replyLabel = context.getString(R.string.notification_action_reply)
-            val remoteInput = RemoteInput.Builder(NotificationActionReceiver.KEY_REPLY_TEXT)
-                .setLabel(replyLabel)
-                .build()
-            val replyIntent = Intent(context, NotificationActionReceiver::class.java).apply {
-                action = NotificationActionReceiver.ACTION_REPLY
-                putExtra(NotificationActionReceiver.EXTRA_CHAT_ID, chatId)
+            fun pending(action: String,mutable: Boolean=false)=PendingIntent.getBroadcast(context,0,actionIntent(action),
+                PendingIntent.FLAG_UPDATE_CURRENT or if(mutable)PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
+            if(canMarkRead)builder.addAction(NotificationCompat.Action.Builder(R.drawable.ic_notification,
+                context.getString(R.string.notification_action_mark_read),pending(NotificationActionReceiver.ACTION_MARK_READ))
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ).setShowsUserInterface(false).build())
+            if(canReply) {
+                val label=if(chatType=="CHANNEL")"Опубликовать" else context.getString(R.string.notification_action_reply)
+                builder.addAction(NotificationCompat.Action.Builder(R.drawable.ic_notification,label,pending(NotificationActionReceiver.ACTION_REPLY,true))
+                    .addRemoteInput(RemoteInput.Builder(NotificationActionReceiver.KEY_REPLY_TEXT).setLabel(label).build())
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                    .setShowsUserInterface(false).setAllowGeneratedReplies(false).build())
             }
-            // request code сдвинут (+1), чтобы не совпасть с markReadPendingIntent для того же чата
-            val replyPendingIntent = PendingIntent.getBroadcast(
-                context,
-                chatId.hashCode() + 1,
-                replyIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE // RemoteInput требует MUTABLE
-            )
-            val replyAction = NotificationCompat.Action.Builder(
-                R.drawable.ic_notification,
-                replyLabel,
-                replyPendingIntent
-            ).addRemoteInput(remoteInput)
-                .setShowsUserInterface(false)
-                .setAllowGeneratedReplies(false)
-                .build()
-
-            builder.addAction(markReadAction)
-            builder.addAction(replyAction)
+            if(canMute)builder.addAction(NotificationCompat.Action.Builder(R.drawable.ic_notification,
+                context.getString(if(soundMuted)R.string.notification_action_unmute else R.string.notification_action_mute),
+                pending(if(soundMuted)NotificationActionReceiver.ACTION_UNMUTE else NotificationActionReceiver.ACTION_MUTE))
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MUTE).setShowsUserInterface(false).build())
         }
 
         // На Android 13+ показ уведомлений требует разрешения POST_NOTIFICATIONS —
         // запрашивается в MainActivity. Если разрешения нет, notify() просто не сработает без краша.
         runCatching {
-            NotificationManagerCompat.from(context).notify(chatId.hashCode(), builder.build())
+            NotificationManagerCompat.from(context).cancel(chatId.hashCode())
+            if(accountId!=null)NotificationManagerCompat.from(context).notify(notificationTag(accountId,chatId,isMention),0,builder.build())
+            else NotificationManagerCompat.from(context).notify(chatId.hashCode(), builder.build())
         }
     }
 
     /** Убирает показанное уведомление для чата (например, при его открытии). */
-    fun cancelNotification(context: Context, chatId: String) {
+    fun cancelNotification(context: Context, chatId: String, accountId: String? = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid) {
         runCatching {
-            NotificationManagerCompat.from(context).cancel(chatId.hashCode())
+            val manager=NotificationManagerCompat.from(context)
+            manager.cancel(chatId.hashCode())
+            accountId?.let { uid -> manager.cancel(notificationTag(uid,chatId,false),0);manager.cancel(notificationTag(uid,chatId,true),0) }
         }
     }
 
-    // НОВОЕ (подтверждение "Ответ отправлен"): перерисовывает то же уведомление личного
-    // чата с обновлённой историей (включающей только что отправленную реплику "от себя"),
-    // чтобы пользователь увидел подтверждение отправки прямо в шторке, не открывая
-    // приложение. Кнопки действий не добавляются заново — раз ответ уже отправлен,
-    // уведомление можно просто прочитать; setTimeoutAfter автоматически уберёт его,
-    // если пользователь не взаимодействует с ним дальше. Новое входящее сообщение
-    // (следующий push) перерисует уведомление обычным путём — с кнопками — как всегда.
-    fun showReplySentNotification(
+    // Quiet, temporary acknowledgement of a DURABLE QUEUE operation, not a server delivery receipt.
+    // Actual send failures remain visible in the encrypted outbox in the chat.
+    fun showReplyQueuedNotification(
         context: Context,
         chatId: String,
         history: List<StoredNotificationMessage>

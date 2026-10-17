@@ -8,15 +8,18 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
 /**
  * Формат данных в push-сообщении (см. push-worker/index.js):
- * data: { chatId, senderName, messageText } — обычное сообщение чата
+ * data: { chatId, senderName, messageText, chatType?, recipientId?, senderId?, topicId? }
+ * Legacy pushes are supported. For groups/channels, @username is matched against the
+ * signed-in user's current username, never a substring or an email address.
+ * Optional type="mention" with recipientId is accepted from the trusted FCM sender.
+ * No decrypted PRIVATE message text is uploaded or required for this feature.
  * data: { type: "moderation", title, body } — уведомление о модерации
  * (глобальный бан/разбан); намеренно не проверяет mute/quiet hours/snooze —
  * это редкое и важное системное уведомление, которое не должно теряться
@@ -40,7 +43,8 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
     @Inject
     lateinit var notificationMessageStore: NotificationMessageStore
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO)
+    @Inject lateinit var chatAccess: app.yodo.messenger.notifications.NotificationChatAccess
+    @Inject lateinit var silenceStore: app.yodo.messenger.data.local.NotificationSilenceStore
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -78,74 +82,59 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        val chatId = message.data["chatId"] ?: return
-        val senderName = message.data["senderName"] ?: "Yodo Messenger"
-        val messageText = message.data["messageText"] ?: message.notification?.body.orEmpty()
-        // НОВОЕ (быстрые действия "Прочитано"/"Ответить"): кнопки показываем только
-        // для личных чатов (1 на 1) — push-worker кладёт chatType в data (см.
-        // push-worker/index.js). По умолчанию (chatType отсутствует/неизвестен)
-        // считаем чат НЕ приватным — безопаснее не показать кнопки, чем случайно
-        // показать их в группе.
-        val isPrivateChat = message.data["chatType"].equals("PRIVATE", ignoreCase = true)
-
-        serviceScope.launch {
-            val globallyMuted = userSettingsPreferences.muteAllNotifications.first()
-            if (globallyMuted) return@launch
-
-            // НОВОЕ: пауза уведомлений (snooze) — молчим, пока не истечёт таймер.
-            val snoozedUntil = userSettingsPreferences.notificationsSnoozedUntil.first()
-            if (snoozedUntil > System.currentTimeMillis()) return@launch
-
-            // НОВОЕ: тихие часы — подавляем уведомления в заданном ночном окне.
-            val quietEnabled = userSettingsPreferences.quietHoursEnabled.first()
-            if (quietEnabled) {
-                val start = userSettingsPreferences.quietHoursStart.first()
-                val end = userSettingsPreferences.quietHoursEnd.first()
-                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-                val inQuiet = if (start <= end) hour in start until end else (hour >= start || hour < end)
-                if (inQuiet) return@launch
+        val chatId = message.data["chatId"]?.takeIf { it.isNotBlank() } ?: return
+        val uid=firebaseAuth.currentUser?.uid ?: return
+        if(message.data["recipientId"]?.let { it!=uid }==true)return
+        if(message.data["senderId"]==uid)return
+        // FirebaseMessagingService invokes this on its worker thread. Finish bounded work before
+        // returning; a detached coroutine can be killed before it posts the notification.
+        kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+            kotlinx.coroutines.withTimeoutOrNull(9_000) {
+                try { handleChatPush(message,uid,chatId) }
+                catch(e: kotlinx.coroutines.CancellationException){throw e}
+                catch(e: Exception){android.util.Log.w("YodoPush","Chat notification could not be processed",e)}
             }
-
-            val soundEnabled = userSettingsPreferences.notificationSound.first()
-            val vibrationEnabled = userSettingsPreferences.notificationVibration.first()
-
-            // НОВОЕ: скрытие текста в уведомлениях — показываем обезличенное уведомление.
-            val hidePreview = userSettingsPreferences.hideNotificationPreview.first()
-            if (hidePreview) {
-                NotificationHelper.showMessageNotification(
-                    context = applicationContext,
-                    chatId = chatId,
-                    senderName = "Новое сообщение",
-                    messageText = "Откройте приложение, чтобы прочитать",
-                    soundEnabled = soundEnabled,
-                    vibrationEnabled = vibrationEnabled,
-                    // Текст скрыт настройками приватности — быстрый инлайн-ответ здесь неуместен
-                    // (не видно, на что отвечаешь), но отметить прочитанным всё же можно.
-                    isPrivateChat = isPrivateChat
-                )
-                return@launch
-            }
-
-            // Копим историю на клиенте — rich-уведомление (MessagingStyle) показывает
-            // стек последних сообщений чата, а не только это одно.
-            val history = notificationMessageStore.addMessage(
-                chatId = chatId,
-                senderName = senderName,
-                text = messageText,
-                timestampMillis = System.currentTimeMillis()
-            )
-
-            NotificationHelper.showMessageNotification(
-                context = applicationContext,
-                chatId = chatId,
-                senderName = senderName,
-                messageText = messageText,
-                history = history,
-                soundEnabled = soundEnabled,
-                vibrationEnabled = vibrationEnabled,
-                isPrivateChat = isPrivateChat
-            )
         }
+    }
+
+    private suspend fun handleChatPush(message: RemoteMessage,uid: String,chatId: String) {
+        if(userSettingsPreferences.muteAllNotifications.first())return
+        if(userSettingsPreferences.notificationsSnoozedUntil.first()>System.currentTimeMillis())return
+        if(userSettingsPreferences.quietHoursEnabled.first()) {
+            val start=userSettingsPreferences.quietHoursStart.first()
+            val end=userSettingsPreferences.quietHoursEnd.first()
+            val hour=java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            if(if(start<=end)hour in start until end else hour>=start||hour<end)return
+        }
+        val hidePreview=userSettingsPreferences.hideNotificationPreview.first()
+        val access=chatAccess.load(uid,chatId,hidePreview) ?: return
+        // Existing per-chat "disable notifications" is different from the new local sound-only action.
+        if(access.serverMuted)return
+        val sender=message.data["senderName"] ?: "YodoMessenger"
+        val text=message.data["messageText"] ?: message.notification?.body.orEmpty()
+        val mention=if(message.data["type"]=="mention" && message.data["recipientId"]==uid)true
+            else if(access.type=="GROUP"||access.type=="CHANNEL") {
+                val username=try { kotlinx.coroutines.withTimeout(2_000) {
+                    firestore.collection("users").document(uid).get().await().getString("username")
+                }} catch(e: Exception){
+                    if(e is kotlinx.coroutines.CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException)throw e
+                    null
+                }
+                app.yodo.messenger.core.mentions.mentionsUsername(text,username)
+            } else false
+        val locallyMuted=silenceStore.isSilent(uid,chatId)
+        val (sound,vibration)=app.yodo.messenger.notifications.notificationAlerts(
+            userSettingsPreferences.notificationSound.first(),userSettingsPreferences.notificationVibration.first(),locallyMuted)
+        if(firebaseAuth.currentUser?.uid!=uid)return
+        val displaySender=if(hidePreview)"Новое сообщение"else sender
+        val displayText=if(hidePreview)"Откройте приложение, чтобы прочитать"else text
+        val history=if(hidePreview)emptyList() else notificationMessageStore.addMessage(chatId,displaySender,displayText,
+            System.currentTimeMillis(),accountId=uid,mention=mention)
+        if(firebaseAuth.currentUser?.uid!=uid)return
+        NotificationHelper.showMessageNotification(applicationContext,chatId,displaySender,displayText,history,
+            soundEnabled=sound,vibrationEnabled=vibration,accountId=uid,chatType=access.type,
+            canMarkRead=access.actions.markRead,canReply=access.actions.reply,canMute=access.actions.mute,
+            topicId=message.data["topicId"],conversationTitle=if(hidePreview)null else access.title.takeIf { it.isNotBlank() },isMention=mention,soundMuted=locallyMuted)
     }
 
     private fun saveTokenToFirestore(token: String) {

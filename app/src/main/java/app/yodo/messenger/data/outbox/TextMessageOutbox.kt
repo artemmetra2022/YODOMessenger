@@ -61,10 +61,11 @@ class TextMessageOutbox @Inject constructor(
     }
 
     suspend fun enqueue(chat: String, text: String, topic: String?, reply: ReplyContext?,
-        hasTtl: Boolean, ttl: Long?, silent: Boolean): Item = withContext(Dispatchers.IO) {
+        hasTtl: Boolean, ttl: Long?, silent: Boolean, expectedOwner: String? = null): Item = withContext(Dispatchers.IO) {
         mutex.withLock {
             loadAccount()
             val uid = auth.currentUser?.uid ?: error("Войдите в аккаунт")
+            check(expectedOwner == null || expectedOwner == uid) { "Аккаунт изменился" }
             check(mutableItems.value.size < 200) { "Очередь заполнена. Повторите неотправленные сообщения" }
             val item = Item(UUID.randomUUID().toString(), uid, chat, text, maxOf(System.currentTimeMillis(), (mutableItems.value.lastOrNull()?.timestamp ?: 0L) + 1),
                 topic, reply, hasTtl, ttl, silent)

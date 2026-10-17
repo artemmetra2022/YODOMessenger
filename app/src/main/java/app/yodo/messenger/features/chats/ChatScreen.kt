@@ -1375,6 +1375,10 @@ fun ChatScreen(
                 Text("В очереди: ${uiState.queuedTextCount}", modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            MentionSuggestions(inputText,uiState.mentionMembers.filter { it.uid != viewModel.currentUserId }) { username ->
+                inputText=app.yodo.messenger.core.mentions.completeMention(inputText,username)
+                viewModel.onInputTextChanged(inputText)
+            }
             MessageInputBar(
                                     text = inputText,
                                     onTextChange = { inputText = it; viewModel.onInputTextChanged(it) },
@@ -2539,7 +2543,7 @@ private fun MessageBubble(
                         run {
                             val inlineText = displayBody
                             Text(
-                                text = inlineText,
+                                text = annotatedMentions(inlineText,textColor),
                                 color = textColor,
                                 style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 20.sp),
                                 modifier = Modifier.padding(horizontal = 12.dp)

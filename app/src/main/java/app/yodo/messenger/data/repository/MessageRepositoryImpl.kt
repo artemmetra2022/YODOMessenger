@@ -1223,8 +1223,12 @@ class MessageRepositoryImpl @Inject constructor(
         awaitClose { chatListener.remove(); topicListener?.remove() }
     }
 
-    override suspend fun clearUnreadForVisibleMessages(chatId: String, visibleIds: List<String>, topicId: String?): Boolean {
+    override suspend fun clearUnreadForVisibleMessages(chatId: String, visibleIds: List<String>, topicId: String?): Boolean =
+        clearUnreadScoped(chatId,visibleIds,topicId,null)
+
+    private suspend fun clearUnreadScoped(chatId: String, visibleIds: List<String>, topicId: String?, expectedAccount: String?): Boolean {
         val uid = firebaseAuth.currentUser?.uid ?: return false
+        check(expectedAccount == null || expectedAccount == uid) { "Аккаунт изменился" }
         if (visibleIds.isEmpty()) return false
         val chatRef = firestore.collection("chats").document(chatId)
         return firestore.runTransaction { tx ->
@@ -1258,11 +1262,14 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     // Explicit notification action: unlike viewport receipts, this intentionally reads the whole chat.
-    override suspend fun markChatAsRead(chatId: String) {
+    override suspend fun markChatAsRead(chatId: String, expectedAccount: String?) {
+        val uid=firebaseAuth.currentUser?.uid ?: return
+        check(expectedAccount==null || expectedAccount==uid) { "Аккаунт изменился" }
         val docs = firestore.collection("chats").document(chatId).collection("messages").get(Source.SERVER).await()
+        check(firebaseAuth.currentUser?.uid==uid) { "Аккаунт изменился" }
         val ids = docs.documents.map { it.id }
-        try { markMessagesAsRead(chatId, ids) }
-        finally { clearUnreadForVisibleMessages(chatId, ids) }
+        try { updateReceipts(chatId,ids,userSettingsPreferences.showReadReceipts.first(),null,uid) }
+        finally { if(firebaseAuth.currentUser?.uid==uid)clearUnreadScoped(chatId,ids,null,uid) }
     }
 
     override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>, topicId: String?) {
@@ -1270,8 +1277,9 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     private suspend fun updateReceipts(chatId: String, ids: List<String>, read: Boolean,
-        topicId: String?) {
+        topicId: String?, expectedAccount: String? = null) {
         val uid = firebaseAuth.currentUser?.uid ?: return
+        check(expectedAccount==null || expectedAccount==uid) { "Аккаунт изменился" }
         val chatRef = firestore.collection("chats").document(chatId)
         // Small transactions stay within the rules document-access budget. All reads precede writes.
         ids.distinct().chunked(8).forEach { chunk ->

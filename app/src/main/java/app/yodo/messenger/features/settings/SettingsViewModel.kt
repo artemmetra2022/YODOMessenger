@@ -47,6 +47,7 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val appSettingsRepository: app.yodo.messenger.domain.repository.AppSettingsRepository,
     private val firebaseAuth: FirebaseAuth,
+    private val notificationSilenceStore: app.yodo.messenger.data.local.NotificationSilenceStore,
     private val presenceRepository: PresenceRepository,
     private val userRepository: UserRepository
 ) : ViewModel() {
@@ -203,6 +204,10 @@ class SettingsViewModel @Inject constructor(
     fun setHideKeyboardOnSend(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideKeyboardOnSend(enabled) } }
     fun setHideKeyboardOnScroll(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setHideKeyboardOnScroll(enabled) } }
     fun setQuickReaction(emoji: String) { viewModelScope.launch { userSettingsPreferences.setQuickReaction(emoji) } }
+    fun restoreNotificationChatSounds() {
+        val uid=firebaseAuth.currentUser?.uid ?: return
+        viewModelScope.launch { notificationSilenceStore.clear(uid) }
+    }
     fun setNotificationSound(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationSound(enabled) } }
     fun setNotificationVibration(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setNotificationVibration(enabled) } }
     fun setMuteAllNotifications(enabled: Boolean) { viewModelScope.launch { userSettingsPreferences.setMuteAllNotifications(enabled) } }

@@ -303,7 +303,7 @@ object SettingsSearchIndex {
         SettingsSearchItem(
             id = "mute_all", anchorId = ANCHOR_NOTIFICATIONS,
             title = "Отключить все уведомления", subtitle = "Полностью выключить уведомления",
-            keywords = listOf("выключить уведомления", "без звука", "тишина", "mute", "пуш", "push", "отключить пуши", "не уведомлять"),
+            keywords = listOf("выключить уведомления", "упоминания", "вернуть звук чатам", "отключить звук", "без звука", "тишина", "mute", "пуш", "push", "отключить пуши", "не уведомлять"),
             sectionTitle = SEC_NOTIFICATIONS, categoryRoute = ROUTE_NOTIFICATIONS
         ),
         SettingsSearchItem(

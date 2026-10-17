@@ -105,7 +105,7 @@ interface MessageRepository {
     suspend fun hardDeleteMessage(chatId: String, messageId: String): SendMessageResult
     fun observeUnreadBadge(chatId: String, topicId: String? = null): Flow<app.yodo.messenger.domain.model.UnreadBadgeSnapshot>
     suspend fun clearUnreadForVisibleMessages(chatId: String, visibleIds: List<String>, topicId: String? = null): Boolean
-    suspend fun markChatAsRead(chatId: String)
+    suspend fun markChatAsRead(chatId: String, expectedAccount: String? = null)
     suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>, topicId: String? = null)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
     // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).
