@@ -426,15 +426,5 @@ private fun formatForwardTimestamp(millis: Long): String {
 
 @androidx.compose.runtime.Composable
 private fun formatForwardLastSeen(millis: Long): String {
-    val diff = System.currentTimeMillis() - millis
-    val minutes = diff / (60 * 1000)
-    val hours = diff / (60 * 60 * 1000)
-    val days = diff / (24 * 60 * 60 * 1000)
-    return when {
-        minutes < 1 -> stringResource(R.string.forward_just_now)
-        minutes < 60 -> "$minutes мин. назад"
-        hours < 24 -> "$hours ч. назад"
-        days == 1L -> stringResource(R.string.forward_yesterday)
-        else -> SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date(millis))
-    }
+    return app.yodo.messenger.util.LastSeenFormatter.format(millis)
 }

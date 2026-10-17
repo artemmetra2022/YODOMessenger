@@ -1730,13 +1730,7 @@ private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier)
             maxLines = 1,
             modifier = modifier
         )
-        chat.lastSeenMillis > 0 -> Text(
-            stringResource(R.string.chat_list_was_online, formatLastSeen(chat.lastSeenMillis)),
-            style = MaterialTheme.typography.labelMedium,
-            color = Color.Gray,
-            maxLines = 1,
-            modifier = modifier
-        )
+        // «был(а) ...» в списке чатов не показываем — только в самом чате и в профиле.
     }
 }
 
@@ -1755,25 +1749,6 @@ private fun LastMessageStatusIcon(rawStatus: String?) {
         ?: app.yodo.messenger.domain.model.MessageStatus.SENDING
     MessageReceiptIndicator(status, compact = true, neutralColor = MaterialTheme.colorScheme.onSurfaceVariant)
 
-}
-
-@Composable
-private fun formatLastSeen(millis: Long): String {
-    // НОВОЕ (баг 12): время отсчитывается от посекундного тика, а не от момента
-    // композиции — подпись "N сек/мин назад" живая и обновляется каждую секунду.
-    val now = rememberNowTick()
-    val diffMillis = (now - millis).coerceAtLeast(0L)
-    val diffSeconds = diffMillis / 1_000
-    val diffMinutes = diffSeconds / 60
-    return when {
-        diffSeconds < 10 -> stringResource(R.string.chat_list_just_now)
-        diffSeconds < 60 -> "$diffSeconds сек назад"
-        diffMinutes < 60 -> "$diffMinutes мин назад"
-        diffMinutes < 24 * 60 -> "${diffMinutes / 60} ч назад"
-        diffMinutes < 7 * 24 * 60 -> SimpleDateFormat("EEEE, HH:mm", Locale("ru")).format(Date(millis))
-            .replaceFirstChar { it.uppercase() }
-        else -> SimpleDateFormat("d MMM, HH:mm", Locale("ru")).format(Date(millis))
-    }
 }
 
 @Composable

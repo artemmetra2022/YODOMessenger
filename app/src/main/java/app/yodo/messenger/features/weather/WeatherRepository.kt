@@ -28,23 +28,35 @@ data class WeatherMain(
     val tempMin: Double = 0.0,
     val tempMax: Double = 0.0,
     val pressure: Int = 0,
-    val humidity: Int = 0
+    val humidity: Int = 0,
+    val clouds: Int = 0,
+    val dewPoint: Double? = null,
+    val uvIndex: Double? = null
 )
 
-data class WeatherWind(val speed: Double = 0.0)
+data class WeatherWind(
+    val speed: Double = 0.0,
+    val gust: Double? = null,
+    val deg: Int? = null
+)
 
 data class CurrentWeatherResponse(
     val name: String = "",
     val weather: List<WeatherCondition> = emptyList(),
     val main: WeatherMain = WeatherMain(),
     val wind: WeatherWind = WeatherWind(),
-    val dt: Long = 0L
+    val dt: Long = 0L,
+    val precipitation: Double = 0.0,
+    val precipProbability: Int? = null
 )
 
 data class ForecastItem(
     val dt: Long,
     val main: WeatherMain,
-    val weather: List<WeatherCondition> = emptyList()
+    val weather: List<WeatherCondition> = emptyList(),
+    val wind: WeatherWind = WeatherWind(),
+    val precipitation: Double = 0.0,
+    val precipProbability: Int? = null
 )
 
 data class ForecastResponse(val list: List<ForecastItem> = emptyList())
@@ -67,7 +79,14 @@ data class MetDetails(
     @SerialName("air_pressure_at_sea_level") val pressure: Double = 0.0,
     @SerialName("wind_speed") val windSpeed: Double = 0.0,
     @SerialName("air_temperature_min") val temperatureMin: Double? = null,
-    @SerialName("air_temperature_max") val temperatureMax: Double? = null
+    @SerialName("air_temperature_max") val temperatureMax: Double? = null,
+    @SerialName("cloud_area_fraction") val cloudAreaFraction: Double = 0.0,
+    @SerialName("dew_point_temperature") val dewPoint: Double? = null,
+    @SerialName("ultraviolet_index_clear_sky") val uvIndex: Double? = null,
+    @SerialName("wind_from_direction") val windFromDirection: Double? = null,
+    @SerialName("wind_speed_of_gust") val windGust: Double? = null,
+    @SerialName("precipitation_amount") val precipitationAmount: Double? = null,
+    @SerialName("probability_of_precipitation") val precipitationProbability: Double? = null
 )
 
 @Serializable
@@ -217,8 +236,10 @@ private fun MetSeriesEntry.toCurrentWeather(cityName: String): CurrentWeatherRes
         name = cityName,
         weather = listOf(data.symbolCode().toCondition()),
         main = details.toWeatherMain(),
-        wind = WeatherWind(speed = details.windSpeed),
-        dt = time.toEpochSeconds()
+        wind = details.toWind(),
+        dt = time.toEpochSeconds(),
+        precipitation = data.precipitationAmount(),
+        precipProbability = data.precipitationProbability()
     )
 }
 
@@ -227,7 +248,10 @@ private fun MetSeriesEntry.toForecastItem(): ForecastItem {
     return ForecastItem(
         dt = time.toEpochSeconds(),
         main = details.toWeatherMain(sixHour = data.next6Hours?.details),
-        weather = listOf(data.symbolCode().toCondition())
+        weather = listOf(data.symbolCode().toCondition()),
+        wind = details.toWind(),
+        precipitation = data.precipitationAmount(),
+        precipProbability = data.precipitationProbability()
     )
 }
 
@@ -237,8 +261,42 @@ private fun MetDetails.toWeatherMain(sixHour: MetDetails? = null): WeatherMain =
     tempMin = sixHour?.temperatureMin ?: temperatureMin ?: airTemperature,
     tempMax = sixHour?.temperatureMax ?: temperatureMax ?: airTemperature,
     pressure = pressure.roundToInt(),
-    humidity = relativeHumidity.roundToInt()
+    humidity = relativeHumidity.roundToInt(),
+    clouds = cloudAreaFraction.roundToInt(),
+    dewPoint = dewPoint,
+    uvIndex = uvIndex
 )
+
+private fun MetDetails.toWind(): WeatherWind = WeatherWind(
+    speed = windSpeed,
+    gust = windGust,
+    deg = windFromDirection?.roundToInt()
+)
+
+// Осадки за ближайший час (если met.no их не даёт — за 6 часов, делённые на 6).
+private fun MetSeriesData.precipitationAmount(): Double =
+    next1Hours?.details?.precipitationAmount
+        ?: next6Hours?.details?.precipitationAmount?.div(6.0)
+        ?: 0.0
+
+private fun MetSeriesData.precipitationProbability(): Int? =
+    (next1Hours?.details?.precipitationProbability ?: next6Hours?.details?.precipitationProbability)
+        ?.roundToInt()
+
+// Направление ветра: градусы «откуда дует» → подпись.
+fun windDirectionLabel(deg: Int?): String {
+    if (deg == null) return ""
+    val names = listOf("С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ")
+    return names[(((deg % 360) + 360) % 360 / 45.0 + 0.5).toInt() % 8]
+}
+
+fun uvLabel(uv: Double): String = when {
+    uv < 3 -> "низкий"
+    uv < 6 -> "умеренный"
+    uv < 8 -> "высокий"
+    uv < 11 -> "очень высокий"
+    else -> "экстремальный"
+}
 
 private fun MetSeriesData.symbolCode(): String =
     next1Hours?.summary?.symbolCode?.takeIf { it.isNotBlank() }

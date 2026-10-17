@@ -653,17 +653,5 @@ private fun isPresenceEffectivelyOnline(presence: app.yodo.messenger.domain.mode
 
 @Composable
 private fun formatProfileLastSeen(millis: Long): String {
-    val now = rememberProfileNowTick()
-    val diffMillis = (now - millis).coerceAtLeast(0L)
-    val diffSeconds = diffMillis / 1_000
-    val diffMinutes = diffSeconds / 60
-    return when {
-        diffSeconds < 10 -> "только что"
-        diffSeconds < 60 -> "$diffSeconds сек назад"
-        diffMinutes < 60 -> "$diffMinutes мин назад"
-        diffMinutes < 24 * 60 -> "${diffMinutes / 60} ч назад"
-        diffMinutes < 7 * 24 * 60 -> java.text.SimpleDateFormat("EEEE, HH:mm", java.util.Locale("ru"))
-            .format(java.util.Date(millis)).replaceFirstChar { it.uppercase() }
-        else -> java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale("ru")).format(java.util.Date(millis))
-    }
+    return app.yodo.messenger.util.LastSeenFormatter.format(millis)
 }

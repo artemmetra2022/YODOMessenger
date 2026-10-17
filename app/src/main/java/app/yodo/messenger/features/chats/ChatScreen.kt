@@ -150,6 +150,9 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -1705,7 +1708,23 @@ fun ChatScreen(
                                 onSaveToFavorite = { viewModel.saveToFavorite(message) },
                                 onVotePoll = { optionIndex -> viewModel.voteOnPoll(message.id, optionIndex) },
                                 onClosePoll = { viewModel.closePoll(message.id) },
-                                onImageClick = { base64 -> onOpenImageViewer(base64, uiState.chatTitle, message.timestamp) },
+                                onImageClick = { base64 ->
+                                    // Листание по всем фото чата (как в Telegram): собираем плоский список
+                                    // изображений в хронологическом порядке и находим позицию нажатого.
+                                    val gallery = ArrayList<String>()
+                                    var startIndex = 0
+                                    displayedMessages.forEach { m ->
+                                        if (!m.isViewOnce && !m.isDeleted) {
+                                            val list = if (m.imagesBase64.isNotEmpty()) m.imagesBase64
+                                            else listOfNotNull(m.imageBase64)
+                                            if (m.id == message.id) startIndex = gallery.size + list.indexOf(base64).coerceAtLeast(0)
+                                            gallery.addAll(list)
+                                        }
+                                    }
+                                    ImageViewerHolder.images = gallery
+                                    ImageViewerHolder.initialIndex = startIndex
+                                    onOpenImageViewer(base64, uiState.chatTitle, message.timestamp)
+                                },
                                 onViewOnceClick = { msg -> if (msg.imageBase64 != null) viewOnceOverlayMessage = msg },
                                 onReplyQuoteClick = { targetMessageId ->
                                     val targetIndex = displayedMessages.indexOfFirst { it.id == targetMessageId }
@@ -1890,73 +1909,67 @@ private fun DateSeparator(label: String) {
     }
 }
 
-// НОВОЕ (несколько фото): сетка-коллаж для нескольких фото в одном сообщении.
-// Фото показываются по 2 в ряд (при нечётном количестве последнее занимает всю ширин).
+// Сетка-коллаж в стиле Telegram: плотные зазоры 2dp, скругление только по внешнему контуру,
+// показываются все фото (до 10), тап открывает просмотрщик с листанием на выбранном фото.
+//  • 1 фото — в натуральном соотношении сторон;
+//  • 2 — два столбца; 3 — большое слева + два справа; 4 — широкое сверху + три снизу;
+//  • 5+ — ряды по 3 (первый ряд короче, если не делится нацело).
 @Composable
 private fun ImageAlbumGrid(
     images: List<String>,
     onImageClick: (Int) -> Unit
 ) {
-    // ПЕРЕРАБОТАНО (U): коллаж больше не всегда квадратный и учитывает размеры фото:
-    // • 1 фото — в натуральном соотношении сторон;
-    // • 2 фото — два столбца;
-    // • 3 фото — одно большое + два малых;
-    // • 4 и больше — сетка 2x2, на последней плитке показываем "+N".
-    val decoded = images.map { base64 ->
-        base64 to remember(base64) { ImageUtils.decodeBase64ToBitmap(base64) }
+    val shown = images.take(10)
+    val decoded = shown.map { base64 ->
+        remember(base64) { ImageUtils.decodeChatImageBitmapCached(base64, 640) }
     }
+    val gap = 2.dp
     Column(
         modifier = Modifier
             .padding(4.dp)
-            .widthIn(min = 180.dp, max = 280.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .widthIn(min = 180.dp, max = 280.dp)
+            .clip(RoundedCornerShape(12.dp)),
+        verticalArrangement = Arrangement.spacedBy(gap)
     ) {
         when (decoded.size) {
             1 -> {
-                val (_, bmp) = decoded[0]
+                val bmp = decoded[0]
                 if (bmp != null) {
                     val ar = (bmp.width.toFloat() / bmp.height.toFloat()).coerceIn(0.6f, 1.9f)
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = "Фото",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(ar)
-                            .clip(RoundedCornerShape(12.dp)).clickable { onImageClick(0) }
-                    )
+                    AlbumTile(bmp, Modifier.fillMaxWidth().aspectRatio(ar)) { onImageClick(0) }
                 }
             }
-            2 -> {
-                Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    decoded.forEachIndexed { i, (_, bmp) -> AlbumTile(bmp, Modifier.weight(1f).fillMaxHeight()) { onImageClick(i) } }
+            2 -> Row(Modifier.fillMaxWidth().height(160.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                AlbumTile(decoded[0], Modifier.weight(1f).fillMaxHeight()) { onImageClick(0) }
+                AlbumTile(decoded[1], Modifier.weight(1f).fillMaxHeight()) { onImageClick(1) }
+            }
+            3 -> Row(Modifier.fillMaxWidth().height(200.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                AlbumTile(decoded[0], Modifier.weight(2f).fillMaxHeight()) { onImageClick(0) }
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    AlbumTile(decoded[1], Modifier.fillMaxWidth().weight(1f)) { onImageClick(1) }
+                    AlbumTile(decoded[2], Modifier.fillMaxWidth().weight(1f)) { onImageClick(2) }
                 }
             }
-            3 -> {
-                Row(Modifier.fillMaxWidth().height(180.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    AlbumTile(decoded[0].second, Modifier.weight(2f).fillMaxHeight()) { onImageClick(0) }
-                    Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        AlbumTile(decoded[1].second, Modifier.fillMaxWidth().weight(1f)) { onImageClick(1) }
-                        AlbumTile(decoded[2].second, Modifier.fillMaxWidth().weight(1f)) { onImageClick(2) }
-                    }
+            4 -> {
+                AlbumTile(decoded[0], Modifier.fillMaxWidth().height(150.dp)) { onImageClick(0) }
+                Row(Modifier.fillMaxWidth().height(86.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    for (i in 1..3) AlbumTile(decoded[i], Modifier.weight(1f).fillMaxHeight()) { onImageClick(i) }
                 }
             }
             else -> {
-                // Показываем первые 4 плитки; на 4-й — "+N", если фото больше.
-                val extra = decoded.size - 4
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(0 to 1, 2 to 3).forEach { (a, b) ->
-                        Row(Modifier.fillMaxWidth().height(120.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            AlbumTile(decoded[a].second, Modifier.weight(1f).fillMaxHeight()) { onImageClick(a) }
-                            Box(Modifier.weight(1f).fillMaxHeight()) {
-                                AlbumTile(decoded[b].second, Modifier.fillMaxSize()) { onImageClick(b) }
-                                if (b == 3 && extra > 0) {
-                                    Box(
-                                        Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
-                                            .background(Color.Black.copy(alpha = 0.5f))
-                                            .clickable { onImageClick(b) },
-                                        contentAlignment = Alignment.Center
-                                    ) { Text("+$extra", color = Color.White, style = MaterialTheme.typography.titleLarge) }
-                                }
-                            }
+                val n = decoded.size
+                val rows = buildList {
+                    var rest = n
+                    when (n % 3) { 1 -> { add(1); rest -= 1 }; 2 -> { add(2); rest -= 2 } }
+                    repeat(rest / 3) { add(3) }
+                }
+                var index = 0
+                rows.forEach { count ->
+                    val rowHeight = when (count) { 1 -> 150.dp; 2 -> 120.dp; else -> 90.dp }
+                    Row(Modifier.fillMaxWidth().height(rowHeight), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        repeat(count) {
+                            val i = index++
+                            AlbumTile(decoded[i], Modifier.weight(1f).fillMaxHeight()) { onImageClick(i) }
                         }
                     }
                 }
@@ -1972,10 +1985,10 @@ private fun AlbumTile(bmp: android.graphics.Bitmap?, modifier: Modifier, onClick
             bitmap = bmp.asImageBitmap(),
             contentDescription = "Фото",
             contentScale = ContentScale.Crop,
-            modifier = modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+            modifier = modifier.clickable(onClick = onClick)
         )
     } else {
-        Spacer(modifier = modifier)
+        Spacer(modifier = modifier.background(Color.Black.copy(alpha = 0.08f)))
     }
 }
 
@@ -2178,7 +2191,9 @@ private fun MessageBubble(
     val renderedBubbleColor = if (experimentalInterface) {
         bubbleColor.copy(alpha = bubbleGlassAlpha.coerceIn(0.05f, 0.90f))
     } else bubbleColor
-    val bubbleShape = if (experimentalInterface) {
+    val bubbleShape = if (isChannel) {
+        RoundedCornerShape(18.dp)
+    } else if (experimentalInterface) {
         if (isOwnMessage) RoundedCornerShape(18.dp, 18.dp, 5.dp, 18.dp)
         else RoundedCornerShape(18.dp, 18.dp, 18.dp, 5.dp)
     } else {
@@ -2238,14 +2253,18 @@ private fun MessageBubble(
         }
         Box(modifier = Modifier.weight(1f), contentAlignment = alignment) {
         Row(
-            modifier = Modifier.graphicsLayer {
+            modifier = Modifier
+                .then(if (isChannel) Modifier.fillMaxWidth().padding(horizontal = 8.dp) else Modifier)
+                .graphicsLayer {
                 scaleX = sendAppearance.value
                 scaleY = sendAppearance.value
                 alpha = sendAppearance.value
             },
             verticalAlignment = Alignment.Bottom
         ) {
-            if (!isOwnMessage) {
+            // Каналы: у постов нет аватарки автора (канал — это одна «лента»), поэтому
+            // ни аватар, ни резерв под него (46dp) не рисуем — пост занимает всю ширину.
+            if (!isOwnMessage && !isChannel) {
                 if (showAvatar) {
                     UserAvatar(
                         displayName = avatarName,
@@ -2258,7 +2277,10 @@ private fun MessageBubble(
                     Spacer(modifier = Modifier.width(46.dp))
                 }
             }
-            Column(horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start) {
+            Column(
+                modifier = if (isChannel) Modifier.weight(1f) else Modifier,
+                horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start
+            ) {
             if (message.isPinned) {
                 Row(modifier = Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", tint = colorTheme.primary, modifier = Modifier.size(12.dp))
@@ -2268,7 +2290,8 @@ private fun MessageBubble(
             BoxWithConstraints {
                 Column(
                     modifier = Modifier
-                        .widthIn(max = maxWidth * 0.78f)
+                        .then(if (isChannel) Modifier.fillMaxWidth() else Modifier)
+                        .widthIn(max = if (isChannel) maxWidth else maxWidth * 0.78f)
                         .squish(bubbleSource, strength = 0.5f)
                         .shadow(
                             elevation = 1.dp,
@@ -2287,7 +2310,7 @@ private fun MessageBubble(
                             },
                             shape = bubbleShape
                         )
-                        .then(if (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST) {
+                        .then(if (!isChannel && (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST)) {
                             Modifier.drawBehind { drawTelegramTail(renderedBubbleColor, isOwnMessage) }
                         } else Modifier)
                         .pointerInput(message.id, isSelectionMode) {
@@ -4234,19 +4257,17 @@ private fun formatDateSeparator(millis: Long): String {
 }
 
 private fun formatLastSeen(millis: Long): String {
-    val diffMillis = (System.currentTimeMillis() - millis).coerceAtLeast(0L)
-    val diffSeconds = diffMillis / 1_000
-    val diffMinutes = diffSeconds / 60
-    return when {
-        diffSeconds < 10 -> "только что"
-        diffSeconds < 60 -> "$diffSeconds сек назад"
-        diffMinutes < 60 -> "$diffMinutes мин назад"
-        diffMinutes < 24 * 60 -> "${diffMinutes / 60} ч назад"
-        diffMinutes < 7 * 24 * 60 -> SimpleDateFormat("EEEE, HH:mm", Locale("ru")).format(Date(millis))
-            .replaceFirstChar { it.uppercase() }
-        else -> SimpleDateFormat("d MMM, HH:mm", Locale("ru")).format(Date(millis))
-    }
+    return app.yodo.messenger.util.LastSeenFormatter.format(millis)
 }
+
+// Меню вложений в стиле Telegram: нижняя шторка, сетка круглых цветных кнопок с подписями
+// и компактный выбор качества фото чипами. Сигнатура прежняя — вызывающий код не менялся.
+private data class AttachTile(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val label: String,
+    val color: Color,
+    val onClick: () -> Unit
+)
 
 @Composable
 private fun AttachMenuDialog(
@@ -4263,62 +4284,87 @@ private fun AttachMenuDialog(
     onPickChecklist: (() -> Unit)? = null,
     onPasteImage: () -> Unit
 ) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth()
+    val tiles = buildList {
+        add(AttachTile(Icons.Filled.Photo, "Фото", Color(0xFF3D8BFD), onPickPhoto))
+        add(AttachTile(Icons.Filled.InsertDriveFile, "Файл", Color(0xFF7E57C2), onPickFile))
+        add(AttachTile(Icons.Filled.LocationOn, "Геопозиция", Color(0xFF43A047), onPickLocation))
+        add(AttachTile(Icons.Filled.Poll, "Опрос", Color(0xFFFFA000), onPickPoll))
+        onPickChecklist?.let { add(AttachTile(Icons.Filled.CheckCircle, stringResource(R.string.checklist_create), Color(0xFF00ACC1), it)) }
+        add(AttachTile(Icons.Filled.RemoveRedEye, "Один просмотр", Color(0xFF8E24AA), onPickViewOncePhoto))
+        add(AttachTile(Icons.Filled.ContentPaste, "Из буфера", Color(0xFF546E7A), onPasteImage))
+        add(AttachTile(Icons.Filled.Edit, "Доска", Color(0xFFE53935), onPickCanvas))
+        onPickSharedBoard?.let { add(AttachTile(Icons.Filled.Edit, "Общая доска", Color(0xFFD81B60), it)) }
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp)
         ) {
-            Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                Text(
-                    "Отправить",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-                AttachMenuRow(icon = Icons.Filled.Edit, label = "Интерактивная доска", onClick = onPickCanvas)
-                onPickSharedBoard?.let { AttachMenuRow(icon = Icons.Filled.Edit, label = "Общая доска чата", onClick = it) }
-                AttachMenuRow(icon = Icons.Filled.Photo, label = "Фото (можно несколько)", onClick = onPickPhoto)
-                Text(
-                    stringResource(R.string.chat_photo_quality),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
+            tiles.chunked(4).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    row.forEach { tile -> AttachTileButton(tile, Modifier.weight(1f)) }
+                    // Добиваем пустыми ячейками, чтобы кнопки неполного ряда не растягивались.
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            Text(
+                stringResource(R.string.chat_photo_quality),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 6.dp)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChatImageQuality.entries.forEach { quality ->
                     val label = when (quality) {
                         ChatImageQuality.DATA_SAVER -> stringResource(R.string.chat_photo_quality_data_saver)
                         ChatImageQuality.STANDARD -> stringResource(R.string.chat_photo_quality_standard)
                         ChatImageQuality.HIGH -> stringResource(R.string.chat_photo_quality_high)
                     }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onImageQualitySelected(quality) }
-                            .padding(horizontal = 20.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = selectedImageQuality == quality,
-                            onClick = { onImageQualitySelected(quality) }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(label, style = MaterialTheme.typography.bodyMedium)
-                    }
+                    FilterChip(
+                        selected = selectedImageQuality == quality,
+                        onClick = { onImageQualitySelected(quality) },
+                        label = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                    )
                 }
-                // НОВОЕ (картинки з буфера): вставить изображение из буфера обмена (с подписью).
-                AttachMenuRow(icon = Icons.Filled.ContentPaste, label = "Вставить из буфера", onClick = onPasteImage)
-                // НОВОЕ (одноразовые медиа): фото, которое получатель сможет открыть
-                // полноэкранно только один раз — после этого оно стирается на сервере.
-                AttachMenuRow(icon = Icons.Filled.RemoveRedEye, label = "Фото на один просмотр", onClick = onPickViewOncePhoto)
-                AttachMenuRow(icon = Icons.Filled.InsertDriveFile, label = "Файл", onClick = onPickFile)
-                AttachMenuRow(icon = Icons.Filled.LocationOn, label = "Геопоиция", onClick = onPickLocation)
-                AttachMenuRow(icon = Icons.Filled.Poll, label = "Опрос", onClick = onPickPoll)
-                onPickChecklist?.let { action ->
-                    AttachMenuRow(icon = Icons.Filled.CheckCircle, label = stringResource(R.string.checklist_create), onClick = action)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun AttachTileButton(tile: AttachTile, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = tile.onClick)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(tile.color),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(tile.icon, contentDescription = tile.label, tint = Color.White, modifier = Modifier.size(26.dp))
+        }
+        Text(
+            tile.label,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 2,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }
 
