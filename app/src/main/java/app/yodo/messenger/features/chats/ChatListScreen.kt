@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.SupportBotAvatar
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FloatingActionButton
@@ -34,6 +37,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
@@ -382,43 +393,18 @@ fun ChatListScreen(
                         tint = Color.White
                     )
                 }
-                DropdownMenu(
-                    expanded = showFabMenu,
-                    onDismissRequest = { showFabMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_new_chat)) },
-                        onClick = { showFabMenu = false; onSearchClick() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_new_group)) },
-                        onClick = { showFabMenu = false; onCreateGroupClick() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_new_channel)) },
-                        onClick = { showFabMenu = false; onCreateChannelClick() }
-                    )
-                    // НОВОЕ (расширение интерфейса каналов): пункт «Каталог каналов» в FAB-меню —
-                    // рекомендации и подборки каналов по категориям.
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_discover_channels)) },
-                        leadingIcon = { Icon(Icons.Filled.Campaign, contentDescription = null) },
-                        onClick = { showFabMenu = false; onDiscoverChannels() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_contacts)) },
-                        leadingIcon = { Icon(Icons.Filled.Contacts, contentDescription = null) },
-                        onClick = { showFabMenu = false; onOpenContacts() }
-                    )
-                    // НОВОЕ (чат поддержки): пункт "Админ-панель поддержки" — только для админов.
-                    if (viewModel.isSupportAdmin) {
-                        DropdownMenuItem(
-                            text = { Text("Админ-панель поддержки") },
-                            leadingIcon = { Icon(Icons.Filled.SupportAgent, contentDescription = null) },
-                            onClick = { showFabMenu = false; onOpenAdminPanel() }
-                        )
-                    }
+                if (showFabMenu) {
+                    YodoActionSheet(title = "Новое общение", subtitle = "Выберите, с чего начать", onDismissRequest = { showFabMenu = false },
+                        actions = buildList {
+                            add(YodoMenuAction(stringResource(R.string.chat_list_new_chat), Icons.Filled.ChatBubbleOutline, "Создать") { onSearchClick() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_new_group), Icons.Filled.Group, "Создать") { onCreateGroupClick() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_new_channel), Icons.Filled.Campaign, "Создать") { onCreateChannelClick() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_discover_channels), Icons.Filled.Campaign, "Найти") { onDiscoverChannels() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_contacts), Icons.Filled.Contacts, "Найти") { onOpenContacts() })
+                            if (viewModel.isSupportAdmin) add(YodoMenuAction("Админ-панель поддержки", Icons.Filled.AdminPanelSettings, "Управление") { onOpenAdminPanel() })
+                        })
                 }
+
             }
         }
     ) { padding ->
@@ -1230,6 +1216,7 @@ internal fun SwipeableChatListItem(
     // или до порога удаления через Animatable, а не через ручной stateful offset.
     val offsetX = remember { androidx.compose.animation.core.Animatable(0f) }
     var showMenu by remember { mutableStateOf(false) }
+    var confirmMenuAction by remember { mutableStateOf<String?>(null) }
     val deleteThreshold = -100f
     val maxDrag = -200f
     val scope = rememberCoroutineScope()
@@ -1310,15 +1297,27 @@ internal fun SwipeableChatListItem(
                 hidePreview = hidePreview
             )
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(text = { Text(if (chat.isPinned) stringResource(R.string.chat_list_unpin) else stringResource(R.string.chat_list_pin)) }, onClick = { showMenu = false; onTogglePin() })
-            DropdownMenuItem(text = { Text(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute)) }, onClick = { showMenu = false; onToggleMute() })
-            DropdownMenuItem(text = { Text(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action)) }, onClick = { showMenu = false; onToggleArchive() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_clear)) }, onClick = { showMenu = false; onClearHistory() })
-            // НОВОЕ (скрытые чаты): скрыть/показать чат (виден только под основным PIN).
-            DropdownMenuItem(text = { Text(if (isHidden) "Показать чат" else "Скрыть чат") }, onClick = { showMenu = false; onToggleHidden() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_delete), color = Color.Red) }, onClick = { showMenu = false; onDelete() })
+        if (showMenu) {
+            YodoActionSheet(title = chat.title, subtitle = "Действия с перепиской",
+                onDismissRequest = { showMenu = false }, actions = listOf(
+                    YodoMenuAction(if (chat.isPinned) stringResource(R.string.chat_list_unpin) else stringResource(R.string.chat_list_pin), Icons.Filled.PushPin, "В списке чатов") { onTogglePin() },
+                    YodoMenuAction(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute), if (chat.isMuted) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, "Уведомления") { onToggleMute() },
+                    YodoMenuAction(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action), if (chat.isArchived) Icons.Filled.Unarchive else Icons.Filled.Archive, "В списке чатов") { onToggleArchive() },
+                    YodoMenuAction(if (isHidden) "Показать чат" else "Скрыть чат", if (isHidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, "Приватность") { onToggleHidden() },
+                    YodoMenuAction(stringResource(R.string.chat_list_clear), Icons.Filled.CleaningServices, "Опасные действия", destructive = true) { confirmMenuAction = "clear" },
+                    YodoMenuAction(stringResource(R.string.chat_list_delete), Icons.Filled.Delete, "Опасные действия", destructive = true) { confirmMenuAction = "delete" }
+                ))
         }
+        confirmMenuAction?.let { action ->
+            AlertDialog(onDismissRequest = { confirmMenuAction = null },
+                title = { Text(if (action == "clear") "Очистить историю?" else "Удалить чат?") },
+                text = { Text(if (action == "clear") "Будут удалены сообщения, доступные вам для удаления. Отменить это действие нельзя."
+                    else "Удаление может затронуть историю сообщений. В группе или канале вы также выйдете из числа участников. Продолжить?") },
+                confirmButton = { TextButton(onClick = { confirmMenuAction = null; if (action == "clear") onClearHistory() else onDelete() }) {
+                    Text(if (action == "clear") "Очистить" else "Удалить", color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { TextButton(onClick = { confirmMenuAction = null }) { Text("Отмена") } })
+        }
+
     }
 }
 
@@ -1413,19 +1412,7 @@ private fun ChatListItem(
     ) {
         // Аватар
         if (isSupportChat) {
-            // НОВОЕ (логотип поддержки): фирменный знак поддержки вместо закладки.
-            Box(
-                modifier = Modifier.size(avatarSize).clip(CircleShape)
-                    .background(colorTheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_support_logo),
-                    contentDescription = "Поддержка YodoMessenger",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
+            SupportBotAvatar(size = avatarSize, accent = colorTheme.primary)
         } else if (isSavedChat) {
             Box(
                 modifier = Modifier.size(avatarSize).clip(CircleShape)

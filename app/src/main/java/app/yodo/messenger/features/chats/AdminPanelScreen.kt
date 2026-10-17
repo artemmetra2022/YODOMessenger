@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.SupportBotAvatar
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FilterChip
@@ -7,6 +8,12 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -103,70 +110,56 @@ fun AdminPanelScreen(
                     style = MaterialTheme.typography.bodyLarge
                 )
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(conversations, key = { it.chatId }) { conv ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .combinedClickable(
-                                    onClick = { onOpenConversation(conv.chatId) },
-                                    // НОВОЕ (п.19 ТЗ): долгий тап — ограничить обращения в поддержку.
-                                    onLongClick = { viewModel.openRestrictionDialog(conv.userId, conv.userName) }
-                                )
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(colorTheme.primary),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.Person, contentDescription = null, tint = Color.White)
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = conv.userName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    )
-                                    if (conv.awaitingReply) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFE53935))
-                                        )
-                                    }
+                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item(key = "support_summary") {
+                        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                SupportBotAvatar()
+                                Column(Modifier.weight(1f)) {
+                                    Text("Центр поддержки", style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Text("Ожидают ответа: ${conversations.count { it.awaitingReply }} · всего: ${conversations.size}",
+                                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
-                                if (conv.userEmail.isNotBlank()) {
-                                    Text(
-                                        text = conv.userEmail,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Text(
-                                    text = conv.lastMessage.ifBlank { "Нет сообщений" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
                             }
                         }
-                        Divider()
+                    }
+                    items(conversations, key = { it.chatId }) { conv ->
+                        Surface(shape = RoundedCornerShape(20.dp), tonalElevation = 1.dp) {
+                            Row(Modifier.fillMaxWidth().combinedClickable(
+                                onClick = { onOpenConversation(conv.chatId) },
+                                onLongClick = { viewModel.openRestrictionDialog(conv.userId, conv.userName) }
+                            ).padding(start = 16.dp, top = 14.dp, end = 8.dp, bottom = 14.dp),
+                                verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+                                    contentAlignment = Alignment.Center) {
+                                    Text(conv.userName.firstOrNull()?.uppercase() ?: "?", style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(conv.userName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (conv.userEmail.isNotBlank()) Text(conv.userEmail, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Surface(shape = RoundedCornerShape(8.dp),
+                                        color = if (conv.awaitingReply) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
+                                        Text(if (conv.awaitingReply) "Нужен ответ" else "Нет ожидающего ответа", Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (conv.awaitingReply) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Text(conv.lastMessage.ifBlank { "Нет сообщений" }, style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
+                                IconButton(onClick = { viewModel.openRestrictionDialog(conv.userId, conv.userName) }) {
+                                    Icon(Icons.Default.MoreVert, "Управление обращением")
+                                }
+                            }
+                        }
                     }
                 }
+
             }
         }
     }

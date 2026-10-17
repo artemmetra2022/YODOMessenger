@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -32,6 +34,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Comment
@@ -167,29 +171,14 @@ fun ChannelProfileScreen(
                             IconButton(onClick = { shareMenuExpanded = true }) {
                                 Icon(Icons.Filled.Share, contentDescription = "Поделиться каналом")
                             }
-                            DropdownMenu(
-                                expanded = shareMenuExpanded,
-                                onDismissRequest = { shareMenuExpanded = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Просто ссылка") },
-                                    onClick = {
-                                        shareMenuExpanded = false
-                                        shareChannelInviteLink(context, uiState.profile!!)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Ссылка с описанием канала") },
-                                    onClick = {
-                                        shareMenuExpanded = false
-                                        shareChannelInviteLinkWithDescription(
-                                            context,
-                                            uiState.profile!!,
-                                            uiState.currentUser
-                                        )
-                                    }
-                                )
+                            if (shareMenuExpanded) {
+                                YodoActionSheet(title = "Поделиться каналом", subtitle = uiState.profile?.title,
+                                    onDismissRequest = { shareMenuExpanded = false }, actions = listOf(
+                                        YodoMenuAction("Только ссылка", Icons.Filled.Link, description = "Короткое приглашение в канал") { shareChannelInviteLink(context, uiState.profile!!) },
+                                        YodoMenuAction("Ссылка с описанием", Icons.Filled.Description, description = "О канале и отправителе приглашения") { shareChannelInviteLinkWithDescription(context, uiState.profile!!, uiState.currentUser) }
+                                    ))
                             }
+
                         }
                     }
                 }

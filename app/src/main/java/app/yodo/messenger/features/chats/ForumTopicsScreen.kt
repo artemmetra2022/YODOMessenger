@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FloatingActionButton
@@ -248,27 +250,17 @@ private fun ForumTopicRow(
             }
         }
 
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(if (topic.isPinned) R.string.forum_topics_unpin else R.string.forum_topics_pin)) },
-                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
-                onClick = { showMenu = false; onTogglePin() }
-            )
-            if (canManage) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(if (topic.isClosed) R.string.forum_topics_reopen else R.string.forum_topics_close)) },
-                    leadingIcon = {
-                        Icon(if (topic.isClosed) Icons.Filled.LockOpen else Icons.Filled.Lock, contentDescription = null)
-                    },
-                    onClick = { showMenu = false; onToggleClosed() }
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.forum_topics_delete)) },
-                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                    onClick = { showMenu = false; onDeleteRequest() }
-                )
-            }
+        if (showMenu) {
+            YodoActionSheet(title = "Тема форума", actions = buildList {
+                add(YodoMenuAction(stringResource(if (topic.isPinned) R.string.forum_topics_unpin else R.string.forum_topics_pin), Icons.Filled.PushPin) { onTogglePin() })
+                if (canManage) {
+                    add(YodoMenuAction(stringResource(if (topic.isClosed) R.string.forum_topics_reopen else R.string.forum_topics_close),
+                        if (topic.isClosed) Icons.Filled.LockOpen else Icons.Filled.Lock) { onToggleClosed() })
+                    add(YodoMenuAction(stringResource(R.string.forum_topics_delete), Icons.Filled.Delete, "Опасные действия", destructive = true) { onDeleteRequest() })
+                }
+            }, onDismissRequest = { showMenu = false })
         }
+
     }
 }
 

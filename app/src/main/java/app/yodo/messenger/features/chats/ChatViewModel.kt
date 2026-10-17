@@ -121,11 +121,6 @@ data class ChatUiState(
 // Раздел "Не нашли нужный вопрос?" обрабатывается как обычный FaqSection (id = OTHER_SECTION_ID),
 // но его единственный "вопрос" на самом деле не открывает экран ответа, а сразу зовёт оператора
 // (см. ChatScreen: SupportFaqPanel).
-sealed class SupportFaqScreen {
-    object SectionList : SupportFaqScreen()
-    data class QuestionList(val sectionId: String) : SupportFaqScreen()
-    data class Answer(val sectionId: String, val questionId: String) : SupportFaqScreen()
-}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(

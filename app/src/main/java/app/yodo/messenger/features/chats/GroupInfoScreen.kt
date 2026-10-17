@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
@@ -387,43 +389,16 @@ fun GroupInfoScreen(
     // список пунктов (две длинные надписи в одной строке confirm/dismiss сжимались
     // и налезали друг на друга на узких экранах).
     memberActions?.let { member ->
-        AlertDialog(
-            onDismissRequest = { memberActions = null },
-            title = {
-                Text(
-                    member.displayName,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    MemberActionRow(
-                        icon = Icons.Filled.PersonRemove,
-                        label = "Исключить из группы",
-                        onClick = { memberActions = null; confirmMemberAction = member to "kick" }
-                    )
-                    MemberActionRow(
-                        icon = Icons.Filled.Block,
-                        label = "Забанить",
-                        onClick = { memberActions = null; confirmMemberAction = member to "ban" }
-                    )
-                    // НОВОЕ (передача владения): доступно только текущему владельцу группы,
-                    // не обычному админу.
-                    if ((uiState as? GroupInfoUiState.Content)?.info?.createdBy == viewModel.myUid) {
-                        MemberActionRow(
-                            icon = Icons.Filled.Shield,
-                            label = "Назначить владельцем",
-                            onClick = { memberActions = null; confirmTransferTo = member }
-                        )
-                    }
+        YodoActionSheet(title = member.displayName, subtitle = "Управление участником",
+            onDismissRequest = { memberActions = null }, actions = buildList {
+                if ((uiState as? GroupInfoUiState.Content)?.info?.createdBy == viewModel.myUid) {
+                    add(YodoMenuAction("Назначить владельцем", Icons.Filled.Shield, "Права участника",
+                        description = "Передача владения группой") { confirmTransferTo = member })
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { memberActions = null }) { Text("Отмена") }
-            }
-        )
+                add(YodoMenuAction("Исключить из группы", Icons.Filled.PersonRemove, "Модерация", destructive = true) { confirmMemberAction = member to "kick" })
+                add(YodoMenuAction("Забанить", Icons.Filled.Block, "Модерация", destructive = true) { confirmMemberAction = member to "ban" })
+            })
+
     }
 
     // НОВОЕ (админ-функции групп): подтверждение исключения/бана.

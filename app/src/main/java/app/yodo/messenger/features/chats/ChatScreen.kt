@@ -2,6 +2,9 @@ package app.yodo.messenger.features.chats
 
 import kotlinx.coroutines.flow.collectLatest
 
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
+import app.yodo.messenger.ui.components.SupportBotAvatar
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -21,6 +24,11 @@ import app.yodo.messenger.ui.components.softMessengerBackdrop
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.ArrowBack
@@ -729,7 +737,9 @@ fun ChatScreen(
                                 modifier = headerModifier,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (isChannel) {
+                                if (uiState.chatType == "SUPPORT" && !isSupportAdmin) {
+                                    SupportBotAvatar(size = 36.dp, accent = colorTheme.primary, modifier = Modifier.padding(end = 8.dp))
+                                } else if (isChannel) {
                                     if (uiState.channelAvatarBase64 != null) {
                                         UserAvatar(
                                             displayName = uiState.chatTitle,
@@ -798,7 +808,10 @@ fun ChatScreen(
                                             }
                                         }
                                     }
-                                    if (isChannel) {
+                                    if (uiState.chatType == "SUPPORT" && !isSupportAdmin) {
+                                        Text("Справка и связь с оператором", style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    } else if (isChannel) {
                                         Text(
                                             text = "${uiState.subscriberCount} " + subscriberCountLabel(uiState.subscriberCount),
                                             style = MaterialTheme.typography.labelMedium,
@@ -854,71 +867,44 @@ fun ChatScreen(
                             var showChatMenu by remember { mutableStateOf(false) }
                             var showDisappearingDialog by remember { mutableStateOf(false) }
                             var showDeleteChannelDialog by remember { mutableStateOf(false) }
+                            var showClearChatDialog by remember { mutableStateOf(false) }
+                            var showDeleteChatDialog by remember { mutableStateOf(false) }
                             Box {
                                 IconButton(onClick = { showChatMenu = true }) {
                                     Icon(Icons.Filled.MoreVert, contentDescription = "Меню")
                                 }
-                                DropdownMenu(expanded = showChatMenu, onDismissRequest = { showChatMenu = false }) {
-                                    if (uiState.chatType == "PRIVATE" && !chatId.startsWith("support_") && !chatId.startsWith("saved_")) {
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.security_keys_title)) },
-                                            onClick = { showChatMenu = false; showKeyVerification = true; viewModel.refreshConversationSecurity() })
-                                    }
-                                    if (isChannel && uiState.isAdmin) {
-                                        DropdownMenuItem(
-                                            text = { Text("Пригласить в канал") },
-                                            leadingIcon = { Icon(Icons.Filled.PersonAdd, contentDescription = null) },
-                                            onClick = { showChatMenu = false; onInviteToChannel(chatId) }
-                                        )
-                                    }
-                                    if (isChannel && uiState.isAdmin) {
-                                        DropdownMenuItem(
-                                            text = { Text("Отложенные посты") },
-                                            leadingIcon = { Icon(Icons.Filled.Schedule, contentDescription = null) },
-                                            onClick = { showChatMenu = false; showScheduledList = true }
-                                        )
-                                    }
-                                    if (isChannel && uiState.isAdmin) {
-                                        DropdownMenuItem(
-                                            text = { Text("Статистика канала") },
-                                            leadingIcon = { Icon(Icons.Filled.Campaign, contentDescription = null) },
-                                            onClick = { showChatMenu = false; onOpenChannelStats(chatId) }
-                                        )
-                                    }
-                                    if (isChannel && !uiState.isChannelOwner) {
-                                        DropdownMenuItem(
-                                            text = { Text(if (uiState.isSubscribed) "Отписаться" else "Подписаться") },
-                                            leadingIcon = {
-                                                Icon(
-                                                    if (uiState.isSubscribed) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
-                                                    contentDescription = null
-                                                )
-                                            },
-                                            onClick = { showChatMenu = false; viewModel.toggleChannelSubscription() }
-                                        )
-                                    }
-                                    if (!isChannel) {
-                                        DropdownMenuItem(
-                                            text = { Text("Исчезающие сообщения" + if (uiState.disappearingTtlSeconds != null) " (${disappearingTtlLabel(uiState.disappearingTtlSeconds)})" else "") },
-                                            leadingIcon = { Icon(Icons.Filled.Timer, contentDescription = null) },
-                                            onClick = { showChatMenu = false; showDisappearingDialog = true }
-                                        )
-                                    }
-                                    // НОВОЕ (поделиться контактом абнента): делимся QR-кодом контакта обеседника, а не своего.
-                                    if (uiState.chatType == "PRIVATE" && uiState.otherUserId != null) {
-                                        DropdownMenuItem(
-                                            text = { Text("Поделиться контактом абонента (QR)") },
-                                            leadingIcon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
-                                            onClick = { showChatMenu = false; onShareContactQr(uiState.otherUserId!!) }
-                                        )
-                                    }
-                                    DropdownMenuItem(text = { Text("Очистить историю") }, onClick = { showChatMenu = false; viewModel.clearChatHistory() })
-                                    DropdownMenuItem(text = { Text("Статистика чата") }, onClick = { showChatMenu = false; onOpenChatStats(chatId) })
-                                    DropdownMenuItem(text = { Text("Экспорт чата") }, onClick = { showChatMenu = false; viewModel.exportChat(context) })
-                                    DropdownMenuItem(
-                                        text = { Text("Сделать скриншот") },
-                                        leadingIcon = { Icon(Icons.Filled.CameraAlt, contentDescription = null) },
-                                        onClick = {
-                                            showChatMenu = false
+                                if (showChatMenu) {
+                                    val menuContext = ChatMenuContext(chatId, uiState.chatType, uiState.isAdmin,
+                                        uiState.isChannelOwner, uiState.otherUserId != null)
+                                    val menuActions = chatMenuIds(menuContext).map { id ->
+                                        when (id) {
+                                            ChatMenuId.PROFILE -> YodoMenuAction(
+                                                if (isChannel) "О канале" else if (uiState.chatType == "GROUP") "О группе" else "Профиль собеседника",
+                                                Icons.Filled.Info, "Основное") {
+                                                when (uiState.chatType) {
+                                                    "CHANNEL" -> onOpenChannelProfile(chatId)
+                                                    "GROUP" -> onOpenGroupInfo(chatId)
+                                                    else -> uiState.otherUserId?.let(onOpenUserProfile)
+                                                }
+                                            }
+                                            ChatMenuId.SEARCH -> YodoMenuAction("Поиск по сообщениям", Icons.Filled.Search, "Основное") { viewModel.toggleSearch() }
+                                            ChatMenuId.BOARD -> YodoMenuAction("Интерактивная доска", Icons.Filled.Dashboard, "Основное") { onOpenCanvas(null, 0, null) }
+                                            ChatMenuId.VERIFY_KEYS -> YodoMenuAction(stringResource(R.string.security_keys_title), Icons.Filled.Security, "Приватность") {
+                                                showKeyVerification = true; viewModel.refreshConversationSecurity()
+                                            }
+                                            ChatMenuId.INVITE -> YodoMenuAction("Пригласить в канал", Icons.Filled.PersonAdd, "Управление каналом") { onInviteToChannel(chatId) }
+                                            ChatMenuId.SCHEDULED -> YodoMenuAction("Отложенные посты", Icons.Filled.Schedule, "Управление каналом") { showScheduledList = true }
+                                            ChatMenuId.CHANNEL_STATS -> YodoMenuAction("Статистика канала", Icons.Filled.Campaign, "Управление каналом") { onOpenChannelStats(chatId) }
+                                            ChatMenuId.SUBSCRIPTION -> YodoMenuAction(if (uiState.isSubscribed) "Отписаться от канала" else "Подписаться на канал",
+                                                if (uiState.isSubscribed) Icons.Filled.NotificationsOff else Icons.Filled.Notifications, "Подписка") { viewModel.toggleChannelSubscription() }
+                                            ChatMenuId.DISAPPEARING -> YodoMenuAction("Исчезающие сообщения", Icons.Filled.Timer, "Приватность",
+                                                description = uiState.disappearingTtlSeconds?.let { disappearingTtlLabel(it) } ?: "Выключены") { showDisappearingDialog = true }
+                                            ChatMenuId.SHARE_CONTACT -> YodoMenuAction("Поделиться контактом", Icons.Filled.QrCode2, "Инструменты", description = "QR-код собеседника") {
+                                                uiState.otherUserId?.let(onShareContactQr)
+                                            }
+                                            ChatMenuId.CHAT_STATS -> YodoMenuAction("Статистика чата", Icons.Filled.BarChart, "Инструменты") { onOpenChatStats(chatId) }
+                                            ChatMenuId.EXPORT -> YodoMenuAction("Экспорт чата", Icons.Filled.IosShare, "Инструменты") { viewModel.exportChat(context) }
+                                            ChatMenuId.SCREENSHOT -> YodoMenuAction("Сохранить скриншот", Icons.Filled.CameraAlt, "Инструменты") {
                                             val contentBounds = messagesAreaWindowBounds
                                             val window = ChatScreenshotUtils.findActivity(context)?.window
                                             if (contentBounds == null || window == null) {
@@ -935,18 +921,35 @@ fun ChatScreen(
                                                     )
                                                 }
                                             }
+                                            }
+                                            ChatMenuId.CLEAR -> YodoMenuAction("Очистить историю", Icons.Filled.CleaningServices, "Опасные действия", destructive = true) { showClearChatDialog = true }
+                                            ChatMenuId.DELETE_CHAT -> YodoMenuAction("Удалить чат", Icons.Filled.Delete, "Опасные действия", destructive = true) { showDeleteChatDialog = true }
+                                            ChatMenuId.DELETE_CHANNEL -> YodoMenuAction("Удалить канал", Icons.Filled.Delete, "Опасные действия", description = "Для всех подписчиков", destructive = true) { showDeleteChannelDialog = true }
                                         }
-                                    )
-                                    if (isChannel && uiState.isChannelOwner) {
-                                        DropdownMenuItem(
-                                            text = { Text("Удалить канал", color = MaterialTheme.colorScheme.error) },
-                                            onClick = { showChatMenu = false; showDeleteChannelDialog = true }
-                                        )
-                                    } else {
-                                        DropdownMenuItem(text = { Text("Удалить чат", color = MaterialTheme.colorScheme.error) }, onClick = { showChatMenu = false; viewModel.deleteChat(); onBackClick() })
                                     }
+                                    YodoActionSheet(title = uiState.chatTitle, subtitle = when (uiState.chatType) {
+                                        "GROUP" -> "Меню группы"
+                                        "CHANNEL" -> "Меню канала"
+                                        "SUPPORT" -> "Поддержка YodoMessenger"
+                                        else -> "Меню чата"
+                                    }, actions = menuActions, onDismissRequest = { showChatMenu = false })
                                 }
                             }
+                            if (showClearChatDialog) {
+                                AlertDialog(onDismissRequest = { showClearChatDialog = false },
+                                    title = { Text("Очистить историю?") },
+                                    text = { Text("Будут удалены сообщения, доступные вам для удаления по вашим правам. Отменить это действие нельзя.") },
+                                    confirmButton = { TextButton(onClick = { showClearChatDialog = false; viewModel.clearChatHistory() }) { Text("Очистить", color = MaterialTheme.colorScheme.error) } },
+                                    dismissButton = { TextButton(onClick = { showClearChatDialog = false }) { Text("Отмена") } })
+                            }
+                            if (showDeleteChatDialog) {
+                                AlertDialog(onDismissRequest = { showDeleteChatDialog = false },
+                                    title = { Text("Удалить чат?") },
+                                    text = { Text("В зависимости от ваших прав будут удалены ваши сообщения или история чата; в группе или канале вы также выйдете из числа участников. Продолжить?") },
+                                    confirmButton = { TextButton(onClick = { showDeleteChatDialog = false; viewModel.deleteChat(); onBackClick() }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } },
+                                    dismissButton = { TextButton(onClick = { showDeleteChatDialog = false }) { Text("Отмена") } })
+                            }
+
                             if (showDisappearingDialog) {
                                 DisappearingMessagesDialog(
                                     currentTtlSeconds = uiState.disappearingTtlSeconds,
@@ -1342,25 +1345,19 @@ fun ChatScreen(
                                 // оператору вручную, оставляем узкую плашку, чтобы можно было
                                 // вернуться к разделам вопросов в один тап.
                                 if (isSupportChat) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { viewModel.openSupportFaqMenu() }
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.HelpOutline,
-                                            contentDescription = null,
-                                            tint = colorTheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            "Открыть список вопросов",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = colorTheme.primary,
-                                            modifier = Modifier.padding(start = 8.dp)
-                                        )
+                                    Surface(onClick = { viewModel.openSupportFaqMenu() },
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            SupportBotAvatar(size = 36.dp, accent = colorTheme.primary)
+                                            Column(Modifier.weight(1f)) {
+                                                Text("Помощник Yodo", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                Text("Вернуться к темам и ответам", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                            }
+                                            Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        }
                                     }
                                 }
                                 if (uiState.failedTextCount > 0) {
@@ -1611,6 +1608,10 @@ fun ChatScreen(
                         modifier = Modifier.align(Alignment.Center).size(28.dp),
                         strokeWidth = 2.dp
                     )
+                } else if (uiState.chatType == "SUPPORT" && !isSupportAdmin && !uiState.isSearchActive) {
+                    if (uiState.supportFaqScreen == null) {
+                        SupportWelcomeCard(modifier = Modifier.align(Alignment.Center), operatorMode = true)
+                    }
                 } else {
                     val emptyText = when {
                         isChannel -> "Здесь пока ничего нет"
@@ -2594,11 +2595,13 @@ private fun MessageBubble(
                             }
                         }
                     }
-                    Row(
+                    MessageFooter(
+                        reactions = if (isOfficialChannel) emptyMap() else message.reactions,
+                        currentUserId = currentUserId,
+                        accent = colorTheme.primary,
+                        textColor = textColor,
+                        onReact = onReact,
                         modifier = Modifier.align(Alignment.End)
-                            .padding(horizontal = 12.dp)
-                            .padding(top = 2.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (message.isEdited) {
                             Text("изменено ", color = textColor.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
@@ -2699,92 +2702,37 @@ private fun MessageBubble(
         // удалить для всех) растягивался почти на весь экран, а нижние пункты могли
         // упираться в край и быть недоступны. Ограничиваем высоту и добавляем
         // вертикальную прокрутку — меню остаётся компактным, а все пункты доступны.
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                CompositionLocalProvider(LocalSquishScale provides 1.6f) {
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = 350.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    if (!isOfficialChannel) {
-                        DropdownMenuItem(
-                            text = { Text("Добавить реакцию") },
-                            leadingIcon = { Icon(Icons.Filled.EmojiEmotions, contentDescription = null) },
-                            onClick = { showMenu = false; showReactionPicker = true }
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("Выбрать") },
-                        leadingIcon = { Icon(Icons.Filled.CheckCircle, contentDescription = null) },
-                        onClick = { showMenu = false; onSelectionToggle(message) }
-                    )
-                    if (!isOfficialChannel) {
-                        DropdownMenuItem(
-                            text = { Text("Информация о сообщении") },
-                            leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                            onClick = { showMenu = false; onInfoClick(message) }
-                        )
-                    }
-                    if (app.yodo.messenger.features.canvas.canImportCanvasImage(message.isViewOnce, message.isDeleted, message.expiresAt, System.currentTimeMillis()) && (message.imageBase64 != null || message.imagesBase64.isNotEmpty())) {
-                        DropdownMenuItem(text = { Text("Открыть на доске") }, onClick = { showMenu = false; onOpenCanvas() })
-                    }
-                    if (!message.isDeleted && !message.isViewOnce) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.reminder_title)) },
-                            leadingIcon = { Icon(Icons.Filled.Schedule, contentDescription = null) },
-                            onClick = { showMenu = false; onRemind() })
-                    }
-                    DropdownMenuItem(text = { Text("Ответить") },
-
- leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null) }, onClick = { showMenu = false; onReply() })
-                    if (isChannel && !isOfficialChannel) {
-                        DropdownMenuItem(
-                            text = { Text("Комментарии") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null) },
-                            onClick = { showMenu = false; onCommentsClick() }
-                        )
-                    }
-                    DropdownMenuItem(text = { Text(if (message.isPinned) "Открепить" else "Закрепить") }, leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) }, onClick = { showMenu = false; onPin() })
-                    // НОВОЕ (одноразовые медиа): не даём сохранять view-once фото в избранное.
-                    if (!message.isViewOnce) {
-                        DropdownMenuItem(text = { Text("В избранное") }, leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null) }, onClick = { showMenu = false; onSaveToFavorite() })
-                    }
-                    if (message.text.isNotBlank()) {
-                        DropdownMenuItem(text = { Text("Копировать") }, leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) }, onClick = { showMenu = false; clipboardManager.setText(AnnotatedString(message.text)) })
-                        // НОВОЕ (копирование фрагмента): открывает отдельный режим выделения
-                        // части текста сообщения (см. TextSelectionDialog ниже).
-                        DropdownMenuItem(
-                            text = { Text("Копировать фрагмент") },
-                            leadingIcon = { Icon(Icons.Filled.ContentCut, contentDescription = null) },
-                            onClick = { showMenu = false; showTextSelectionDialog = true }
-                        )
-                    }
-                    // НОВОЕ (одноразовые медиа): фото "на один просмотр" нельзя пересылать.
-                    if (!message.isViewOnce) {
-                        DropdownMenuItem(text = { Text("Переслать") }, leadingIcon = { Icon(Icons.Filled.Forward, contentDescription = null) }, onClick = { showMenu = false; onForward() })
-                    }
-                    if (isOwnMessage) {
-                        if (message.checklist == null) DropdownMenuItem(text = { Text("Редактировать") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { showMenu = false; onEdit() })
-                        DropdownMenuItem(text = { Text("Удалить") }, leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) }, onClick = { showMenu = false; onDelete() })
-                    } else {
-                        // НОВОЕ (система жалоб, п.5 ТЗ): жалоба на чужое сообщение.
-                        DropdownMenuItem(
-                            text = { Text("Пожаловаться") },
-                            leadingIcon = { Icon(Icons.Filled.Flag, contentDescription = null) },
-                            onClick = { showMenu = false; onReport() }
-                        )
-                        // НОВОЕ (модерация): модератор/админ (право DELETE_MESSAGES)
-                        // может удалить чужое сообщение — с подтверждением.
-                        if (canDeleteOthers) {
-                            DropdownMenuItem(
-                                text = { Text("Удалить для всех", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                                onClick = { showMenu = false; showDeleteOthersConfirm = true }
-                            )
-                        }
-                    }
+        if (showMenu) {
+            val messageActions = buildList {
+                if (!isOfficialChannel) add(YodoMenuAction("Добавить реакцию", Icons.Filled.EmojiEmotions, "Сообщение") { showReactionPicker = true })
+                add(YodoMenuAction("Ответить", Icons.AutoMirrored.Filled.Reply, "Сообщение") { onReply() })
+                add(YodoMenuAction("Выбрать", Icons.Filled.CheckCircle, "Сообщение") { onSelectionToggle(message) })
+                if (isChannel && !isOfficialChannel) add(YodoMenuAction("Комментарии", Icons.AutoMirrored.Filled.Comment, "Сообщение") { onCommentsClick() })
+                if (!isOfficialChannel) add(YodoMenuAction("Информация о сообщении", Icons.Filled.Info, "Сообщение") { onInfoClick(message) })
+                if (message.text.isNotBlank()) {
+                    add(YodoMenuAction("Копировать", Icons.Filled.ContentCopy, "Сохранить и поделиться") { clipboardManager.setText(AnnotatedString(message.text)) })
+                    add(YodoMenuAction("Копировать фрагмент", Icons.Filled.ContentCut, "Сохранить и поделиться") { showTextSelectionDialog = true })
                 }
-                }   // CompositionLocalProvider
+                if (!message.isViewOnce) {
+                    add(YodoMenuAction("Переслать", Icons.Filled.Forward, "Сохранить и поделиться") { onForward() })
+                    add(YodoMenuAction("В избранное", Icons.Filled.Bookmark, "Сохранить и поделиться") { onSaveToFavorite() })
                 }
+                if (app.yodo.messenger.features.canvas.canImportCanvasImage(message.isViewOnce, message.isDeleted, message.expiresAt, System.currentTimeMillis()) && (message.imageBase64 != null || message.imagesBase64.isNotEmpty())) {
+                    add(YodoMenuAction("Открыть на доске", Icons.Filled.Dashboard, "Инструменты") { onOpenCanvas() })
+                }
+                if (!message.isDeleted && !message.isViewOnce) add(YodoMenuAction(stringResource(R.string.reminder_title), Icons.Filled.Schedule, "Инструменты") { onRemind() })
+                add(YodoMenuAction(if (message.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin, "Инструменты") { onPin() })
+                if (isOwnMessage) {
+                    if (message.checklist == null) add(YodoMenuAction("Редактировать", Icons.Filled.Edit, "Управление") { onEdit() })
+                    add(YodoMenuAction("Удалить", Icons.Filled.Delete, "Опасные действия", destructive = true) { onDelete() })
+                } else {
+                    add(YodoMenuAction("Пожаловаться", Icons.Filled.Flag, "Безопасность") { onReport() })
+                    if (canDeleteOthers) add(YodoMenuAction("Удалить для всех", Icons.Filled.Delete, "Опасные действия", destructive = true) { showDeleteOthersConfirm = true })
+                }
+            }
+            YodoActionSheet(title = "Сообщение", subtitle = formatMessageTime(message.timestamp),
+                actions = messageActions, onDismissRequest = { showMenu = false })
+        }
 
         // НОВОЕ (модерация): подтверждение удаления чужого сообщения.
         if (showDeleteOthersConfirm) {
@@ -2812,79 +2760,6 @@ private fun MessageBubble(
                 onDismiss = { showTextSelectionDialog = false }
             )
         }
-
-            // ═══════════════ ЭТАП 14: АНИМИРОВАННЫЕ РЕАКЦИИ ═══════════════
-            if (message.reactions.isNotEmpty() && !isOfficialChannel) {
-                Row(
-                    modifier = Modifier.padding(top = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    message.reactions.filterValues { it.isNotEmpty() }.forEach { (emoji, uids) ->
-                        val reactedByMe = currentUserId in uids
-                        val reactionCount = uids.size
-                        var burstScale by remember { mutableFloatStateOf(1f) }
-                        val animatedScale by animateFloatAsState(
-                            targetValue = burstScale,
-                            animationSpec = spring(
-                                dampingRatio = 0.55f,
-                                stiffness = 400f
-                            ),
-                            label = "reaction_burst"
-                        )
-                        LaunchedEffect(reactionCount) {
-                            burstScale = 1.35f
-                            kotlinx.coroutines.delay(120)
-                            burstScale = 1f
-                        }
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = scaleIn(
-                                animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
-                            ) + fadeIn(tween(200)),
-                            exit = scaleOut(
-                                animationSpec = tween(150)
-                            ) + fadeOut(tween(150))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .graphicsLayer {
-                                        scaleX = animatedScale
-                                        scaleY = animatedScale
-                                    }
-                                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                                        if (reactedByMe) colorTheme.primary.copy(alpha = 0.25f)
-                                        else MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                    .border(
-                                        width = if (reactedByMe) 1.dp else 0.dp,
-                                        color = if (reactedByMe) colorTheme.primary else Color.Transparent,
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { onReact(emoji) }
-                                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    emoji,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.graphicsLayer {
-                                        scaleX = animatedScale
-                                        scaleY = animatedScale
-                                    }
-                                )
-                                if (uids.size > 1) {
-                                    Text(
-                                        " ${uids.size}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             if (isChannel && !isOfficialChannel) {
                 // НОВОЕ (бейдж «🔥 Популярное»): сами просмотры теперь показываются рядом со временем.
@@ -3617,227 +3492,6 @@ private fun MessageInputBar(
                 }
             }
         }
-    }
-}
-
-// НОВОЕ (FAQ-бот поддержки): кнопочная панель бота поддержки — заменяет обычное поле
-// ввода в чате поддержки, пока пользователь не свернёт её. Три экрана:
-// 1) SectionList — разделы FAQ (плюс "Не нашли нужный вопрос?" внизу);
-// 2) QuestionList — список вопросов внутри раздела, с кнопкой "Назад";
-// 3) Answer — вопрос и ответ, с кнопками "Назад" и "Связаться с поддержкой".
-@Composable
-private fun SupportFaqPanel(
-    screen: SupportFaqScreen,
-    sections: List<FaqSection>,
-    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
-    onSelectSection: (String) -> Unit,
-    onSelectQuestion: (String, String) -> Unit,
-    onBackToSections: () -> Unit,
-    onBackToQuestions: (String) -> Unit,
-    onContactOperator: () -> Unit,
-    onCollapse: () -> Unit
-) {
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 420.dp)
-        ) {
-            // Заголовок панели
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (screen !is SupportFaqScreen.SectionList) {
-                    IconButton(
-                        onClick = {
-                            when (screen) {
-                                is SupportFaqScreen.QuestionList -> onBackToSections()
-                                is SupportFaqScreen.Answer -> onBackToQuestions(screen.sectionId)
-                                else -> {}
-                            }
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Назад", tint = colorTheme.primary)
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Icon(
-                    Icons.Filled.SupportAgent, contentDescription = null,
-                    tint = colorTheme.primary, modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = when (screen) {
-                        is SupportFaqScreen.SectionList -> "Чем помочь?"
-                        is SupportFaqScreen.QuestionList ->
-                            sections.firstOrNull { it.id == screen.sectionId }?.title ?: "Вопросы"
-                        is SupportFaqScreen.Answer ->
-                            sections.firstOrNull { it.id == screen.sectionId }?.title ?: "Ответ"
-                    },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f).padding(start = 8.dp)
-                )
-                TextButton(onClick = onCollapse) {
-                    Text("Свернуть", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-            when (screen) {
-                is SupportFaqScreen.SectionList -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(vertical = 6.dp)
-                    ) {
-                        items(sections, key = { it.id }) { section ->
-                            FaqRow(
-                                emoji = section.emoji,
-                                title = section.title,
-                                onClick = { onSelectSection(section.id) }
-                            )
-                        }
-                        item(key = "other_section") {
-                            FaqRow(
-                                emoji = "🙋",
-                                title = "Нет нужного вопроса?",
-                                titleColor = colorTheme.primary,
-                                onClick = { onSelectSection(SupportFaqData.OTHER_SECTION_ID) }
-                            )
-                        }
-                    }
-                }
-                is SupportFaqScreen.QuestionList -> {
-                    if (screen.sectionId == SupportFaqData.OTHER_SECTION_ID) {
-                        OtherQuestionBlock(colorTheme = colorTheme, onContactOperator = onContactOperator)
-                    } else {
-                        val section = sections.firstOrNull { it.id == screen.sectionId }
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(vertical = 6.dp)
-                        ) {
-                            section?.questions?.forEach { q ->
-                                item(key = q.id) {
-                                    FaqRow(
-                                        emoji = null,
-                                        title = q.question,
-                                        onClick = { onSelectQuestion(screen.sectionId, q.id) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                is SupportFaqScreen.Answer -> {
-                    val question = sections.firstOrNull { it.id == screen.sectionId }
-                        ?.questions?.firstOrNull { it.id == screen.questionId }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            text = question?.question ?: "",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = question?.answer ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { onBackToQuestions(screen.sectionId) },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Другие вопросы", style = MaterialTheme.typography.labelMedium)
-                            }
-                            Button(
-                                onClick = onContactOperator,
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary)
-                            ) {
-                                Text("Это не помогло", style = MaterialTheme.typography.labelMedium, color = Color.White)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun OtherQuestionBlock(
-    colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
-    onContactOperator: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
-        Text(
-            text = "Не нашли ответ среди готовых вопросов?",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "Опишите вашу проблему своими словами — оператор поддержки ответит вам в этом же чате.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = onContactOperator,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary)
-        ) {
-            Icon(Icons.Filled.SupportAgent, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Связаться с поддержкой", color = Color.White, style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-private fun FaqRow(
-    emoji: String?,
-    title: String,
-    titleColor: Color = Color.Unspecified,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (emoji != null) {
-            Text(emoji, style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.width(12.dp))
-        }
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (titleColor != Color.Unspecified) titleColor else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
-        Icon(
-            Icons.Filled.ChevronRight,
-            contentDescription = null,
-            tint = Color.Gray,
-            modifier = Modifier.size(18.dp)
-        )
     }
 }
 
