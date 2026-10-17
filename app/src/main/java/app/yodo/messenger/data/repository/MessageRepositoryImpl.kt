@@ -1354,18 +1354,18 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun toggleReaction(chatId: String, messageId: String, emoji: String) {
-        val uid = firebaseAuth.currentUser?.uid ?: return
+        val uid = firebaseAuth.currentUser?.uid ?: throw IllegalStateException("Not authenticated")
         val messageRef = firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
-        try {
-            firestore.runTransaction { transaction ->
-                val snapshot = transaction.get(messageRef)
-                val reactionsRaw = snapshot.get("reactions") as? Map<*, *>
-                val currentUids = (reactionsRaw?.get(emoji) as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                val updatedUids = if (uid in currentUids) currentUids - uid else currentUids + uid
-                transaction.update(messageRef, "reactions.$emoji", updatedUids)
-            }.await()
-        } catch (e: Exception) { }
+        // Исключение больше не глотаем: ChatViewModel.toggleReaction() делает оптимистичный
+        // локальный апдейт и должен узнать о неудаче, чтобы откатить его.
+        firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(messageRef)
+            val reactionsRaw = snapshot.get("reactions") as? Map<*, *>
+            val currentUids = (reactionsRaw?.get(emoji) as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            val updatedUids = if (uid in currentUids) currentUids - uid else currentUids + uid
+            transaction.update(messageRef, "reactions.$emoji", updatedUids)
+        }.await()
     }
 
     override suspend fun togglePinMessage(chatId: String, messageId: String): SendMessageResult {

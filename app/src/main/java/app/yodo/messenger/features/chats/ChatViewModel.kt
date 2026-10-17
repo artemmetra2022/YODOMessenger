@@ -1130,8 +1130,35 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // Оптимистичный апдейт реакции: меняем message.reactions в uiState сразу,
+    // не дожидаясь транзакции Firestore. Следующий снапшот из observeMessages()
+    // всё равно перезапишет messages целиком и либо подтвердит, либо (при ошибке)
+    // переопределит наш локальный патч — поэтому на ошибке откатываем вручную.
     fun toggleReaction(messageId: String, emoji: String) {
-        viewModelScope.launch { messageRepository.toggleReaction(chatId, messageId, emoji) }
+        val uid = currentUserId ?: return
+        val before = _uiState.value.messages
+        val after = before.map { msg ->
+            if (msg.id != messageId) return@map msg
+            val current = msg.reactions[emoji] ?: emptyList()
+            val updated = if (uid in current) current - uid else current + uid
+            val newReactions = if (updated.isEmpty()) {
+                msg.reactions - emoji
+            } else {
+                msg.reactions + (emoji to updated)
+            }
+            msg.copy(reactions = newReactions)
+        }
+        _uiState.value = _uiState.value.copy(messages = after)
+        viewModelScope.launch {
+            try {
+                messageRepository.toggleReaction(chatId, messageId, emoji)
+            } catch (e: Exception) {
+                // Откатываем только если список ещё не успел обновиться новым снапшотом.
+                if (_uiState.value.messages === after) {
+                    _uiState.value = _uiState.value.copy(messages = before)
+                }
+            }
+        }
     }
 
     // НОВОЕ (F3 статистика постов): отмечаем просмотр поста канала при показе на экране.

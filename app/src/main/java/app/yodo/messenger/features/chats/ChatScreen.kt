@@ -2260,6 +2260,10 @@ private fun MessageBubble(
                 scaleY = sendAppearance.value
                 alpha = sendAppearance.value
             },
+            // В каналах строку-обёртку всё равно растягиваем на всю ширину (так пузырь
+            // можно выровнять по alignment), но саму Column с пузырём — нет, см. ниже:
+            // там убрали weight(1f)/fillMaxWidth, чтобы пузырь не "раздувался" под пустое
+            // сообщение.
             verticalAlignment = Alignment.Bottom
         ) {
             // Каналы: у постов нет аватарки автора (канал — это одна «лента»), поэтому
@@ -2278,7 +2282,11 @@ private fun MessageBubble(
                 }
             }
             Column(
-                modifier = if (isChannel) Modifier.weight(1f) else Modifier,
+                // Было: Modifier.weight(1f) для каналов — это заставляло Column (а с ней и
+                // пузырь внутри) всегда занимать всю доступную ширину строки, даже если текст
+                // поста короткий. Теперь Column — обычный wrap-content, как в личных чатах;
+                // ширину самого пузыря контролирует widthIn(min, max) ниже, в BoxWithConstraints.
+                modifier = Modifier,
                 horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start
             ) {
             if (message.isPinned) {
@@ -2290,8 +2298,15 @@ private fun MessageBubble(
             BoxWithConstraints {
                 Column(
                     modifier = Modifier
-                        .then(if (isChannel) Modifier.fillMaxWidth() else Modifier)
-                        .widthIn(max = if (isChannel) maxWidth else maxWidth * 0.78f)
+                        // Пузырь (и в каналах, и в обычных чатах) теперь только wrap-content:
+                        // подстраивается под длину текста. Нижняя граница (minWidth) не даёт
+                        // совсем коротким постам (одно слово/эмодзи) выглядеть "схлопнутыми",
+                        // верхняя (max) — не даёт посту растянуться на весь экран, оставляя
+                        // по краю воздух, как в обычной переписке.
+                        .widthIn(
+                            min = 72.dp,
+                            max = if (isChannel) maxWidth * 0.92f else maxWidth * 0.78f
+                        )
                         .squish(bubbleSource, strength = 0.5f)
                         .shadow(
                             elevation = 1.dp,
