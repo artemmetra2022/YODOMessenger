@@ -5,8 +5,6 @@ import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
 import app.yodo.messenger.ui.components.IconButton
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
@@ -31,10 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -59,7 +55,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -70,7 +65,6 @@ import app.yodo.messenger.domain.model.PostComment
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.ColorTheme
 import app.yodo.messenger.util.ImageUtils
-import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -153,10 +147,16 @@ fun ProfilePostsSection(
     }
 
     if (showComposeDialog) {
-        ComposePostDialog(
+        // НОВОЕ: полноценный редактор с форматированием и прикреплением доски из
+        // личной библиотеки (взамен старого простого поля ввода, см. PostEditorDialog.kt).
+        val selectedBoard by viewModel.selectedBoard.collectAsState()
+        PostEditorDialog(
+            colorTheme = colorTheme,
             isPosting = isPosting,
+            selectedBoard = selectedBoard,
+            onSelectBoard = { viewModel.selectBoard(it) },
             onDismiss = { showComposeDialog = false },
-            onPost = { text, uris ->
+            onPublish = { text, uris ->
                 viewModel.createPost(text, uris)
                 showComposeDialog = false
             }
@@ -237,7 +237,14 @@ private fun PostCard(
 
         if (post.text.isNotBlank()) {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(post.text, style = MaterialTheme.typography.bodyMedium)
+            // НОВОЕ: текст поста рендерится с учётом markdown-разметки (жирный/курсив/
+            // зачёркнутый/заголовки/списки/цитаты/ссылки) — см. PostMarkdown.kt.
+            Text(rememberPostAnnotatedText(post.text), style = MaterialTheme.typography.bodyMedium)
+        }
+
+        if (post.hasAttachedBoard) {
+            Spacer(modifier = Modifier.height(10.dp))
+            AttachedBoardCard(post = post, colorTheme = colorTheme)
         }
 
         if (post.photosBase64.isNotEmpty()) {
@@ -361,90 +368,56 @@ private fun PostPhoto(base64: String, modifier: Modifier) {
     }
 }
 
+/**
+ * НОВОЕ: карточка прикреплённой к посту доски — показывает только статичное превью
+ * (bitmap), отрендеренное на момент публикации. Доска остаётся приватной: открыть
+ * или отредактировать её из чужого поста нельзя, здесь нет действия-перехода.
+ */
 @Composable
-private fun ComposePostDialog(
-    isPosting: Boolean,
-    onDismiss: () -> Unit,
-    onPost: (String, List<Uri>) -> Unit
-) {
-    var text by remember { mutableStateOf("") }
-    var selectedUris by remember { mutableStateOf(listOf<Uri>()) }
-    val maxPhotos = 4
-
-    val pickImages = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            selectedUris = (selectedUris + uris).take(maxPhotos)
+private fun AttachedBoardCard(post: Post, colorTheme: ColorTheme) {
+    val base64 = post.attachedBoardPreviewBase64 ?: return
+    val bitmap = remember(base64) { ImageUtils.decodeChatImageBitmapCached(base64) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.Article,
+                contentDescription = null,
+                tint = colorTheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(
+                    post.attachedBoardTitle ?: "Доска",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                post.attachedBoardObjectCount?.let {
+                    Text(
+                        "Объектов: $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
-
-    AlertDialog(
-        onDismissRequest = { if (!isPosting) onDismiss() },
-        title = { Text("Новый пост") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
-                    placeholder = { Text("Что у вас нового?") },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    enabled = !isPosting
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                if (selectedUris.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(selectedUris) { uri ->
-                            Box(modifier = Modifier.size(72.dp)) {
-                                AsyncImage(
-                                    model = uri,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp))
-                                )
-                                IconButton(
-                                    onClick = { selectedUris = selectedUris - uri },
-                                    modifier = Modifier.size(20.dp).align(Alignment.TopEnd)
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = "Убрать фото",
-                                        tint = Color.White,
-                                        modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                TextButton(
-                    onClick = { pickImages.launch("image/*") },
-                    enabled = !isPosting && selectedUris.size < maxPhotos
-                ) {
-                    Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Добавить фото (${selectedUris.size}/$maxPhotos)")
-                }
-            }
-        },
-        confirmButton = {
-            if (isPosting) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp))
-            } else {
-                Button(
-                    onClick = { onPost(text, selectedUris) },
-                    enabled = text.isNotBlank() || selectedUris.isNotEmpty()
-                ) { Text("Опубликовать") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isPosting) { Text("Отмена") }
-        }
-    )
 }
 
 /**

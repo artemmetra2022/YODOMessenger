@@ -73,6 +73,13 @@ object ImageUtils {
         return compressChatImageToBase64(context, uri)
     }
 
+    // НОВОЕ: превью прикреплённой к посту личной доски (уже отрисованный bitmap из
+    // CanvasRenderer.bitmap()). Используем те же лимиты, что и для фото поста —
+    // документ поста по-прежнему ограничен 1 МБ Firestore.
+    fun compressBoardPreviewToBase64(bitmap: Bitmap): String? {
+        return compressAdaptive(bitmap, POST_MAX_DIMENSION, POST_STARTING_QUALITY, POST_MIN_QUALITY, POST_MAX_BASE64)
+    }
+
     /**
      * Сжимает изображение, постепенно уменьшая JPEG-качество (шагом 8), пока результат
      * не влезет в maxBase64Length. Так мы всегда сохраняем максимально возможное качество

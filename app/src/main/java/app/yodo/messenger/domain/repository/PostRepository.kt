@@ -10,12 +10,26 @@ sealed class PostResult {
     data class Error(val message: String) : PostResult()
 }
 
+// НОВОЕ: уже отрендеренное превью личной доски, готовое к прикреплению к посту.
+// bitmapBase64 — сжатый JPEG/PNG в base64 (как и прочие картинки в приложении, без Storage).
+data class AttachedBoardPreview(
+    val title: String,
+    val bitmapBase64: String,
+    val objectCount: Int
+)
+
 interface PostRepository {
     // Живой поток постов конкретного пользователя (для стены в профиле), новые сверху.
     fun observePosts(userId: String): Flow<List<Post>>
 
     // imageUris — локальные Uri фото, выбранных пользователем (можно пусто, если только текст).
-    suspend fun createPost(text: String, imageUris: List<Uri>): PostResult
+    // attachedBoard — НОВОЕ: превью прикреплённой личной доски (Canvas), если автор её выбрал
+    // в редакторе поста. Сама доска никуда не выгружается — только готовый bitmap-снимок.
+    suspend fun createPost(
+        text: String,
+        imageUris: List<Uri>,
+        attachedBoard: AttachedBoardPreview? = null
+    ): PostResult
 
     suspend fun deletePost(postId: String): PostResult
 
