@@ -70,6 +70,7 @@ object SettingsSearchIndex {
     const val ANCHOR_BOARD = "board"
     const val ANCHOR_BOARD_IN_CHAT = "board_in_chat"
     const val ANCHOR_BOARD_DRAWING = "board_drawing"
+    const val ANCHOR_BOARD_LIBRARY = "board_library"
     const val ANCHOR_BOARD_NEW = "board_new"
 
     private const val SEC_APPEARANCE = "Оформление"
@@ -413,6 +414,12 @@ object SettingsSearchIndex {
             sectionTitle = SEC_APP, categoryRoute = ROUTE_APP
         ),
         // Раздел «Интерактивная доска».
+        SettingsSearchItem(
+            id = "board_library", anchorId = ANCHOR_BOARD_LIBRARY,
+            title = "Сохранённые доски", subtitle = "Открыть, переименовать или удалить локальные доски",
+            keywords = listOf("все доски", "мои доски", "сохранённые", "удалить доску", "изменить доску", "переименовать"),
+            sectionTitle = SEC_BOARD, categoryRoute = ROUTE_BOARD
+        ),
         SettingsSearchItem(
             id = "board_show_in_chat", anchorId = ANCHOR_BOARD_IN_CHAT,
             title = "Доска в чате", subtitle = "Показывать общую доску живой карточкой в чате",

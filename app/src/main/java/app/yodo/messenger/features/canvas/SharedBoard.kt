@@ -63,7 +63,8 @@ object SharedBoardOps {
         require(currentCount - d.removes.size + d.adds.size <= CanvasLimits.MAX_OBJECTS) { "Достигнут предел объектов на общей доске (${CanvasLimits.MAX_OBJECTS})" }
     /** Обратное действие с учётом того, что у доски уже могли поменяться другие участники. */
     fun reverse(presentIds: Set<String>, step: Delta) =
-        Delta(adds = step.removes.filter { it.id !in presentIds }, removes = step.adds.filter { it.id in presentIds })
+        if(step.adds.size==1 && step.removes.size==1 && step.adds.single().id !in presentIds) Delta(emptyList(),emptyList())
+        else Delta(adds = step.removes.filter { it.id !in presentIds }, removes = step.adds.filter { it.id in presentIds })
 }
 
 /** Хранение одного объекта в документе Firestore: JSON того же формата, что и у файла доски. */
@@ -235,6 +236,28 @@ class SharedBoardRepository @Inject constructor(private val firestore: FirebaseF
             }
             if (index == groups.lastIndex) batch.update(meta(chatId), mapOf("updatedAt" to FieldValue.serverTimestamp(), "updatedBy" to uid))
             withTimeout(30_000) { batch.commit().await() }
+        }
+    }
+
+    /** Compare-and-replace: two users moving the same object must not create duplicates. */
+    suspend fun replaceObject(chatId: String, expected: CanvasObject, replacement: CanvasObject, expectedGeneration: Long) {
+        val uid=requireNotNull(auth.currentUser?.uid) { "Войдите в аккаунт" }
+        require(expected.id != replacement.id)
+        val json=CanvasSharedCodec.encodeObject(replacement)
+        withTimeout(30_000) {
+            firestore.runTransaction { tx ->
+                val ref=meta(chatId);val oldRef=objects(chatId).document(expected.id);val newRef=objects(chatId).document(replacement.id)
+                val board=tx.get(ref);val old=tx.get(oldRef);val new=tx.get(newRef)
+                check(board.exists() && board.getBoolean("deleted")!=true && board.getBoolean("clearing")!=true &&
+                    (board.getLong("generation")?:0L)==expectedGeneration) { "Доска была очищена или удалена" }
+                check(old.exists() && (old.getLong("generation")?:0L)==expectedGeneration &&
+                    old.getString("json")?.let(CanvasSharedCodec::decodeObject)==expected && !new.exists()) {
+                    "Объект уже изменён другим участником. Выделите его заново."
+                }
+                tx.delete(oldRef)
+                tx.set(newRef,mapOf("json" to json,"authorUid" to uid,"at" to FieldValue.serverTimestamp(),"generation" to expectedGeneration))
+                tx.update(ref,mapOf("updatedAt" to FieldValue.serverTimestamp(),"updatedBy" to uid))
+            }.await()
         }
     }
 

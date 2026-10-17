@@ -4,8 +4,8 @@ import java.util.UUID
 import kotlin.math.*
 
 // HIGHLIGHTER — не отдельный вид объекта: это PEN с полупрозрачным цветом (формат не меняется).
-enum class CanvasTool { PEN, HIGHLIGHTER, LINE, ARROW, RECTANGLE, ROUNDED_RECT, CIRCLE, ELLIPSE, TRIANGLE, DIAMOND, TEXT, FORMULA, ERASER, HAND }
-// ROUNDED_RECT, ELLIPSE, TRIANGLE, DIAMOND — этап 4 (формат документа v3, Nearby-протокол 4).
+enum class CanvasTool { PEN, HIGHLIGHTER, LINE, ARROW, RECTANGLE, ROUNDED_RECT, CIRCLE, ELLIPSE, TRIANGLE, DIAMOND, TEXT, FORMULA, ERASER, HAND, SELECT }
+// ROUNDED_RECT, ELLIPSE, TRIANGLE, DIAMOND — этап 4 (формат документа v3, Nearby-протокол 5).
 enum class CanvasObjectKind { PEN, LINE, ARROW, RECTANGLE, CIRCLE, TEXT, FORMULA, ROUNDED_RECT, ELLIPSE, TRIANGLE, DIAMOND }
 /** Виды, которых нет в документах v1/v2: старые клиенты их не прочитают. */
 val CanvasStage4Kinds: Set<CanvasObjectKind> = setOf(CanvasObjectKind.ROUNDED_RECT, CanvasObjectKind.ELLIPSE, CanvasObjectKind.TRIANGLE, CanvasObjectKind.DIAMOND)
@@ -15,7 +15,8 @@ data class CanvasPoint(val x: Float, val y: Float)
 data class CanvasObject(
     val id: String = UUID.randomUUID().toString(), val kind: CanvasObjectKind,
     val points: List<CanvasPoint>, val color: Int = 0xff1e293b.toInt(),
-    val width: Float = 4f, val text: String = "", val fontSize: Float = 32f
+    val width: Float = 4f, val text: String = "", val fontSize: Float = 32f,
+    val rotation: Float = 0f, val textBoxWidth: Float = 0f
 )
 data class CanvasDocument(
     val id: String = UUID.randomUUID().toString(), val title: String,
@@ -41,6 +42,8 @@ object CanvasLimits {
         require(doc.objects.count{it.kind==CanvasObjectKind.FORMULA}<=CanvasMath.MAX_FORMULAS){"Не более 30 формул на доске"}
         doc.objects.forEach { obj ->
             require(validId(obj.id))
+            require(obj.rotation.isFinite() && obj.rotation >= 0f && obj.rotation < 360f)
+            require(obj.textBoxWidth.isFinite() && obj.textBoxWidth in 0f..4096f)
             require(obj.width.isFinite() && obj.width in 1f..32f && obj.fontSize.isFinite() && obj.fontSize in 16f..96f)
             require(obj.points.size in 1..MAX_POINTS_PER_OBJECT)
             require(obj.kind in listOf(CanvasObjectKind.PEN, CanvasObjectKind.TEXT) || obj.points.size == 2)
@@ -97,6 +100,8 @@ fun arrowLegs(a: CanvasPoint, b: CanvasPoint, width: Float): Pair<CanvasPoint, C
     return end(0.5f) to end(-0.5f)
 }
 fun hitCanvasObject(obj: CanvasObject, point: CanvasPoint, radius: Float): Boolean {
+    if (obj.rotation != 0f) return hitCanvasObject(obj.copy(rotation=0f),
+        rotateCanvasPoint(point, canvasObjectBounds(obj).center, -obj.rotation), radius)
     val a = obj.points.first(); val b = obj.points.last(); val tolerance = radius + obj.width / 2f
     return when (obj.kind) {
         CanvasObjectKind.PEN -> if (obj.points.size == 1) segmentDistance(point, a, a) <= tolerance

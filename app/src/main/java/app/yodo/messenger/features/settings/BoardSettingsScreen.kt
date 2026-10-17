@@ -9,6 +9,7 @@ import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -69,9 +70,26 @@ class BoardSettingsViewModel @Inject constructor(private val store: CanvasSettin
 fun BoardSettingsScreen(
     onBackClick: () -> Unit,
     initialAnchorId: String? = null,
+    onOpenBoard: (String, String) -> Unit = { _, _ -> },
+    libraryViewModel: CanvasLibraryViewModel = hiltViewModel(),
     viewModel: BoardSettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val library by libraryViewModel.state.collectAsState()
+    var renameBoard by remember { mutableStateOf<app.yodo.messenger.features.canvas.CanvasSavedBoard?>(null) }
+    var deleteBoard by remember { mutableStateOf<app.yodo.messenger.features.canvas.CanvasSavedBoard?>(null) }
+    val lifecycleOwner=androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner,libraryViewModel) {
+        val observer=androidx.lifecycle.LifecycleEventObserver { _,event ->
+            if(event==androidx.lifecycle.Lifecycle.Event.ON_RESUME)libraryViewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(library.boards) {
+        if(renameBoard!=null && library.boards.none { it==renameBoard })renameBoard=null
+        if(deleteBoard!=null && library.boards.none { it==deleteBoard })deleteBoard=null
+    }
     val colorTheme = LocalColorTheme.current
     val listState = rememberLazyListState()
     val anchorPositions = remember { mutableMapOf<String, Float>() }
@@ -100,6 +118,23 @@ fun BoardSettingsScreen(
     ) { padding ->
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(padding)) {
             item { Spacer(Modifier.height(4.dp)) }
+            item {
+                SettingsSectionHeader(icon=Icons.Filled.Edit,title="Сохранённые доски",colorTheme=colorTheme,
+                    modifier=Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_BOARD_LIBRARY,anchorPositions,highlightedAnchor,colorTheme))
+                Text("Все локальные доски текущего аккаунта на этом устройстве. Нажмите «Открыть», чтобы изменить рисунок.",
+                    style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(horizontal=20.dp,vertical=8.dp))
+                if(library.loading || library.busy)LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal=20.dp))
+                if(library.boards.isEmpty() && !library.loading)Text("Сохранённых досок пока нет",modifier=Modifier.padding(20.dp))
+                library.error?.let { message ->
+                    Text(message,color=MaterialTheme.colorScheme.error,modifier=Modifier.padding(horizontal=20.dp,vertical=8.dp))
+                }
+                TextButton(enabled=!library.busy,onClick=libraryViewModel::refresh,modifier=Modifier.padding(horizontal=12.dp).heightIn(min=48.dp)) {Text("Обновить список")}
+            }
+            items(library.boards,key={"${it.storageChatHash}/${it.id}"}) { entry ->
+                CanvasSavedBoardCard(entry,!library.busy,
+                    {entry.chatId?.let { onOpenBoard(it,entry.id) }},{renameBoard=entry},{deleteBoard=entry})
+            }
+
             item {
                 SettingsSectionHeader(icon = Icons.Filled.Visibility, title = "Доска в чате", colorTheme = colorTheme,
                     modifier = Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_BOARD_IN_CHAT, anchorPositions, highlightedAnchor, colorTheme))
@@ -184,6 +219,7 @@ fun BoardSettingsScreen(
             }
         }
     }
+    CanvasLibraryDialogs(renameBoard,deleteBoard,!library.busy,{renameBoard=null;deleteBoard=null},libraryViewModel::rename,libraryViewModel::delete)
     if (confirmReset) AlertDialog(
         onDismissRequest = { confirmReset = false }, title = { Text("Сбросить настройки доски?") },
         text = { Text("Все параметры раздела вернутся к значениям по умолчанию. Сами доски не изменятся.") },

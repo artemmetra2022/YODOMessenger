@@ -31,6 +31,7 @@ fun SharedBoardScreen(onBackClick: () -> Unit, viewModel: SharedBoardViewModel =
     var fontSize by remember { mutableFloatStateOf(32f) }
     var shapeAssist by remember { mutableStateOf(settings.shapeAssist) }
     var snapGrid by remember { mutableStateOf(settings.snapToGrid) }
+    var hasSelection by remember { mutableStateOf(false) }
     var drawingView by remember { mutableStateOf<CanvasDrawingView?>(null) }
     var textPoint by remember { mutableStateOf<CanvasPoint?>(null) }
     var formulaPoint by remember { mutableStateOf<CanvasPoint?>(null) }
@@ -82,6 +83,7 @@ fun SharedBoardScreen(onBackClick: () -> Unit, viewModel: SharedBoardViewModel =
                     val changed = view.document?.id != doc.id
                     if (view.documentRevision != ui.generation) view.cancelRemoteConflict()
                     view.documentRevision = ui.generation
+                    view.onSelectionChange={hasSelection=it};view.onEditError=viewModel::reportEditError
                     view.workspaceColor=workspaceColor.toArgb();view.paperEdgeColor=paperEdgeColor.toArgb()
                     view.document = doc; view.backgroundImage = null; view.tool = tool; view.inkColor = color; view.inkWidth = width; view.fontSize = fontSize
                     view.shapeAssist = shapeAssist; view.snapToGrid = snapGrid; view.haptics = settings.haptics
@@ -106,7 +108,7 @@ fun SharedBoardScreen(onBackClick: () -> Unit, viewModel: SharedBoardViewModel =
                 style = MaterialTheme.typography.bodyMedium, color=MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
-            CanvasEditorDock(tool,{tool=it},color,{color=it},width,{width=it},fontSize,{fontSize=it},enabled=editable)
+            CanvasEditorDock(tool,{tool=it},color,{color=it},width,{width=it},fontSize,{fontSize=it},enabled=editable,selectionView=drawingView,hasSelection=hasSelection)
         }
     }
     if(boardOptions) CanvasBoardOptions(ui.doc?.grid,viewModel::updateGrid,editable,

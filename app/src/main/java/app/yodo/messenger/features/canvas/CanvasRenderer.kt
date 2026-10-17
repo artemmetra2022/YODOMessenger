@@ -28,7 +28,26 @@ object CanvasRenderer {
         draft?.let { drawObject(canvas, it, doc.width, paint) }
         canvas.restore()
     }
+    fun objectBounds(obj: CanvasObject, pageWidth: Int): CanvasBounds {
+        if(obj.kind!=CanvasObjectKind.TEXT)return canvasObjectBounds(obj)
+        val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{textSize=obj.fontSize;typeface=Typeface.create("sans-serif",Typeface.NORMAL)}
+        val a=obj.points.first();val available=if(obj.textBoxWidth>0f)obj.textBoxWidth else (pageWidth-a.x-12f).coerceAtLeast(30f)
+        var y=a.y;var right=a.x
+        obj.text.lines().forEach { line ->
+            var rest=line
+            if(rest.isEmpty())y+=obj.fontSize*1.25f
+            while(rest.isNotEmpty()) {
+                val count=paint.breakText(rest,true,available,null).coerceAtLeast(1)
+                right=max(right,a.x+paint.measureText(rest.take(count)));y+=obj.fontSize*1.25f;rest=rest.drop(count)
+            }
+        }
+        return CanvasBounds(a.x,a.y+paint.fontMetrics.ascent,right.coerceAtLeast(a.x+1f),y-obj.fontSize*1.25f+paint.fontMetrics.descent)
+    }
     private fun drawObject(canvas: Canvas, obj: CanvasObject, pageWidth: Int, paint: Paint) {
+        val saved=canvas.save()
+        try {
+        val center=objectBounds(obj,pageWidth).center
+        if(obj.rotation!=0f)canvas.rotate(obj.rotation,center.x,center.y)
         paint.color = obj.color; paint.strokeWidth = obj.width; paint.style = Paint.Style.STROKE
         val a = obj.points.first(); val b = obj.points.last()
         when (obj.kind) {
@@ -59,7 +78,7 @@ object CanvasRenderer {
             CanvasObjectKind.FORMULA -> CanvasMathNative.drawObject(canvas,obj)
             CanvasObjectKind.TEXT -> {
                 paint.style = Paint.Style.FILL; paint.textSize = obj.fontSize; paint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-                var y = a.y; val available = (pageWidth - a.x - 12).coerceAtLeast(30f)
+                var y = a.y; val available = if(obj.textBoxWidth>0f)obj.textBoxWidth else (pageWidth - a.x - 12).coerceAtLeast(30f)
                 obj.text.lines().forEach { line ->
                     var rest = line
                     if (rest.isEmpty()) y += obj.fontSize * 1.25f
@@ -70,6 +89,7 @@ object CanvasRenderer {
                 }
             }
         }
+        } finally { canvas.restoreToCount(saved) }
     }
     private fun drawTemplate(canvas: Canvas, doc: CanvasDocument, paint: Paint) {
         val x = doc.width.toFloat(); val y = doc.height.toFloat()

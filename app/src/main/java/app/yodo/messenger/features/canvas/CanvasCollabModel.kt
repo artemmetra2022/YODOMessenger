@@ -66,7 +66,10 @@ class CanvasAuthority(initial:CanvasDocument,val hostActor:String,val guestActor
             val stack=if(command.kind==CanvasCommandKind.UNDO)undo.getValue(actor) else redo.getValue(actor)
             val other=if(command.kind==CanvasCommandKind.UNDO)redo.getValue(actor) else undo.getValue(actor)
             val record=stack.lastOrNull()
-            val ids=record?.after?.keys?.filter{prior[it]==record.after[it]&&versions[it]==record.versions[it]}?:emptyList()
+            val matching=record?.after?.keys?.filter{prior[it]==record.after[it]&&versions[it]==record.versions[it]}?:emptyList()
+            val replacement=record!=null && record.before.size==2 && record.before.values.count{it!=null}==1 && record.after.values.count{it!=null}==1
+            // Reversing half a replacement would resurrect an obsolete object after a peer moved it again.
+            val ids=if(replacement && matching.size!=record!!.after.size)emptyList() else matching
             val adds=ids.mapNotNull{record!!.before[it]};val removes=ids.filter{prior[it]!=null}
             // Object values are immutable, so inverse operations never replace a currently present ID.
             delta=CanvasDelta(adds=adds,removes=removes)

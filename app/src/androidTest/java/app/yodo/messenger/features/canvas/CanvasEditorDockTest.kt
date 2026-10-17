@@ -16,12 +16,12 @@ import org.junit.Test
 class CanvasEditorDockTest {
     @get:Rule val compose = createComposeRule()
 
-    private fun dock(onImage: (() -> Unit)? = null) {
+    private fun dock(hasSelection: Boolean = false, onImage: (() -> Unit)? = null) {
         compose.setContent {
-            var tool by remember { mutableStateOf(CanvasTool.PEN) }
+            var tool by remember { mutableStateOf(if(hasSelection)CanvasTool.SELECT else CanvasTool.PEN) }
             MaterialTheme {
                 Box(Modifier.width(320.dp)) {
-                    CanvasEditorDock(tool, { tool = it }, BoardColors.DEFAULT, {}, 4f, {}, 32f, {}, true, onImage)
+                    CanvasEditorDock(tool, { tool = it }, BoardColors.DEFAULT, {}, 4f, {}, 32f, {}, true, onImage, hasSelection=hasSelection)
                 }
             }
         }
@@ -29,7 +29,7 @@ class CanvasEditorDockTest {
 
     @Test fun primaryToolsVisibleWithoutScrolling() {
         dock()
-        listOf("Перо", "Маркер", "Ластик", "Фигуры", "Текст", "Рука").forEach {
+        listOf("Перо", "Маркер", "Ластик", "Фигуры", "Текст", "Выбор").forEach {
             compose.onNodeWithText(it).assertIsDisplayed()
         }
         compose.onNodeWithContentDescription("Все цвета; выбран Чёрный").assertIsDisplayed()
@@ -61,5 +61,21 @@ class CanvasEditorDockTest {
         compose.onNodeWithText("Текст").performClick()
         compose.onNodeWithText("Картинка из галереи").performClick()
         compose.runOnIdle { assertEquals(1, called) }
+    }
+    @Test fun selectionAndHandStayReachable() {
+        dock()
+        compose.onNodeWithText("Выбор").performClick()
+        compose.onNodeWithContentDescription("Выбор").assertIsSelected()
+        compose.onNodeWithText("Текст").performClick()
+        compose.onNodeWithText("Рука").assertIsDisplayed().performClick()
+    }
+    @Test fun selectionActionsReplaceColorsWithoutCoveringPaper() {
+        dock(hasSelection=true)
+        listOf("Уменьшить объект", "Увеличить объект", "Повернуть влево на 15°", "Повернуть вправо на 15°", "Копировать объект", "Снять выделение").forEach {
+            compose.onNodeWithContentDescription(it).assertIsDisplayed()
+        }
+        compose.onNodeWithText("Выбор").assertIsDisplayed()
+        compose.onNodeWithText("Перо").assertIsDisplayed()
+        compose.onNodeWithText("4 px").assertDoesNotExist()
     }
 }

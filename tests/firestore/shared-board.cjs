@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
-const { doc, setDoc, updateDoc, getDoc, deleteDoc, serverTimestamp, collection, getDocs, writeBatch, query, orderBy, documentId, limit, startAfter } = require('firebase/firestore');
+const { doc, setDoc, updateDoc, getDoc, deleteDoc, serverTimestamp, collection, getDocs, writeBatch, runTransaction, query, orderBy, documentId, limit, startAfter } = require('firebase/firestore');
 async function main() {
  const env = await initializeTestEnvironment({ projectId:'demo-yodo-shared-board', firestore:{host:'127.0.0.1',port:8088,rules:fs.readFileSync(process.env.YODO_RULES_PATH||path.resolve(__dirname,'../../firestore.rules'),'utf8')} });
  let passed=0;
@@ -60,6 +60,35 @@ async function main() {
     if(removed!==326)throw new Error(`expected 326 deleted, got ${removed}`);
     await assertSucceeds(updateDoc(meta(alice),change({clearing:false})));
     if(!(await getDocs(collection(alice,'chats/group/sharedBoardObjects'))).empty)throw new Error('objects survived');
+  });
+  const replace = (db, uid, oldN, newN, expectedJson, generation) => runTransaction(db, async tx => {
+    const m=await tx.get(meta(db)),old=await tx.get(object(db,oldN)),fresh=await tx.get(object(db,newN));
+    if(m.data().deleted || m.data().clearing || (m.data().generation||0)!==generation)throw new Error('stale board');
+    if(!old.exists() || old.data().json!==expectedJson || (old.data().generation||0)!==generation || fresh.exists())throw new Error('stale object');
+    tx.delete(object(db,oldN));
+    tx.set(object(db,newN),{json:JSON.stringify({rotation:45}),authorUid:uid,at:serverTimestamp(),generation});
+    tx.update(meta(db),{updatedAt:serverTimestamp(),updatedBy:uid});
+  });
+  await test('member atomically replaces object created by another member',async()=>{
+    await setDoc(object(alice,400),payload(4));
+    await assertSucceeds(replace(bob,'bob',400,401,'{}',4));
+    if((await getDoc(object(alice,400))).exists() || !(await getDoc(object(alice,401))).exists())throw new Error('not atomic');
+  });
+  await test('stale replacement cannot resurrect moved object',async()=>{
+    let rejected=false;try{await replace(alice,'alice',400,402,'{}',4)}catch(_){rejected=true}
+    if(!rejected || (await getDoc(object(alice,402))).exists())throw new Error('stale move survived');
+  });
+  await test('concurrent replacements produce exactly one winner',async()=>{
+    await setDoc(object(alice,410),payload(4));
+    const results=await Promise.allSettled([replace(alice,'alice',410,411,'{}',4),replace(bob,'bob',410,412,'{}',4)]);
+    if(results.filter(x=>x.status==='fulfilled').length!==1)throw new Error('expected one winner');
+    const a=await getDoc(object(alice,411)),b=await getDoc(object(alice,412));
+    if(Number(a.exists())+Number(b.exists())!==1)throw new Error('duplicates created');
+  });
+  await test('replacement cannot cross board generation',async()=>{
+    await setDoc(object(alice,420),payload(4));
+    let rejected=false;try{await replace(alice,'alice',420,421,'{}',3)}catch(_){rejected=true}
+    if(!rejected || !(await getDoc(object(alice,420))).exists() || (await getDoc(object(alice,421))).exists())throw new Error('stale generation changed board');
   });
   const settings=db=>doc(db,'config/appSettings');
   await test('admin can set realtime sync',()=>assertSucceeds(setDoc(settings(admin),{boardSyncIntervalMs:0})));

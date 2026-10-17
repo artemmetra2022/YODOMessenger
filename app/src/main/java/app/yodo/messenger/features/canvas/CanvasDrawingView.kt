@@ -12,8 +12,15 @@ import kotlin.math.*
 
 class CanvasDrawingView(context: Context) : View(context) {
     var document: CanvasDocument? = null
+        set(value) {
+            if (field?.id != value?.id) clearSelection()
+            if (selectionOriginal != null && value?.objects?.any { it == selectionOriginal } != true) cancelDraft()
+            field = value
+            onSelectionChange(value?.objects?.any { it.id == selectedId } == true)
+        }
     var backgroundImage: Bitmap? = null
     var tool = CanvasTool.PEN
+        set(value) { if (field != value) { cancelDraft(); if (value != CanvasTool.SELECT) clearSelection() }; field = value }
     var inkColor = 0xff1e293b.toInt()
     var inkWidth = 4f
     var fontSize = 32f
@@ -33,6 +40,99 @@ class CanvasDrawingView(context: Context) : View(context) {
     var onText: (CanvasPoint) -> Unit = {}
     var onFormula: (CanvasPoint,CanvasObject?) -> Unit = {_,_->}
     var onLimit: () -> Unit = {}
+    var onSelectionChange: (Boolean) -> Unit = {}
+    var onEditError: (String) -> Unit = {}
+    private var selectedId: String? = null
+    private var selectionOriginal: CanvasObject? = null
+    private var selectionPreview: CanvasObject? = null
+    private var selectionStart = CanvasPoint(0f, 0f)
+    private var selectionMode = "move"
+    private var selectionMoved = false
+    private fun bounds(o: CanvasObject) = CanvasRenderer.objectBounds(o, document?.width ?: 1200)
+    private fun frozen(o: CanvasObject): CanvasObject = if(o.kind == CanvasObjectKind.TEXT && o.textBoxWidth == 0f)
+        o.copy(textBoxWidth = ((document?.width ?: 1200)-o.points.first().x-12f).coerceAtLeast(30f)) else o
+    fun clearSelection() { selectedId=null; selectionOriginal=null; selectionPreview=null; onSelectionChange(false); invalidate() }
+    private fun hit(o: CanvasObject, p: CanvasPoint, radius: Float, interior: Boolean = false): Boolean {
+        val b=bounds(o);val local=rotateCanvasPoint(p,b.center,-o.rotation)
+        return if(o.kind==CanvasObjectKind.TEXT || interior && o.kind !in listOf(CanvasObjectKind.PEN,CanvasObjectKind.LINE,CanvasObjectKind.ARROW))
+            b.contains(local,radius) else hitCanvasObject(o.copy(rotation=0f),local,radius)
+    }
+    private fun applySelection(o: CanvasObject?, copy: Boolean = false) {
+        val doc=document?:return;val original=doc.objects.firstOrNull{it.id==selectedId}?:return
+        if(o==null){onEditError("Объект не помещается на доске");return}
+        if(!copy && o==original)return
+        try {
+            val next=CanvasObjectTransforms.replace(doc,original,o,copy)
+            selectedId=next.objects.last().id;onSelectionChange(false)
+            finishGesture(doc,next)
+        } catch(e: IllegalArgumentException) { onEditError(e.message?:"Не удалось изменить объект") }
+        invalidate()
+    }
+    fun scaleSelection(factor: Float) { if(!isEnabled)return;val o=document?.objects?.firstOrNull{it.id==selectedId}?:return
+        gestureRevision=documentRevision;applySelection(CanvasObjectTransforms.scale(frozen(o),factor,document!!,::bounds)) }
+    fun rotateSelection(delta: Float) { if(!isEnabled)return;val o=document?.objects?.firstOrNull{it.id==selectedId}?:return
+        gestureRevision=documentRevision;applySelection(CanvasObjectTransforms.rotate(frozen(o),o.rotation+delta,document!!,::bounds)) }
+    fun copySelection() { if(!isEnabled)return;val o=document?.objects?.firstOrNull{it.id==selectedId}?:return
+        gestureRevision=documentRevision;applySelection(CanvasObjectTransforms.fit(CanvasObjectTransforms.translate(frozen(o),24f,24f),document!!,::bounds),true) }
+    private fun selectionTouch(event: MotionEvent, p: CanvasPoint, doc: CanvasDocument, t: CanvasTransform): Boolean {
+        val radius=22f*resources.displayMetrics.density/t.scale
+        when(event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                cancelDraft();gestureRevision=documentRevision;selectionMoved=false
+                var o=doc.objects.firstOrNull{it.id==selectedId}
+                selectionMode="move"
+                if(o!=null) {
+                    val b=bounds(o);val local=rotateCanvasPoint(p,b.center,-o.rotation)
+                    val rotation=CanvasPoint(b.center.x,b.top-32f*resources.displayMetrics.density/t.scale)
+                    selectionMode=when {
+                        hypot(local.x-b.right,local.y-b.bottom)<radius -> "scale"
+                        hypot(local.x-rotation.x,local.y-rotation.y)<radius -> "rotate"
+                        else -> "move"
+                    }
+                    if(selectionMode=="move"&&!b.contains(local,radius*.3f))o=null
+                }
+                if(o==null)o=doc.objects.asReversed().firstOrNull{hit(it,p,radius*.35f,true)}
+                selectedId=o?.id;onSelectionChange(o!=null)
+                selectionOriginal=o;selectionPreview=o;selectionStart=p;activeGesture=o!=null
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val original=selectionOriginal?:return true
+                if(doc.objects.none{it==original}){cancelDraft();return true}
+                if(!selectionMoved && hypot(p.x-selectionStart.x,p.y-selectionStart.y)<4f*resources.displayMetrics.density/t.scale)return true
+                selectionMoved=true
+                val o=frozen(original);val c=bounds(o).center
+                val next=when(selectionMode) {
+                    "scale" -> CanvasObjectTransforms.scale(o,hypot(p.x-c.x,p.y-c.y)/hypot(selectionStart.x-c.x,selectionStart.y-c.y).coerceAtLeast(1f),doc,::bounds)
+                    "rotate" -> CanvasObjectTransforms.rotate(o,o.rotation+(atan2(p.y-c.y,p.x-c.x)-atan2(selectionStart.y-c.y,selectionStart.x-c.x))*180f/PI.toFloat(),doc,::bounds)
+                    else -> CanvasObjectTransforms.fit(CanvasObjectTransforms.translate(o,p.x-selectionStart.x,p.y-selectionStart.y),doc,::bounds)
+                }
+                if(next!=null)selectionPreview=next
+            }
+            MotionEvent.ACTION_UP -> {
+                val original=selectionOriginal;val preview=selectionPreview
+                if(original!=null && preview!=null && preview!=original && doc.objects.any{it==original})applySelection(preview)
+                cancelDraft();performClick()
+            }
+            MotionEvent.ACTION_CANCEL -> cancelDraft()
+        }
+        invalidate();return true
+    }
+    private fun drawSelection(canvas: Canvas, t: CanvasTransform, doc: CanvasDocument) {
+        if(tool!=CanvasTool.SELECT)return
+        val o=selectionPreview?:doc.objects.firstOrNull{it.id==selectedId}?:return
+        val b=bounds(o);val unit=resources.displayMetrics.density/t.scale
+        val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply { color=0xff2563eb.toInt();style=Paint.Style.STROKE;strokeWidth=2f*unit }
+        val count=canvas.save()
+        try {
+            canvas.rotate(o.rotation,b.center.x,b.center.y)
+            canvas.drawRect(b.left,b.top,b.right,b.bottom,paint)
+            canvas.drawLine(b.center.x,b.top,b.center.x,b.top-32f*unit,paint)
+            listOf(CanvasPoint(b.right,b.bottom),CanvasPoint(b.center.x,b.top-32f*unit)).forEach {
+                paint.style=Paint.Style.FILL;paint.color=0xffffffff.toInt();canvas.drawCircle(it.x,it.y,8f*unit,paint)
+                paint.style=Paint.Style.STROKE;paint.color=0xff2563eb.toInt();canvas.drawCircle(it.x,it.y,8f*unit,paint)
+            }
+        } finally { canvas.restoreToCount(count) }
+    }
     var onCursor: (CanvasPoint?) -> Unit = {}
     var remoteCursor: CanvasRemoteCursor? = null
     private var zoom=1f; private var pan=CanvasPoint(0f,0f)
@@ -73,7 +173,7 @@ class CanvasDrawingView(context: Context) : View(context) {
     })
     fun cancelRemoteConflict(){cancelDraft();invalidate()}
     fun resetViewport(){zoom=1f;pan=CanvasPoint(0f,0f);cancelDraft();invalidate()}
-    private fun cancelDraft(){removeCallbacks(holdRunnable);snapped=false;holdAnchor=null;activeGesture=false;draft=null;erasedIds.clear();erasedPreview=null;eraserPoint=null;gestureTooLong=false}
+    private fun cancelDraft(){selectionOriginal=null;selectionPreview=null;removeCallbacks(holdRunnable);snapped=false;holdAnchor=null;activeGesture=false;draft=null;erasedIds.clear();erasedPreview=null;eraserPoint=null;gestureTooLong=false}
     override fun onDraw(canvas: Canvas) {
         // AndroidView does not guarantee clipping to its layout bounds in Compose.
         // Clip before drawColor: otherwise the board can paint over sibling toolbars.
@@ -83,9 +183,14 @@ class CanvasDrawingView(context: Context) : View(context) {
             super.onDraw(canvas)
             canvas.drawColor(workspaceColor)
             val base=document?:return
-            val doc=if(erasedPreview!=null)base.copy(objects=base.objects.filterNot{it.id in erasedIds})else base;val transform=transform()?:return
+            val doc=when {
+                selectionPreview!=null -> base.copy(objects=base.objects.map{if(it.id==selectedId)selectionPreview!! else it})
+                erasedPreview!=null -> base.copy(objects=base.objects.filterNot{it.id in erasedIds})
+                else -> base
+            };val transform=transform()?:return
             canvas.save();canvas.translate(transform.offsetX,transform.offsetY);canvas.scale(transform.scale,transform.scale)
             CanvasRenderer.draw(canvas,doc,backgroundImage,draft)
+            drawSelection(canvas,transform,doc)
             paperEdgePaint.color=paperEdgeColor
             paperEdgePaint.strokeWidth=resources.displayMetrics.density/transform.scale
             canvas.drawRect(0f,0f,doc.width.toFloat(),doc.height.toFloat(),paperEdgePaint)
@@ -115,10 +220,11 @@ class CanvasDrawingView(context: Context) : View(context) {
         if(multiTouch){if(event.actionMasked==MotionEvent.ACTION_UP||event.actionMasked==MotionEvent.ACTION_CANCEL){multiTouch=false;lastFocus=null};return true}
         val transform=transform()?:return false
         val world=transform.world(CanvasPoint(event.x,event.y))
+        if(tool==CanvasTool.SELECT)return selectionTouch(event,world,doc,transform)
         val rawPoint=CanvasPoint(world.x.coerceIn(0f,doc.width.toFloat()),world.y.coerceIn(0f,doc.height.toFloat()))
         val point=if(snapToGrid&&isShapeTool(tool))snapCanvasPoint(rawPoint,doc.width.toFloat(),doc.height.toFloat()) else rawPoint
         fun erase(){eraserPoint=point;val current=doc.copy(objects=doc.objects.filterNot{it.id in erasedIds});val radius=max(12f,18f/transform.scale)
-            current.objects.filter{hitCanvasObject(it,point,radius)}.forEach{erasedIds.add(it.id)}
+            current.objects.filter{hit(it,point,radius)}.forEach{erasedIds.add(it.id)}
             erasedPreview=doc.copy(objects=doc.objects.filterNot{it.id in erasedIds})}
         if(event.actionMasked==MotionEvent.ACTION_MOVE && !activeGesture)return true
         if(event.actionMasked==MotionEvent.ACTION_UP && !activeGesture)return true
@@ -133,7 +239,7 @@ class CanvasDrawingView(context: Context) : View(context) {
                 when(tool){
                     CanvasTool.HAND -> Unit
                     CanvasTool.TEXT -> {onText(point);performClick()}
-                    CanvasTool.FORMULA -> {val existing=doc.objects.asReversed().firstOrNull{it.kind==CanvasObjectKind.FORMULA&&hitCanvasObject(it,point,0f)};onFormula(existing?.points?.first()?:point,existing);performClick()}
+                    CanvasTool.FORMULA -> {val existing=doc.objects.asReversed().firstOrNull{it.kind==CanvasObjectKind.FORMULA&&hit(it,point,0f)};onFormula(existing?.points?.first()?:point,existing);performClick()}
                     CanvasTool.ERASER -> erase()
                     else -> {
                         val highlighter=tool==CanvasTool.HIGHLIGHTER

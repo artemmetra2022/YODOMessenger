@@ -38,6 +38,7 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
     var fontSize by remember { mutableFloatStateOf(32f) }
     var shapeAssist by remember { mutableStateOf(true) }
     var snapGrid by remember { mutableStateOf(false) }
+    var hasSelection by remember { mutableStateOf(false) }
     var drawingView by remember { mutableStateOf<CanvasDrawingView?>(null) }
     var textPoint by remember { mutableStateOf<CanvasPoint?>(null) }
     var formulaPoint by remember { mutableStateOf<CanvasPoint?>(null) }
@@ -118,6 +119,7 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
             val doc=state.doc
             if(doc!=null) AndroidView(modifier=Modifier.fillMaxSize(),factory={context->CanvasDrawingView(context).also{drawingView=it}},update={view->
                 val changed=view.document?.id!=doc.id
+                view.onSelectionChange={hasSelection=it};view.onEditError=viewModel::reportEditError
                 view.workspaceColor=workspaceColor.toArgb();view.paperEdgeColor=paperEdgeColor.toArgb()
                 view.document=doc;view.backgroundImage=state.background;view.tool=tool;view.inkColor=color;view.inkWidth=width;view.fontSize=fontSize;view.shapeAssist=shapeAssist;view.snapToGrid=snapGrid;view.haptics=boardSettings.haptics
                 view.isEnabled=!state.busy&&sessionReady
@@ -137,7 +139,7 @@ fun CanvasScreen(onBackClick:()->Unit, viewModel:CanvasViewModel=hiltViewModel()
             }
         }
         CanvasEditorDock(tool,{tool=it},color,{color=it},width,{width=it},fontSize,{fontSize=it},
-            enabled=!state.busy&&state.doc!=null, onImage=if(localSettings) ({confirmImport=true}) else null)
+            enabled=!state.busy&&state.doc!=null, onImage=if(localSettings) ({confirmImport=true}) else null,selectionView=drawingView,hasSelection=hasSelection)
     } }
     if(boardOptions) CanvasBoardOptions(state.doc?.grid,viewModel::updateGrid,!state.busy&&localSettings,
         shapeAssist,{shapeAssist=it},snapGrid,{snapGrid=it},{boardOptions=false},state.doc?.template,viewModel::updateTemplate)

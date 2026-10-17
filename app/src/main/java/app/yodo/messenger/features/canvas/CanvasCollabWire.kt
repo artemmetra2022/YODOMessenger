@@ -24,7 +24,7 @@ object CanvasCollabWire {
     }
     fun encode(message:CanvasWire):ByteArray {
         val json=buildJsonObject {
-            put("protocol",4)
+            put("protocol",5)
             when(message) {
                 is CanvasWire.Snapshot->{put("type","snapshot");put("session",message.session);put("doc",CanvasCodec.encode(message.doc));put("revision",message.revision);put("host",message.hostActor);put("guest",message.guestActor)}
                 is CanvasWire.Propose->{put("type","propose");put("session",message.session);val c=message.command;put("id",c.id);put("sequence",c.sequence);put("base",c.baseRevision);put("kind",c.kind.name);put("delta",delta(c.delta))}
@@ -38,7 +38,7 @@ object CanvasCollabWire {
     fun decode(bytes:ByteArray):CanvasWire {
         require(bytes.size in 1..MAX_BYTES);val raw=bytes.toString(Charsets.UTF_8);checkDepth(raw)
         val o=Json.parseToJsonElement(raw).jsonObject
-        require(o.getValue("protocol").jsonPrimitive.int==4)
+        require(o.getValue("protocol").jsonPrimitive.int==5){"Обновите приложение у обоих участников совместной доски"}
         fun text(key:String)=o.getValue(key).jsonPrimitive.content
         fun id(key:String)=text(key).also{require(CanvasLimits.validId(it))}
         fun long(key:String)=o.getValue(key).jsonPrimitive.long.also{require(it>=0&&it<Long.MAX_VALUE)}

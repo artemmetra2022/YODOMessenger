@@ -33,7 +33,7 @@ internal val CanvasShapeTools = listOf(CanvasTool.LINE, CanvasTool.ARROW, Canvas
 
 internal fun canvasToolLabel(tool: CanvasTool): String = when (tool) {
     CanvasTool.PEN -> "Перо"; CanvasTool.HIGHLIGHTER -> "Маркер"; CanvasTool.ERASER -> "Ластик"
-    CanvasTool.HAND -> "Рука"; CanvasTool.TEXT -> "Текст"; CanvasTool.FORMULA -> "Формула"
+    CanvasTool.SELECT -> "Выбор"; CanvasTool.HAND -> "Рука"; CanvasTool.TEXT -> "Текст"; CanvasTool.FORMULA -> "Формула"
     CanvasTool.LINE -> "Линия"; CanvasTool.ARROW -> "Стрелка"; CanvasTool.RECTANGLE -> "Прямоугольник"
     CanvasTool.ROUNDED_RECT -> "Скруглённый"; CanvasTool.CIRCLE -> "Окружность"; CanvasTool.ELLIPSE -> "Эллипс"
     CanvasTool.TRIANGLE -> "Треугольник"; CanvasTool.DIAMOND -> "Ромб"
@@ -41,7 +41,7 @@ internal fun canvasToolLabel(tool: CanvasTool): String = when (tool) {
 
 private fun canvasToolIcon(tool: CanvasTool): ImageVector = when (tool) {
     CanvasTool.PEN -> Icons.Default.Edit; CanvasTool.HIGHLIGHTER -> Icons.Default.Brush
-    CanvasTool.ERASER -> Icons.Default.AutoFixNormal; CanvasTool.HAND -> Icons.Default.PanTool
+    CanvasTool.SELECT -> Icons.Default.CropFree; CanvasTool.ERASER -> Icons.Default.AutoFixNormal; CanvasTool.HAND -> Icons.Default.PanTool
     CanvasTool.TEXT -> Icons.Default.TextFields; CanvasTool.FORMULA -> Icons.Default.Functions
     CanvasTool.LINE -> Icons.Default.Remove; CanvasTool.ARROW -> Icons.Default.NorthEast
     CanvasTool.RECTANGLE -> Icons.Default.CropSquare; CanvasTool.ROUNDED_RECT -> Icons.Default.RoundedCorner
@@ -83,11 +83,16 @@ internal fun CanvasPickerSheet(title: String, onDismiss: () -> Unit, content: @C
 @Composable
 internal fun CanvasEditorDock(tool: CanvasTool, onTool: (CanvasTool) -> Unit, color: Int, onColor: (Int) -> Unit,
     width: Float, onWidth: (Float) -> Unit, fontSize: Float, onFontSize: (Float) -> Unit,
-    enabled: Boolean, onImage: (() -> Unit)? = null) {
+    enabled: Boolean, onImage: (() -> Unit)? = null,
+    selectionView: CanvasDrawingView? = null, hasSelection: Boolean = false) {
     var picker by remember { mutableStateOf<String?>(null) }
     val textTool = tool == CanvasTool.TEXT || tool == CanvasTool.FORMULA
+    val insertTool = textTool || tool == CanvasTool.HAND
+    val selecting = tool==CanvasTool.SELECT && hasSelection
     val quickControls: @Composable () -> Unit = {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if(selecting) Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
+                CanvasSelectionActions(selectionView,enabled)
+            } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 BoardColors.palette.take(3).forEach { (name, value) -> CanvasColorSwatch(name, value, color == value, enabled) { onColor(value) } }
                 // Always shows the current color, including one chosen from the full palette.
                 IconButton(onClick = { picker = "palette" }, enabled = enabled, modifier = Modifier.size(48.dp)) {
@@ -107,10 +112,10 @@ internal fun CanvasEditorDock(tool: CanvasTool, onTool: (CanvasTool) -> Unit, co
             Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
                 val shape = tool in CanvasShapeTools
                 val slots = listOf(CanvasTool.PEN, CanvasTool.HIGHLIGHTER, CanvasTool.ERASER,
-                    if (shape) tool else CanvasTool.RECTANGLE, if (textTool) tool else CanvasTool.TEXT, CanvasTool.HAND)
+                    if (shape) tool else CanvasTool.RECTANGLE, if (insertTool) tool else CanvasTool.TEXT, CanvasTool.SELECT)
                 slots.forEachIndexed { index, slot ->
-                    val active = when (index) { 3 -> shape; 4 -> textTool; else -> tool == slot }
-                    val label = when (index) { 3 -> "Фигуры"; 4 -> if (tool == CanvasTool.FORMULA) "Формула" else "Текст"; else -> canvasToolLabel(slot) }
+                    val active = when (index) { 3 -> shape; 4 -> insertTool; else -> tool == slot }
+                    val label = when (index) { 3 -> "Фигуры"; 4 -> when(tool) { CanvasTool.FORMULA -> "Формула"; CanvasTool.HAND -> "Рука"; else -> "Текст" }; else -> canvasToolLabel(slot) }
                     Column(Modifier.weight(1f).heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
                         .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
                         .semantics { selected = active; contentDescription = if (index == 3) "Фигуры: ${canvasToolLabel(slot)}" else label }
@@ -132,7 +137,7 @@ internal fun CanvasEditorDock(tool: CanvasTool, onTool: (CanvasTool) -> Unit, co
             if (maxWidth >= 600.dp) {
                 // On a wide/landscape display the dock becomes one row, leaving more room for the paper.
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(280.dp)) { quickControls() }
+                    Box(Modifier.width(if(selecting)296.dp else 280.dp)) { quickControls() }
                     VerticalDivider(Modifier.height(48.dp).padding(horizontal = 4.dp))
                     Box(Modifier.weight(1f)) { primaryTools() }
                 }
@@ -169,9 +174,9 @@ internal fun CanvasEditorDock(tool: CanvasTool, onTool: (CanvasTool) -> Unit, co
             } }
         }
         "insert" -> CanvasPickerSheet("Добавить на доску", { picker = null }) {
-            listOf(CanvasTool.TEXT, CanvasTool.FORMULA).forEach { item -> CanvasChoice(canvasToolLabel(item), tool == item, enabled) { onTool(item); picker = null } }
+            listOf(CanvasTool.TEXT, CanvasTool.FORMULA, CanvasTool.HAND).forEach { item -> CanvasChoice(canvasToolLabel(item), tool == item, enabled) { onTool(item); picker = null } }
             if (onImage != null) TextButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = enabled, onClick = { picker = null; onImage() }) { Text("Картинка из галереи") }
-            Text("Выберите текст или формулу, затем коснитесь места на холсте.", style = MaterialTheme.typography.bodyMedium)
+            Text("Выберите текст или формулу, затем коснитесь холста. Рука перемещает холст; двумя пальцами можно двигать и масштабировать его в любом режиме.", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -225,8 +230,25 @@ internal fun CanvasBoardOptions(grid: CanvasGrid?, onGrid: (CanvasGrid) -> Unit,
 internal fun CanvasHelp(onDismiss: () -> Unit) {
     CanvasPickerSheet("Как рисовать", onDismiss) {
         Text("Два пальца — масштаб и перемещение. Кнопка в верхней панели вписывает доску в экран.")
+        Text("Выбор: коснитесь объекта и тяните его. Нижний круг меняет размер, верхний — угол. В нижней панели доступны поворот, размер и копирование. Вставленная картинка остаётся фоном и не выделяется.")
+        Text("Рука находится в меню «Текст». Двумя пальцами можно двигать холст в любом режиме.")
         Text("Задержите палец после штриха пером — умная фигура выровняет его. Ластик удаляет объект целиком.")
         Text("В «Фигурах» находятся линии и геометрия. В «Тексте» — текст и формулы; на локальной доске также доступна вставка картинки. Цвет и размер всегда под рукой.")
         Text("Общая доска, онлайн-сессия и отправленные картинки проходят через сервер без сквозного шифрования.")
+    }
+}
+
+/** Compact contextual actions; the six main tools remain reachable without scrolling. */
+@Composable
+internal fun CanvasSelectionActions(view: CanvasDrawingView?, enabled: Boolean, modifier: Modifier = Modifier) {
+    Surface(modifier.padding(4.dp), shape = RoundedCornerShape(16.dp), shadowElevation = 4.dp, tonalElevation = 3.dp) {
+        Row {
+            CanvasActionIcon(Icons.Default.Remove, "Уменьшить объект", enabled) { view?.scaleSelection(.85f) }
+            CanvasActionIcon(Icons.Default.Add, "Увеличить объект", enabled) { view?.scaleSelection(1.15f) }
+            CanvasActionIcon(Icons.Default.RotateLeft, "Повернуть влево на 15°", enabled) { view?.rotateSelection(-15f) }
+            CanvasActionIcon(Icons.Default.RotateRight, "Повернуть вправо на 15°", enabled) { view?.rotateSelection(15f) }
+            CanvasActionIcon(Icons.Default.ContentCopy, "Копировать объект", enabled) { view?.copySelection() }
+            CanvasActionIcon(Icons.Default.Close, "Снять выделение", enabled) { view?.clearSelection() }
+        }
     }
 }

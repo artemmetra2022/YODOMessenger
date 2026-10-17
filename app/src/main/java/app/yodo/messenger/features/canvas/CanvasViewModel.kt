@@ -102,6 +102,7 @@ class CanvasViewModel @Inject constructor(
         delay(600); operation.withLock { try { saveCurrent() } catch(e:Exception) { if(e is CancellationException) throw e; fail(e) } }
     } }
     private fun fail(e:Exception){ _state.update { it.copy(error=e.message?:"Операция не выполнена",busy=false) } }
+    fun reportEditError(message: String) { _state.update { it.copy(error=message) } }
     fun reportLimit(){_state.update { it.copy(error="Достигнут лимит: 300 объектов, 2048 точек в штрихе или 60000 точек на доске") }}
     fun clearFeedback(){_state.update{it.copy(error=null,notice=null)}}
     fun commit(doc:CanvasDocument){ if(_state.value.busy) return
@@ -129,7 +130,8 @@ class CanvasViewModel @Inject constructor(
             if(expected!=null)require(doc.objects.any{it==expected}){"Формула уже изменена или удалена. Откройте её заново."}
             val normalized=CanvasMath.normalize(source);val layout=CanvasMathNative.layout(normalized,size)
             val bounds=CanvasMathLayout.bounds(point,layout,doc)
-            val obj=CanvasObject(kind=CanvasObjectKind.FORMULA,points=bounds,text=normalized,fontSize=size,color=color)
+            val candidate=CanvasObject(kind=CanvasObjectKind.FORMULA,points=bounds,text=normalized,fontSize=size,color=color,rotation=expected?.rotation?:0f)
+        val obj=requireNotNull(CanvasObjectTransforms.fit(candidate,doc)) { "Формула не помещается на доске" }
             val next=doc.copy(objects=doc.objects.filterNot{it.id==expected?.id}+obj)
             CanvasLimits.validate(next);commit(next);true
         }catch(e:Exception){fail(e);false}
