@@ -30,5 +30,5 @@ sealed interface UpdateCheckResult {
     data class Available(val update: AppUpdate) : UpdateCheckResult
 
     /** Проверить не удалось (нет сети, ошибка API и т.п.). */
-    data class Failed(val message: String) : UpdateCheckResult
+    data class Failed(val message: String, val retryAfterMillis: Long? = null) : UpdateCheckResult
 }

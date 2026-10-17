@@ -99,6 +99,11 @@
             </intent-filter>
         </activity>
 
+        <service android:name=".features.update.InstantUpdateService"
+            android:exported="false" android:foregroundServiceType="dataSync" />
+        <activity android:name=".features.update.UpdateInstallActivity"
+            android:exported="false" android:theme="@style/Theme.YODOMessenger" />
+
         <!-- ==================== FIREBASE MESSAGING SERVICE ==================== -->
         <service
             android:name=".data.remote.fcm.YodoFirebaseMessagingService"

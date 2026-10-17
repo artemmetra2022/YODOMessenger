@@ -6,6 +6,12 @@ import app.yodo.messenger.domain.model.AppUpdate
 import app.yodo.messenger.domain.model.UpdateCheckResult
 import app.yodo.messenger.domain.repository.UpdateRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import retrofit2.HttpException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -26,6 +32,7 @@ import javax.inject.Singleton
 internal data class GithubAsset(
     val name: String = "",
     @SerialName("browser_download_url") val browserDownloadUrl: String = "",
+    val state: String = "uploaded",
     val size: Long = 0L
 )
 
@@ -59,6 +66,8 @@ class UpdateRepositoryImpl @Inject constructor(
     override val currentVersionName: String = BuildConfig.VERSION_NAME
 
     override val currentVersionCode: Int = BuildConfig.VERSION_CODE
+
+    private val downloadMutex = Mutex()
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
@@ -108,7 +117,7 @@ class UpdateRepositoryImpl @Inject constructor(
                 return UpdateCheckResult.UpToDate
             }
 
-            val apk = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+            val apk = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) && it.state == "uploaded" && it.size > 0 }
             UpdateCheckResult.Available(
                 AppUpdate(
                     versionName = parsed.first,
@@ -120,6 +129,16 @@ class UpdateRepositoryImpl @Inject constructor(
                     }
                 )
             )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HttpException) {
+            val headers = e.response()?.headers()
+            val retry = if (e.code() == 403 || e.code() == 429) {
+                headers?.get("Retry-After")?.toLongOrNull()?.times(1000L)
+                    ?: headers?.get("X-RateLimit-Reset")?.toLongOrNull()?.let { it * 1000L - System.currentTimeMillis() }
+                    ?: 60_000L
+            } else null
+            UpdateCheckResult.Failed("GitHub: HTTP ${e.code()}", retry?.coerceAtLeast(30_000L))
         } catch (e: Exception) {
             UpdateCheckResult.Failed(e.message ?: "Не удалось проверить обновления")
         }
@@ -130,39 +149,39 @@ class UpdateRepositoryImpl @Inject constructor(
         versionName: String,
         onProgress: (Long, Long) -> Unit
     ): File = withContext(Dispatchers.IO) {
-        val dir = File(context.cacheDir, APK_DIR).apply {
-            if (exists()) listFiles()?.forEach { it.delete() } else mkdirs()
-        }
-        val safeVersion = versionName.replace(Regex("[^0-9A-Za-z._-]"), "_")
-        val target = File(dir, "yodo-$safeVersion.apk")
-
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "YodoMessenger-Android")
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Сервер вернул ${response.code}")
-            }
-            val body = response.body ?: throw IllegalStateException("Пустой ответ сервера")
-            val total = body.contentLength()
-            onProgress(0L, total)
-            body.byteStream().use { input ->
-                target.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
+        downloadMutex.withLock {
+            val dir = File(context.cacheDir, APK_DIR).apply { check(isDirectory || mkdirs()) { "Не удалось создать папку обновлений" } }
+            val safeVersion = versionName.replace(Regex("[^0-9A-Za-z._-]"), "_")
+            val target = File(dir, "yodo-$safeVersion.apk")
+            val partial = File(dir, "yodo-$safeVersion.apk.part")
+            try {
+                val request = Request.Builder().url(url).header("User-Agent", "YodoMessenger-Android").build()
+                client.newCall(request).execute().use { response ->
+                    check(response.isSuccessful) { "Сервер вернул ${response.code}" }
+                    val body = response.body ?: error("Пустой ответ сервера")
+                    val total = body.contentLength()
                     var downloaded = 0L
-                    var read = input.read(buffer)
-                    while (read != -1) {
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        onProgress(downloaded, total)
-                        read = input.read(buffer)
+                    onProgress(0L, total)
+                    body.byteStream().use { input ->
+                        partial.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                onProgress(downloaded, total)
+                            }
+                        }
                     }
+                    check(downloaded > 0L && (total < 0 || downloaded == total)) { "APK скачан не полностью" }
                 }
-            }
+                currentCoroutineContext().ensureActive()
+                check(partial.renameTo(target)) { "Не удалось сохранить APK" }
+                target
+            } finally { partial.delete() }
         }
-        target
     }
 
     /**

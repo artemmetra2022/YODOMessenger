@@ -16,7 +16,7 @@ import java.io.File
 import javax.inject.Inject
 
 /** Фазы проверки/загрузки обновления — управляют тем, что показывать в UI. */
-enum class UpdatePhase { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, DOWNLOADING, READY_TO_INSTALL, ERROR }
+enum class UpdatePhase { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, WAITING_FOR_APK, DOWNLOADING, READY_TO_INSTALL, ERROR }
 
 data class UpdateUiState(
     val currentVersionName: String = "",
@@ -27,6 +27,7 @@ data class UpdateUiState(
     val downloadedBytes: Long = 0L,
     val totalBytes: Long? = null,
     val downloadedFile: File? = null,
+    val instantDownload: Boolean = false,
     val message: String? = null
 )
 
@@ -37,7 +38,8 @@ sealed interface UpdateEvent {
 }
 
 @HiltViewModel
-class UpdateViewModel @Inject constructor(
+class UpdateViewModel @Inject internal constructor(
+    private val instantStore: InstantUpdateStore,
     private val updateRepository: UpdateRepository
 ) : ViewModel() {
 
@@ -48,6 +50,39 @@ class UpdateViewModel @Inject constructor(
 
     private val _events = Channel<UpdateEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
+
+    init {
+        viewModelScope.launch {
+            instantStore.state.collect { snapshot ->
+                if (snapshot.phase == InstantPhase.IDLE) {
+                    if (_state.value.instantDownload) _state.update { it.copy(phase = UpdatePhase.IDLE,
+                        instantDownload = false, downloadedFile = null, message = null) }
+                    return@collect
+                }
+                val phase = when (snapshot.phase) {
+                    InstantPhase.WAITING -> UpdatePhase.WAITING_FOR_APK
+                    InstantPhase.DOWNLOADING -> UpdatePhase.DOWNLOADING
+                    InstantPhase.READY -> UpdatePhase.READY_TO_INSTALL
+                    else -> UpdatePhase.ERROR
+                }
+                _state.update { current -> current.copy(phase = phase, instantDownload = true,
+                    progressPercent = snapshot.totalBytes?.let { ((snapshot.downloadedBytes.toDouble() / it) * 100).toInt().coerceIn(0,100) },
+                    downloadedBytes = snapshot.downloadedBytes, totalBytes = snapshot.totalBytes,
+                    downloadedFile = snapshot.file, message = snapshot.message,
+                    update = current.update?.takeIf { it.versionCode == snapshot.versionCode } ?: snapshot.versionCode.takeIf { it > 0 }?.let {
+                        AppUpdate(snapshot.versionName, it, "", null, "https://github.com/${app.yodo.messenger.BuildConfig.GITHUB_REPO}/releases")
+                    }) }
+            }
+        }
+    }
+
+    fun startInstantDownload() {
+        val update = _state.value.update ?: return
+        if (!canStartInstantDownload(update, updateRepository.currentVersionCode) || instantStore.state.value.active) return
+        instantStore.start(update.versionName, update.versionCode)
+    }
+
+    fun cancelInstantDownload() = instantStore.cancel()
 
     // Авто-проверка выполняется один раз за жизнь Activity-скоупной ViewModel,
     // чтобы не дёргать GitHub при каждой рекомпозиции/повороте.
@@ -65,7 +100,7 @@ class UpdateViewModel @Inject constructor(
 
     private fun check(force: Boolean) {
         val phase = _state.value.phase
-        if (phase == UpdatePhase.CHECKING || phase == UpdatePhase.DOWNLOADING) return
+        if (instantStore.state.value.active || instantStore.state.value.phase == InstantPhase.READY || phase == UpdatePhase.CHECKING || phase == UpdatePhase.DOWNLOADING) return
         viewModelScope.launch {
             _state.update { it.copy(phase = UpdatePhase.CHECKING, message = null, update = null) }
             when (val result = updateRepository.checkForUpdate(force = force)) {
@@ -88,7 +123,7 @@ class UpdateViewModel @Inject constructor(
             _events.trySend(UpdateEvent.OpenUrl(update.releasePageUrl))
             return
         }
-        if (_state.value.phase == UpdatePhase.DOWNLOADING) return
+        if (instantStore.state.value.active || _state.value.phase == UpdatePhase.DOWNLOADING) return
 
         viewModelScope.launch {
             _state.update { it.copy(phase = UpdatePhase.DOWNLOADING, progressPercent = null, downloadedBytes = 0L, totalBytes = null, downloadedFile = null, message = null) }
@@ -101,6 +136,8 @@ class UpdateViewModel @Inject constructor(
                     it.copy(phase = UpdatePhase.READY_TO_INSTALL, progressPercent = null, downloadedFile = file)
                 }
                 _events.send(UpdateEvent.InstallApk(file))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
@@ -115,7 +152,9 @@ class UpdateViewModel @Inject constructor(
 
     /** Повторная попытка установки уже скачанного файла (после выдачи разрешения). */
     fun installDownloaded() {
-        _state.value.downloadedFile?.let { _events.trySend(UpdateEvent.InstallApk(it)) }
+        val file = _state.value.downloadedFile
+        if (file != null && file.isFile && file.length() > 0) _events.trySend(UpdateEvent.InstallApk(file))
+        else _state.update { it.copy(phase = UpdatePhase.ERROR, message = "APK больше недоступен. Проверьте обновления и скачайте его повторно.") }
     }
 
     /** Открыть произвольную ссылку в браузере (страница релиза, репозиторий). */

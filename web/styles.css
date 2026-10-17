@@ -941,3 +941,8 @@ body {
   #support-faq-panel { max-height: 55vh; }
 }
 
+
+/* Separate product landing page; scoped to the login entry link. */
+.auth-presentation-link { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; margin: -12px 0 16px; padding: 8px; font-size: 14px; line-height: 1.5; color: var(--accent); text-decoration: none; border: 1px solid var(--bg-input); border-radius: 8px; }
+.auth-presentation-link:hover { text-decoration: underline; }
+.auth-presentation-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
