@@ -46,6 +46,8 @@ internal fun MessageFooter(
     textColor: Color,
     onReact: (String) -> Unit,
     modifier: Modifier = Modifier,
+    // false — FlowRow не растягивается на всю ширину (посты каналов: пузырь по размеру контента).
+    fillWidth: Boolean = true,
     metadata: @Composable RowScope.() -> Unit
 ) {
     val visible = reactions.filterValues { it.isNotEmpty() }
@@ -58,7 +60,7 @@ internal fun MessageFooter(
         return
     }
     FlowRow(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(top = 4.dp, bottom = 6.dp),
+        modifier = (if (fillWidth) modifier.fillMaxWidth() else modifier).padding(horizontal = 8.dp).padding(top = 4.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {

@@ -13,6 +13,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -175,39 +178,45 @@ fun UserProfileScreen(
                         .verticalScroll(rememberScrollState())
                 ) {
                     // ════════════════════════════════════════
-                    // Шапка с градиентом — как у канала
+                    // Шапка: двухцветный градиент, аватар в кольце, имя, чипы, статус
                     // ════════════════════════════════════════
+                    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    val effectivelyOnline = isPresenceEffectivelyOnline(state.presence)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(colorTheme.primary.copy(alpha = 0.14f), Color.Transparent)
+                                    listOf(
+                                        colorTheme.primary.copy(alpha = 0.24f),
+                                        colorTheme.accent.copy(alpha = 0.08f),
+                                        Color.Transparent
+                                    )
                                 )
                             )
                             .padding(top = padding.calculateTopPadding())
-                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                            .padding(horizontal = 24.dp)
+                            .padding(top = 8.dp, bottom = 22.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Аватар в градиентном кольце — как ChannelAvatarRing
                         UserAvatarRing(
                             displayName = user.displayName,
                             photoUrl = user.photoUrl,
                             avatarBase64 = user.avatarBase64,
-                            isOnline = isPresenceEffectivelyOnline(state.presence),
+                            isOnline = effectivelyOnline,
                             colorTheme = colorTheme
                         )
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        // Имя
                         // Имя + галочка разработчика
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = user.displayName,
                                 style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.ExtraBold,
-                                textAlign = TextAlign.Center
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                             if (isDeveloperAccount(user.email)) {
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -215,17 +224,65 @@ fun UserProfileScreen(
                             }
                         }
 
-                        // @username
-                        user.username?.let {
-                            Text(
-                                text = "@$it",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = colorTheme.primary,
-                                modifier = Modifier.padding(top = 2.dp)
-                            )
+                        // Статус онлайн / «был(а)…» (обновляется каждую секунду)
+                        state.presence?.let { presence ->
+                            val statusText = when {
+                                effectivelyOnline -> stringResource(R.string.user_profile_online)
+                                presence.lastSeenMillis > 0 ->
+                                    stringResource(R.string.chat_list_was_online, formatProfileLastSeen(presence.lastSeenMillis))
+                                else -> null
+                            }
+                            statusText?.let {
+                                Row(
+                                    modifier = Modifier.padding(top = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (effectivelyOnline) Color(0xFF22C55E) else Color.Gray.copy(alpha = 0.6f))
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (effectivelyOnline) colorTheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
 
-                        // НОВОЕ (батч 7): эмодзи-статус и текстовый статус пользователя.
+                        // Чипы: @username и публичный ID (тап — копирование)
+                        val username = user.username
+                        val publicId = user.publicId?.takeIf { it.isNotBlank() }
+                        if (!username.isNullOrBlank() || publicId != null) {
+                            Row(
+                                modifier = Modifier.padding(top = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (!username.isNullOrBlank()) {
+                                    ProfileChip(
+                                        text = "@$username",
+                                        accent = colorTheme.primary,
+                                        filled = true,
+                                        onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString("@$username")) }
+                                    )
+                                }
+                                if (publicId != null) {
+                                    ProfileChip(
+                                        text = "ID $publicId",
+                                        accent = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        filled = false,
+                                        onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(publicId)) }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Эмодзи-статус и текстовый статус
                         val statusLine = listOf(user.emojiStatus, user.customStatus)
                             .mapNotNull { it?.takeIf { s -> s.isNotBlank() } }
                             .joinToString(" ")
@@ -235,41 +292,12 @@ fun UserProfileScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colorTheme.primary,
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(top = 4.dp)
+                                modifier = Modifier
+                                    .padding(top = 12.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(colorTheme.primary.copy(alpha = 0.10f))
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
                             )
-                        }
-
-                        // НОВОЕ (AE): публичный ID пользователя (для админов — чтобы забанить именно этого человека).
-                        user.publicId?.takeIf { it.isNotBlank() }?.let { pid ->
-                            Text(
-                                text = "ID: $pid",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp)
-                            )
-                        }
-
-                        // Статус онлайн
-                        // НОВОЕ (баг 12): статус пересчитывается каждую секунду — «в сети»
-                        // гаснет сам при устаревании (процесс собеседника убит без onStop),
-                        // а «был(а)…» показывает живое время и обновляется в реальном времени.
-                        state.presence?.let { presence ->
-                            val effectivelyOnline = isPresenceEffectivelyOnline(presence)
-                            val statusText = when {
-                                effectivelyOnline -> stringResource(R.string.user_profile_online)
-                                presence.lastSeenMillis > 0 ->
-                                    stringResource(R.string.chat_list_was_online, formatProfileLastSeen(presence.lastSeenMillis))
-                                else -> null
-                            }
-                            statusText?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (effectivelyOnline) colorTheme.primary
-                                    else Color.Gray,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
                         }
 
                         // Краткое bio
@@ -281,77 +309,74 @@ fun UserProfileScreen(
                                 textAlign = TextAlign.Center,
                                 maxLines = 4,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 8.dp)
+                                modifier = Modifier.padding(top = 12.dp)
                             )
                         }
                     }
 
                     // ════════════════════════════════════════
-                    // Кнопка "Написать"
+                    // Действия: «Написать» и блокировка в одном ряду
                     // ════════════════════════════════════════
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
-                            .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(25.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(colorTheme.primary, colorTheme.accent)
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Button(
-                            onClick = { viewModel.openChat() },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                            modifier = Modifier.fillMaxSize()
+                        Box(
+                            modifier = Modifier
+                                .weight(1.4f)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(Brush.horizontalGradient(listOf(colorTheme.primary, colorTheme.accent))),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = { viewModel.openChat() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    stringResource(R.string.user_profile_send_message),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        val blockColor = if (isBlocked) colorTheme.primary else Color(0xFFE53935)
+                        Button(
+                            onClick = { viewModel.toggleBlock() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = blockColor.copy(alpha = 0.12f),
+                                contentColor = blockColor
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp),
+                            shape = RoundedCornerShape(26.dp)
+                        ) {
+                            Icon(Icons.Filled.Block, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                stringResource(R.string.user_profile_send_message),
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
+                                if (isBlocked) "Разблок." else "Блок",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
                     }
 
-                    // НОВОЕ (блокировка): кнопка заблокировать / разблокировать.
-                    Spacer(modifier = Modifier.height(10.dp))
-                    val blockColor = if (isBlocked) colorTheme.primary else Color(0xFFE53935)
-                    Button(
-                        onClick = { viewModel.toggleBlock() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = blockColor.copy(alpha = 0.12f),
-                            contentColor = blockColor
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .padding(horizontal = 20.dp),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.Block,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            if (isBlocked) "Разблокировать" else "Заблокировать",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // НОВОЕ (AD): админская глобальная блокировка аккаунта во всём приложении (только 2 почты).
+                    // Админская глобальная блокировка аккаунта (только 2 почты).
                     if (viewModel.isAppAdmin) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Button(
@@ -366,15 +391,16 @@ fun UserProfileScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
-                                .padding(horizontal = 20.dp),
+                                .padding(horizontal = 16.dp),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Icon(Icons.Filled.Block, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 if (isGloballyBlocked) "Снять блокировку приложения" else "Заблокировать в приложении (админ)",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -429,12 +455,18 @@ fun UserProfileScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp)
-                                .shadow(1.dp, RoundedCornerShape(16.dp))
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(20.dp))
                                 .background(MaterialTheme.colorScheme.surface)
+                                .border(
+                                    0.6.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                    RoundedCornerShape(20.dp)
+                                )
                         ) {
+                            val infoClipboard = androidx.compose.ui.platform.LocalClipboardManager.current
                             extendedFields.forEachIndexed { index, field ->
                                 ProfileInfoRow(
+                                    onClick = { infoClipboard.setText(androidx.compose.ui.text.AnnotatedString(field.value)) },
                                     icon = field.icon,
                                     label = field.label,
                                     value = field.value,
@@ -564,6 +596,29 @@ private fun UserAvatarRing(
     }
 }
 
+/** Небольшой чип под именем (@username, ID). Тап копирует значение. */
+@Composable
+private fun ProfileChip(text: String, accent: Color, filled: Boolean, onClick: () -> Unit) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Medium,
+        color = accent,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (filled) accent.copy(alpha = 0.12f) else Color.Transparent)
+            .border(
+                width = if (filled) 0.dp else 0.8.dp,
+                color = accent.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(50)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+    )
+}
+
 // НОВОЕ (email-статус): контейнер для поля расширенного профиля. isVerified используется
 // только строкой email — null означает "бейдж не показываем" (для остальных полей).
 private data class ProfileExtendedField(
@@ -580,11 +635,13 @@ private fun ProfileInfoRow(
     label: String,
     value: String,
     colorTheme: app.yodo.messenger.ui.theme.ColorTheme,
-    isVerified: Boolean? = null
+    isVerified: Boolean? = null,
+    onClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -598,7 +655,7 @@ private fun ProfileInfoRow(
             Icon(icon, contentDescription = null, tint = colorTheme.primary, modifier = Modifier.size(20.dp))
         }
         Spacer(modifier = Modifier.width(12.dp))
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 label,
                 style = MaterialTheme.typography.labelSmall,
@@ -612,7 +669,7 @@ private fun ProfileInfoRow(
         }
         // НОВОЕ (email-статус): бейдж "подтверждена/не подтверждена" рядом с email в чужом профиле.
         if (isVerified != null) {
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.width(8.dp))
             Icon(
                 imageVector = if (isVerified) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
                 contentDescription = if (isVerified) "Почта подтверждена" else "Почта не подтверждена",

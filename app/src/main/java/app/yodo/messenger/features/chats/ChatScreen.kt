@@ -2305,7 +2305,7 @@ private fun MessageBubble(
                         // по краю воздух, как в обычной переписке.
                         .widthIn(
                             min = 72.dp,
-                            max = if (isChannel) maxWidth * 0.92f else maxWidth * 0.78f
+                            max = if (isChannel) maxWidth * 0.84f else maxWidth * 0.78f
                         )
                         .squish(bubbleSource, strength = 0.5f)
                         .shadow(
@@ -2639,6 +2639,7 @@ private fun MessageBubble(
                         accent = colorTheme.primary,
                         textColor = textColor,
                         onReact = onReact,
+                        fillWidth = !isChannel,
                         modifier = Modifier.align(Alignment.End)
                     ) {
                         if (message.isEdited) {
@@ -2675,39 +2676,40 @@ private fun MessageBubble(
                                 recipientCount = message.receiptRecipientCount, readCount = message.receiptReadCount)
                         }
                     }
-                    // ИСПРАВЛЕНО (кнопка "Комментарии" вылезала за пределы сообщения и
-                    // выглядела отдельным чипом другого цвета): раньше это был отдельный Row
-                    // СНАРУЖИ пузыря сообщения, со своим фоном (surfaceVariant), скруглением
-                    // и ограничением по ширине в 280dp — из-за чего кнопка могла быть шире
-                    // или уже самого текста сообщения и "плавала" отдельно от него. Теперь
-                    // это часть того же пузыря: разделительная линия на всю ширину, а под
-                    // ней — строка "Комментарии · N" тем же текстовым цветом, что и
-                    // остальное сообщение (textColor), без отдельного фона/цвета.
                     if (isChannel && !isOfficialChannel) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            thickness = 1.dp,
-                            color = textColor.copy(alpha = 0.15f)
-                        )
+                        // Кнопка комментариев — компактная «таблетка» внутри пузыря. Без fillMaxWidth
+                        // и без полноширинного разделителя: именно они раньше раздували пузырь
+                        // поста почти на весь экран. Теперь ширину задаёт контент (текст/медиа),
+                        // а таблетка лишь задаёт разумный минимум.
+                        val hasComments = message.commentsCount > 0
+                        // Свой пост: пузырь окрашен в primary — берём цвет текста пузыря, иначе таблетка сольётся.
+                        val pillAccent = if (isOwnMessage) textColor else colorTheme.primary
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+                                .widthIn(min = 150.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(pillAccent.copy(alpha = if (hasComments) 0.20f else 0.12f))
                                 .clickable(onClick = onCommentsClick)
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.Center,
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Comment, contentDescription = null,
-                                tint = textColor.copy(alpha = 0.7f), modifier = Modifier.size(18.dp)
+                                tint = pillAccent, modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                if (message.commentsCount > 0) "Комментарии · ${message.commentsCount}" else "Комментировать",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = textColor.copy(alpha = 0.7f),
+                                if (hasComments) "${message.commentsCount} ${pluralComments(message.commentsCount)}"
+                                else "Комментировать",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = pillAccent,
                                 maxLines = 1
+                            )
+                            Icon(
+                                Icons.Filled.ChevronRight, contentDescription = null,
+                                tint = pillAccent.copy(alpha = 0.8f), modifier = Modifier.size(16.dp)
                             )
                         }
                     }
