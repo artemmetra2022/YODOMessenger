@@ -1392,7 +1392,6 @@ fun ChatScreen(
                                     onMicPressEnd = { stopVoiceRecordingToPreview() },
                                     colorTheme = colorTheme,
                                     placeholder = when {
-                                        isChannel && uiState.isAdmin -> "Вы админ, вам можно писать"
                                         isSupportChat -> "Опишите вопрос оператору..."
                                         else -> "Сообщение..."
                                     },
