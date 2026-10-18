@@ -202,6 +202,27 @@ class WeatherRepository @Inject constructor() {
         return bundle
     }
 
+    /**
+     * Проверка названия города (например, при регистрации).
+     * true — город найден; false — сервис ответил, что такого города нет;
+     * null — проверить не удалось (нет сети, сервис геокодинга недоступен): в этом случае
+     * вызывающий код не должен блокировать пользователя.
+     */
+    suspend fun cityExists(city: String): Boolean? {
+        val normalized = city.trim()
+        if (normalized.isEmpty()) return false
+        return try {
+            geocode(normalized)
+            true
+        } catch (e: CityNotFoundException) {
+            false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private suspend fun geocode(city: String): NominatimPlace {
         val cacheKey = city.lowercase(Locale.ROOT)
         places[cacheKey]?.let { return it }

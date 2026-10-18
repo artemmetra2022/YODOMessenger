@@ -25,11 +25,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.LocationCity
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -73,6 +77,9 @@ fun RegisterScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    // НОВОЕ: город для погоды. Необязателен — можно отказаться галочкой «Не указывать».
+    var weatherCity by remember { mutableStateOf("") }
+    var skipCity by remember { mutableStateOf(false) }
     val passwordStrength = remember(password) { evaluatePasswordStrength(password) }
     val isPasswordAcceptable = passwordStrength.level == PasswordStrengthLevel.STRONG
 
@@ -220,6 +227,48 @@ fun RegisterScreen(
                 PasswordStrengthIndicator(result = passwordStrength)
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // НОВОЕ: город для прогноза погоды на главном экране. Можно отказаться.
+            OutlinedTextField(
+                value = weatherCity,
+                onValueChange = { weatherCity = it.take(80) },
+                enabled = !skipCity,
+                label = { Text("Ваш город (для погоды)") },
+                leadingIcon = { Icon(Icons.Filled.LocationCity, contentDescription = null) },
+                supportingText = {
+                    Text(
+                        if (skipCity) "Город не указан — погода покажет город по умолчанию. Изменить можно в Настройки → Чаты."
+                        else "Необязательно. Изменить можно позже в настройках."
+                    )
+                },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    keyboardType = KeyboardType.Text
+                ),
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { skipCity = !skipCity }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = skipCity,
+                    onCheckedChange = { skipCity = it },
+                    colors = CheckboxDefaults.colors(checkedColor = colorTheme.primary)
+                )
+                Text(
+                    "Не указывать город",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+
             if (uiState is AuthUiState.Error) {
                 Text(
                     text = (uiState as AuthUiState.Error).message,
@@ -233,7 +282,12 @@ fun RegisterScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Button(
-                onClick = { viewModel.register(name, username, email, password) },
+                onClick = {
+                    viewModel.register(
+                        name, username, email, password,
+                        weatherCity = if (skipCity) null else weatherCity
+                    )
+                },
                 enabled = uiState !is AuthUiState.Loading && isPasswordAcceptable,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = colorTheme.primary),
