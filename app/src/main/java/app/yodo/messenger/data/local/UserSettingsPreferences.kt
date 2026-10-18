@@ -293,7 +293,11 @@ class UserSettingsPreferences @Inject constructor(
     suspend fun setCompactChatList(enabled: Boolean) { context.settingsDataStore.edit { it[compactChatListKey] = enabled } }
     suspend fun setHideChatListPreviews(enabled: Boolean) { context.settingsDataStore.edit { it[hideChatListPreviewsKey] = enabled } }
     suspend fun setChatListSortOrder(order: ChatListSortOrder) { context.settingsDataStore.edit { it[chatListSortOrderKey] = order.name } }
-    suspend fun setWeatherCity(city: String) { context.settingsDataStore.edit { it[weatherCityKey] = city.trim().take(80) } }
+    suspend fun setWeatherCity(city: String) {
+        context.settingsDataStore.edit { it[weatherCityKey] = city.trim().take(80) }
+        // Виджет погоды сразу подхватывает новый город.
+        app.yodo.messenger.features.widget.WidgetScheduler.requestRefresh(context)
+    }
     suspend fun setWeatherCardEnabled(enabled: Boolean) { context.settingsDataStore.edit { it[weatherCardEnabledKey] = enabled } }
 
     suspend fun setPin(pin: String) {

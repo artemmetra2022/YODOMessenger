@@ -687,4 +687,34 @@
     <string name="security_own_key_warning">Ключ аккаунта не совпадает с ключом этого устройства или ещё не опубликован. Автоматической замены нет. Старый ключ не переносится: история другого устройства может остаться недоступной.</string>
     <string name="security_own_replace_ack">Я понимаю: этот ключ станет активным, другое устройство может перестать расшифровывать новые сообщения; контакты должны сверить ключ заново</string>
     <string name="security_activate_own">Активировать ключ этого устройства</string>
+
+    <!-- Виджеты рабочего стола -->
+    <string name="widget_unread_label">Непрочитанные</string>
+    <string name="widget_unread_description">Число непрочитанных сообщений и список чатов на рабочем столе</string>
+    <string name="widget_weather_label">Погода</string>
+    <string name="widget_weather_description">Погода в вашем городе: температура, ветер и почасовой прогноз</string>
+    <string name="widget_sign_in">Войдите в аккаунт YODO</string>
+    <string name="widget_no_data">Нет данных. Откройте приложение</string>
+    <string name="widget_all_read">Всё прочитано</string>
+    <string name="widget_chats_hidden">Названия чатов скрыты: включена блокировка или скрыты превью</string>
+    <string name="widget_updated">Обновлено %1$s</string>
+    <string name="widget_feels_like">Ощущается как %1$s</string>
+    <string name="widget_wind">Ветер %1$s м/с</string>
+    <string name="widget_humidity">Влажность %1$d%%</string>
+    <string name="widget_precip">Осадки %1$d%%</string>
+    <plurals name="widget_unread_messages">
+        <item quantity="one">непрочитанное сообщение</item>
+        <item quantity="few">непрочитанных сообщения</item>
+        <item quantity="many">непрочитанных сообщений</item>
+        <item quantity="other">непрочитанных сообщений</item>
+    </plurals>
+    <plurals name="widget_in_chats">
+        <item quantity="one">в %d чате</item>
+        <item quantity="few">в %d чатах</item>
+        <item quantity="many">в %d чатах</item>
+        <item quantity="other">в %d чатах</item>
+    </plurals>
+
+    <string name="widget_combined_label">Погода и непрочитанные</string>
+    <string name="widget_combined_description">Погода и непрочитанные сообщения в одном виджете</string>
 </resources>

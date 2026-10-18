@@ -40,6 +40,21 @@ class YodoApp : Application() {
             PresenceLifecycleObserver(presenceRepository, userSettingsPreferences)
         )
 
+        // Виджеты рабочего стола: обновляем, когда приложение уходит в фон (счётчики
+        // непрочитанных уже изменились) и при входе/выходе из аккаунта.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                    runCatching { app.yodo.messenger.features.widget.WidgetScheduler.requestRefresh(this) }
+                }
+            }
+        )
+        runCatching {
+            com.google.firebase.auth.FirebaseAuth.getInstance().addAuthStateListener {
+                app.yodo.messenger.features.widget.WidgetScheduler.requestRefresh(this)
+            }
+        }
+
         // Безопасная инициализация сессии: оборачиваем в runCatching,
         // чтобы краш Firebase (например, отсутствие google-services.json)
         // не убивал всё приложение при старте.

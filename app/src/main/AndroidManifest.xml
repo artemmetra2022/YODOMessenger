@@ -118,6 +118,42 @@
             android:name=".data.remote.fcm.NotificationActionReceiver"
             android:exported="false" />
 
+        <!-- ==================== ВИДЖЕТЫ РАБОЧЕГО СТОЛА (Glance) ==================== -->
+        <receiver
+            android:name=".features.widget.UnreadWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_unread_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/unread_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".features.widget.WeatherWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_weather_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/weather_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".features.widget.CombinedWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_combined_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/combined_widget_info" />
+        </receiver>
+
         <!-- ==================== FILE PROVIDER (для шаринга фото) ==================== -->
         <provider
             android:name="androidx.core.content.FileProvider"

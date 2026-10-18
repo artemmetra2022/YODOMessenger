@@ -53,12 +53,16 @@ class MainActivity : ComponentActivity() {
     private val pendingChannelDeepLink = mutableStateOf<String?>(null)
     private data class ReminderTarget(val uid: String, val chatId: String, val messageId: String, val topicId: String?)
     private val pendingReminder = mutableStateOf<ReminderTarget?>(null)
+    // Нажатие на виджет рабочего стола («Непрочитанные» / «Погода»).
+    private data class WidgetTarget(val uid: String, val target: String, val chatId: String?)
+    private val pendingWidgetTarget = mutableStateOf<WidgetTarget?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingChannelDeepLink.value = extractChannelIdFromIntent(intent)
         pendingReminder.value = extractReminderTarget(intent)
+        pendingWidgetTarget.value = extractWidgetTarget(intent)
 
         val startDestination = if (authRepository.isLoggedIn()) {
             Routes.ChatList.route
@@ -213,6 +217,23 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
+                            LaunchedEffect(pendingWidgetTarget.value, authRepository.isLoggedIn()) {
+                                pendingWidgetTarget.value?.let { t ->
+                                    // Открываем только для того аккаунта, чьи данные показывал виджет.
+                                    if (authRepository.isLoggedIn() &&
+                                        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid == t.uid
+                                    ) {
+                                        when (t.target) {
+                                            app.yodo.messenger.features.widget.WidgetIntents.TARGET_CHAT ->
+                                                t.chatId?.let { navController.navigate(Routes.Chat.createRoute(it)) }
+                                            app.yodo.messenger.features.widget.WidgetIntents.TARGET_WEATHER ->
+                                                navController.navigate(Routes.Weather.route)
+                                        }
+                                    }
+                                    pendingWidgetTarget.value = null
+                                }
+                            }
+
                             // НОВОЕ (ссылка-приглашение и шаринг): при открытии приложения по ссылке-
                             // приглашению (yodo://channel/<chatId>) — сразу переходит к профилю канала.
                             // Авторизованный и неавторизованный пользователь попадает сразу в обычный
@@ -235,9 +256,20 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingReminder.value = extractReminderTarget(intent)
+        pendingWidgetTarget.value = extractWidgetTarget(intent)
         // НОВОЕ: launchMode="singleTask" — при повторном открытии ссылки, когда активити
         // уже запущена, новый intent приходит сюда, а не в onCreate.
         extractChannelIdFromIntent(intent)?.let { pendingChannelDeepLink.value = it }
+    }
+
+    private fun extractWidgetTarget(intent: android.content.Intent?): WidgetTarget? {
+        if (intent?.action != app.yodo.messenger.features.widget.WidgetIntents.ACTION_OPEN) return null
+        val target = intent.getStringExtra(app.yodo.messenger.features.widget.WidgetIntents.EXTRA_TARGET) ?: return null
+        val uid = intent.getStringExtra(app.yodo.messenger.features.widget.WidgetIntents.EXTRA_UID)
+            ?.takeIf { it.isNotBlank() } ?: return null
+        val chat = intent.getStringExtra(app.yodo.messenger.features.widget.WidgetIntents.EXTRA_CHAT_ID)
+            ?.takeIf { it.isNotBlank() && '/' !in it }
+        return WidgetTarget(uid, target, chat)
     }
 
     private fun extractReminderTarget(intent: android.content.Intent?): ReminderTarget? {

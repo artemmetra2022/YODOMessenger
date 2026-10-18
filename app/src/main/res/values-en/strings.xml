@@ -659,4 +659,30 @@ Try later — people appear when they open this screen.</string>
     <string name="security_own_key_warning">The account key differs from this device or has not been published. It is never replaced automatically. The old private key is not transferred: other-device history may remain unreadable.</string>
     <string name="security_own_replace_ack">I understand: this key becomes active, another device may stop decrypting new messages, and contacts must verify the new key</string>
     <string name="security_activate_own">Activate this device’s key</string>
+
+    <!-- Home screen widgets -->
+    <string name="widget_unread_label">Unread</string>
+    <string name="widget_unread_description">Unread message count and chat list on your home screen</string>
+    <string name="widget_weather_label">Weather</string>
+    <string name="widget_weather_description">Weather in your city: temperature, wind and hourly forecast</string>
+    <string name="widget_sign_in">Sign in to YODO</string>
+    <string name="widget_no_data">No data yet. Open the app</string>
+    <string name="widget_all_read">All caught up</string>
+    <string name="widget_chats_hidden">Chat names are hidden: app lock or hidden previews are on</string>
+    <string name="widget_updated">Updated %1$s</string>
+    <string name="widget_feels_like">Feels like %1$s</string>
+    <string name="widget_wind">Wind %1$s m/s</string>
+    <string name="widget_humidity">Humidity %1$d%%</string>
+    <string name="widget_precip">Precipitation %1$d%%</string>
+    <plurals name="widget_unread_messages">
+        <item quantity="one">unread message</item>
+        <item quantity="other">unread messages</item>
+    </plurals>
+    <plurals name="widget_in_chats">
+        <item quantity="one">in %d chat</item>
+        <item quantity="other">in %d chats</item>
+    </plurals>
+
+    <string name="widget_combined_label">Weather and unread</string>
+    <string name="widget_combined_description">Weather and unread messages in one widget</string>
 </resources>

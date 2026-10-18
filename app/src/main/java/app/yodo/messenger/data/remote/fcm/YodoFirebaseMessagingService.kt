@@ -54,6 +54,9 @@ class YodoFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
+        // Новое сообщение → обновить виджет «Непрочитанные».
+        runCatching { app.yodo.messenger.features.widget.WidgetScheduler.requestRefresh(applicationContext) }
+
         // НОВОЕ (push о модерации): отдельная ветка для событий модерации
         // (глобальный бан/разбан) — другой payload (title/body, без chatId),
         // поэтому не смешивается с обработкой обычных сообщений чата ниже.
