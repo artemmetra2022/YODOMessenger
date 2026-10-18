@@ -3542,6 +3542,9 @@ private fun ChannelBottomBar(
     onSubscribe: () -> Unit
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
+        // Интерфейс edge-to-edge, поэтому без отступа под системную навигацию панель
+        // уходила под неё. Отступ внутри Surface, чтобы фон шёл под навигацией.
+        Box(modifier = Modifier.navigationBarsPadding()) {
         if (!isSubscribed && !isOfficial) {
             Box(
                 modifier = Modifier
@@ -3591,6 +3594,7 @@ private fun ChannelBottomBar(
                 )
             }
         }
+        }
     }
 }
 
@@ -3608,7 +3612,7 @@ private fun VoiceRecordingBar(
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(

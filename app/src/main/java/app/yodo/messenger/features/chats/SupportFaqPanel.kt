@@ -47,7 +47,7 @@ internal fun SupportFaqPanel(
     val maximum = (config.screenHeightDp * fraction).dp.coerceAtMost(640.dp)
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp, shadowElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
-        Column(Modifier.fillMaxWidth().heightIn(max = maximum)) {
+        Column(Modifier.navigationBarsPadding().fillMaxWidth().heightIn(max = maximum)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SupportBotAvatar(size = 44.dp, accent = colorTheme.primary)
