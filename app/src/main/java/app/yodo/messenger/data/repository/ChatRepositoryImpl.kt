@@ -1577,10 +1577,12 @@ class ChatRepositoryImpl @Inject constructor(
                     // а при первом чтении — встроенный SupportFaqData.sections.
                     return@addSnapshotListener
                 }
+                // Разбор без рефлексии (как в SchoolRepositoryImpl): в release-сборке
+                // R8 переименовывает поля POJO, и toObject бросает
+                // «No setter/field for … found on class …» внутри listener'а.
                 val sections = snapshot
                     ?.takeIf { it.exists() }
-                    ?.toObject(SupportFaqFirestore::class.java)
-                    ?.toDomain()
+                    ?.parseSupportFaq()
                 trySend(sections)
             }
         awaitClose { reg.remove() }
@@ -2337,42 +2339,39 @@ class ChatRepositoryImpl @Inject constructor(
     }
 }
 
-// ─────────────────────── POJO для toObject (FAQ-бот поддержки, config/supportFaq)
+// ─────────────────────── Разбор config/supportFaq без рефлексии (FAQ-бот поддержки)
 
 /**
- * POJO-обёртки документа config/supportFaq — его пишет веб-админка (раздел «FAQ-бот»).
- * Пустой список или разделы без вопросов не публикуем: toDomain() вернёт null, и в
- * приложении покажется встроенный SupportFaqData.sections. Схема — как в faq-data.js
- * веб-версии: {sections: [{id, title, emoji, questions: [{id, question, answer}]}]}.
+ * Разбор документа config/supportFaq — его пишет веб-админка (раздел «FAQ-бот»).
+ * Раньше разбор шёл через DocumentSnapshot.toObject(...): сопоставление по именам
+ * полей — рефлексия. В release-сборке R8 переименовывает поля приватных POJO,
+ * сопоставление ломается, и toObject бросает «No setter/field for … found on
+ * class …» внутри snapshot-listener'а, где исключение не ловится, — приложение
+ * вылетало при открытии FAQ. Поэтому поля читаются явно, как в SchoolRepositoryImpl.
+ * Пустой список или разделы без вопросов → null: покажется встроенный
+ * SupportFaqData.sections. Схема — как в faq-data.js веб-версии:
+ * {sections: [{id, title, emoji, questions: [{id, question, answer}]}]}.
  */
-private data class SupportFaqFirestore(
-    val sections: List<SupportFaqSectionFirestore> = emptyList()
-) {
-    fun toDomain(): List<FaqSection>? {
-        if (sections.isEmpty()) return null
-        val mapped = sections.map { it.toDomain() }.filter { it.questions.isNotEmpty() }
-        return mapped.ifEmpty { null }
-    }
-}
-
-private data class SupportFaqSectionFirestore(
-    val id: String = "",
-    val title: String = "",
-    val emoji: String = "",
-    val questions: List<SupportFaqQuestionFirestore> = emptyList()
-) {
-    fun toDomain() = FaqSection(
-        id = id,
-        title = title,
-        emoji = emoji,
-        questions = questions.map { it.toDomain() }
-    )
-}
-
-private data class SupportFaqQuestionFirestore(
-    val id: String = "",
-    val question: String = "",
-    val answer: String = ""
-) {
-    fun toDomain() = FaqQuestion(id = id, question = question, answer = answer)
+private fun DocumentSnapshot.parseSupportFaq(): List<FaqSection>? {
+    val raw = (get("sections") as? List<*>) ?: return null
+    val mapped = raw.mapNotNull { rawSection ->
+        val section = rawSection as? Map<*, *> ?: return@mapNotNull null
+        val questions = (section["questions"] as? List<*>)
+            ?.mapNotNull { rawQuestion ->
+                val question = rawQuestion as? Map<*, *> ?: return@mapNotNull null
+                FaqQuestion(
+                    id = question["id"] as? String ?: "",
+                    question = question["question"] as? String ?: "",
+                    answer = question["answer"] as? String ?: ""
+                )
+            }
+            ?: emptyList()
+        FaqSection(
+            id = section["id"] as? String ?: "",
+            title = section["title"] as? String ?: "",
+            emoji = section["emoji"] as? String ?: "",
+            questions = questions
+        )
+    }.filter { it.questions.isNotEmpty() }
+    return mapped.ifEmpty { null }
 }
