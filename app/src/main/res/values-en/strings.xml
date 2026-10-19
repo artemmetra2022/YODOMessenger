@@ -685,4 +685,25 @@ Try later — people appear when they open this screen.</string>
 
     <string name="widget_combined_label">Weather and unread</string>
     <string name="widget_combined_description">Weather and unread messages in one widget</string>
+
+    <string name="widget_school_label">School</string>
+    <string name="widget_school_description">Current lesson, bell schedule and days until the break</string>
+    <string name="widget_school_lesson">Lesson %1$d</string>
+    <string name="widget_school_until">until %1$s</string>
+    <string name="widget_school_break">Break</string>
+    <string name="widget_school_lesson_at">Lesson %1$d at %2$s</string>
+    <string name="widget_school_before">School has not started</string>
+    <string name="widget_school_first_bell">First bell at %1$s</string>
+    <string name="widget_school_after">Lessons are over</string>
+    <string name="widget_school_rest">Enjoy your time!</string>
+    <string name="widget_school_day_off">Day off</string>
+    <string name="widget_school_next_lessons">Lessons: %1$s</string>
+    <string name="widget_school_lessons_left">Lessons left: %1$d</string>
+    <string name="widget_school_days_short">%1$d d</string>
+    <string name="widget_school_holiday_today">The break starts today</string>
+    <string name="widget_school_holiday_ongoing">The break is on</string>
+    <plurals name="widget_school_holiday_in_days">
+        <item quantity="one">%d day until the break</item>
+        <item quantity="other">%d days until the break</item>
+    </plurals>
 </resources>

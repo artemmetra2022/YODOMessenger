@@ -154,6 +154,18 @@
                 android:resource="@xml/combined_widget_info" />
         </receiver>
 
+        <receiver
+            android:name=".features.widget.SchoolWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_school_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/school_widget_info" />
+        </receiver>
+
         <!-- ==================== FILE PROVIDER (для шаринга фото) ==================== -->
         <provider
             android:name="androidx.core.content.FileProvider"

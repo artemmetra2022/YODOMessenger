@@ -717,4 +717,27 @@
 
     <string name="widget_combined_label">Погода и непрочитанные</string>
     <string name="widget_combined_description">Погода и непрочитанные сообщения в одном виджете</string>
+
+    <string name="widget_school_label">Школа</string>
+    <string name="widget_school_description">Какой сейчас урок, расписание звонков и сколько дней до каникул</string>
+    <string name="widget_school_lesson">Урок %1$d</string>
+    <string name="widget_school_until">до %1$s</string>
+    <string name="widget_school_break">Перемена</string>
+    <string name="widget_school_lesson_at">Урок %1$d в %2$s</string>
+    <string name="widget_school_before">Уроки не начались</string>
+    <string name="widget_school_first_bell">Первый звонок в %1$s</string>
+    <string name="widget_school_after">Уроки закончились</string>
+    <string name="widget_school_rest">Отдыхайте!</string>
+    <string name="widget_school_day_off">Выходной</string>
+    <string name="widget_school_next_lessons">Уроки: %1$s</string>
+    <string name="widget_school_lessons_left">Осталось уроков: %1$d</string>
+    <string name="widget_school_days_short">%1$d дн.</string>
+    <string name="widget_school_holiday_today">Сегодня начинаются каникулы</string>
+    <string name="widget_school_holiday_ongoing">Каникулы идут</string>
+    <plurals name="widget_school_holiday_in_days">
+        <item quantity="one">%d день до каникул</item>
+        <item quantity="few">%d дня до каникул</item>
+        <item quantity="many">%d дней до каникул</item>
+        <item quantity="other">%d дня до каникул</item>
+    </plurals>
 </resources>

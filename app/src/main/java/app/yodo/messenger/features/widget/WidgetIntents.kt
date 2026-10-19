@@ -15,6 +15,7 @@ object WidgetIntents {
     const val TARGET_CHATS = "chats"
     const val TARGET_CHAT = "chat"
     const val TARGET_WEATHER = "weather"
+    const val TARGET_SCHOOL = "school"
 
     fun open(context: Context, target: String, uid: String?, chatId: String? = null): Intent =
         Intent(context, MainActivity::class.java).apply {

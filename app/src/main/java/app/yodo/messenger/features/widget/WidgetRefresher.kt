@@ -16,6 +16,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.model.normalizedUnreadCount
+import app.yodo.messenger.domain.repository.AppSettingsRepository
 import app.yodo.messenger.domain.repository.ChatRepository
 import app.yodo.messenger.features.weather.WeatherRepository
 import com.google.firebase.auth.FirebaseAuth
@@ -27,6 +28,8 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import java.time.LocalDateTime
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -40,6 +43,7 @@ interface WidgetEntryPoint {
     fun auth(): FirebaseAuth
     fun weather(): WeatherRepository
     fun settings(): UserSettingsPreferences
+    fun appSettings(): AppSettingsRepository
 
     companion object {
         fun get(context: Context): WidgetEntryPoint =
@@ -56,11 +60,33 @@ object WidgetRefresher {
         val hasUnread = manager.getGlanceIds(UnreadWidget::class.java).isNotEmpty()
         val hasWeather = manager.getGlanceIds(WeatherWidget::class.java).isNotEmpty()
         val hasCombined = manager.getGlanceIds(CombinedWidget::class.java).isNotEmpty()
+        val hasSchool = manager.getGlanceIds(SchoolWidget::class.java).isNotEmpty()
+        if (hasSchool) refreshSchoolHoliday(context)
         if (hasUnread || hasCombined) refreshUnread(context)
         if (hasWeather || hasCombined) refreshWeather(context)
         if (hasUnread) UnreadWidget().updateAll(context)
         if (hasWeather) WeatherWidget().updateAll(context)
         if (hasCombined) CombinedWidget().updateAll(context)
+        if (hasSchool) {
+            SchoolWidget().updateAll(context)
+            // Заодно чиним цепочку тиков, если система её прервала.
+            SchoolTicker.schedule(context)
+        }
+    }
+
+    /** Подтягивает дату каникул, заданную админом. Без сети/доступа остаётся прежняя или зашитая дата. */
+    private suspend fun refreshSchoolHoliday(context: Context): Boolean {
+        return try {
+            val iso = withTimeoutOrNull(8_000L) {
+                WidgetEntryPoint.get(context).appSettings().observeHolidayDate().first()
+            } ?: return false
+            WidgetStore.writeSchoolHoliday(context, iso)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private suspend fun refreshUnread(context: Context): Boolean {
@@ -140,7 +166,8 @@ object WidgetScheduler {
     fun hasWidgets(context: Context): Boolean =
         widgetIds(context, UnreadWidgetReceiver::class.java).isNotEmpty() ||
             widgetIds(context, WeatherWidgetReceiver::class.java).isNotEmpty() ||
-            widgetIds(context, CombinedWidgetReceiver::class.java).isNotEmpty()
+            widgetIds(context, CombinedWidgetReceiver::class.java).isNotEmpty() ||
+            widgetIds(context, SchoolWidgetReceiver::class.java).isNotEmpty()
 
     /** Раз в 15 минут (минимум WorkManager) — подтянуть счётчики и погоду. */
     fun ensurePeriodic(context: Context) {
@@ -162,5 +189,43 @@ object WidgetScheduler {
 
     fun cancelIfUnused(context: Context) {
         if (!hasWidgets(context)) WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
+    }
+}
+
+/**
+ * Перерисовывает виджет «Школа» ровно по звонкам: после каждого звонка ставит следующий запуск
+ * на ближайший звонок (см. [nextSchoolTick]). Сети не требует. WorkManager не гарантирует точность
+ * до секунды, а в режиме Doze сдвиг может достигать нескольких минут — это ограничение системы.
+ */
+class SchoolTickWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        SchoolWidget().updateAll(applicationContext)
+        // Планируем последним и без приостановок: REPLACE отменяет текущий запуск с тем же именем.
+        SchoolTicker.schedule(applicationContext)
+        return Result.success()
+    }
+}
+
+object SchoolTicker {
+    private const val NAME = "yodo_school_tick"
+
+    private fun hasSchoolWidget(context: Context): Boolean =
+        AppWidgetManager.getInstance(context)
+            .getAppWidgetIds(ComponentName(context, SchoolWidgetReceiver::class.java)).isNotEmpty()
+
+    fun schedule(context: Context) {
+        val app = context.applicationContext
+        if (!hasSchoolWidget(app)) return
+        val delay = millisUntilNextSchoolTick(LocalDateTime.now())
+        WorkManager.getInstance(app).enqueueUniqueWork(
+            NAME,
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<SchoolTickWorker>().setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
+        )
+    }
+
+    fun cancelIfUnused(context: Context) {
+        val app = context.applicationContext
+        if (!hasSchoolWidget(app)) WorkManager.getInstance(app).cancelUniqueWork(NAME)
     }
 }

@@ -12,6 +12,7 @@ object WidgetStore {
     private const val PREFS = "yodo_widget_cache"
     private const val KEY_UNREAD = "unread"
     private const val KEY_WEATHER = "weather"
+    private const val KEY_SCHOOL_HOLIDAY = "school_holiday"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private fun prefs(context: Context) =
@@ -35,5 +36,13 @@ object WidgetStore {
 
     fun writeWeather(context: Context, value: WeatherSnapshot) {
         prefs(context).edit().putString(KEY_WEATHER, json.encodeToString(value)).apply()
+    }
+
+    /** Дата каникул от админа (ISO, «ГГГГ-ММ-ДД»); пусто — виджет берёт зашитую SchoolData.HOLIDAY_DATE_ISO. */
+    fun readSchoolHoliday(context: Context): String =
+        prefs(context).getString(KEY_SCHOOL_HOLIDAY, null).orEmpty()
+
+    fun writeSchoolHoliday(context: Context, isoDate: String) {
+        prefs(context).edit().putString(KEY_SCHOOL_HOLIDAY, isoDate).apply()
     }
 }

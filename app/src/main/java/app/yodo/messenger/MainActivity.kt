@@ -228,6 +228,8 @@ class MainActivity : ComponentActivity() {
                                                 t.chatId?.let { navController.navigate(Routes.Chat.createRoute(it)) }
                                             app.yodo.messenger.features.widget.WidgetIntents.TARGET_WEATHER ->
                                                 navController.navigate(Routes.Weather.route)
+                                            app.yodo.messenger.features.widget.WidgetIntents.TARGET_SCHOOL ->
+                                                navController.navigate(Routes.SchoolSchedule.route)
                                         }
                                     }
                                     pendingWidgetTarget.value = null
