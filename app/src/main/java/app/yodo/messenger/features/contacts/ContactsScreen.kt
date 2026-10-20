@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.contacts
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.IconButton
 import android.Manifest
@@ -75,7 +76,7 @@ fun ContactsScreen(
 
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.contacts_title), style = MaterialTheme.typography.titleLarge) },

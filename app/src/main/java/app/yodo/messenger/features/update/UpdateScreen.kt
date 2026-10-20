@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.update
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.OutlinedButton
 import app.yodo.messenger.ui.components.IconButton
@@ -64,7 +65,7 @@ fun UpdateScreen(
 
     HandleUpdateEvents(viewModel)
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.about_title), style = MaterialTheme.typography.titleLarge) },

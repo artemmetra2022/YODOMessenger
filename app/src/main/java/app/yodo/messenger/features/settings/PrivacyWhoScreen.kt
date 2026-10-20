@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.RadioButton
@@ -98,7 +100,8 @@ fun PrivacyWhoScreen(
 
     LaunchedEffect(Unit) { viewModel.loadMessagePrivacyExceptions() }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text("Кто может…") },
@@ -106,7 +109,14 @@ fun PrivacyWhoScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
-                }
+                },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = if (app.yodo.messenger.ui.theme.LocalInterfaceStyle.current == app.yodo.messenger.data.local.InterfaceStyle.EXPERIMENTAL) {
+                        androidx.compose.ui.graphics.Color.Transparent
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                )
             )
         }
     ) { padding ->
@@ -115,6 +125,7 @@ fun PrivacyWhoScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                .padding(glassContentPadding())
                 .padding(horizontal = 16.dp)
         ) {
             PrivacyWhoCard(

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.SupportBotAvatar
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
@@ -77,7 +78,7 @@ fun AdminPanelScreen(
     val restrictionDialog by viewModel.restrictionDialog.collectAsState()
     val colorTheme = LocalColorTheme.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             Row(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),

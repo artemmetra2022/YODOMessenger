@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.contacts
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.IconButton
 import android.content.Context
@@ -93,7 +94,7 @@ fun ContactQrScreen(
         isGenerating = false
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Контакт собеседника") },

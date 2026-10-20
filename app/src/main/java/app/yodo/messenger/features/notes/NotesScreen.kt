@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.notes
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,7 +50,7 @@ fun NotesScreen(
     var input by remember { mutableStateOf("") }
     val dateFormat = remember { SimpleDateFormat("d MMM yyyy, HH:mm", Locale("ru")) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Заметки") },

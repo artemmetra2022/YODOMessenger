@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -115,7 +117,8 @@ fun AccountSettingsScreen(
         )
     }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -132,7 +135,8 @@ fun AccountSettingsScreen(
     ) { padding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = glassContentPadding()
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
             item {

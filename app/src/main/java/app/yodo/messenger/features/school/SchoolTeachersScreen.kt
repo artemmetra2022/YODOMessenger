@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
@@ -51,7 +52,7 @@ fun SchoolTeachersScreen(
     var selectedSubject by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             SchoolTopBar(
                 title = selectedSubject ?: "Учителя",

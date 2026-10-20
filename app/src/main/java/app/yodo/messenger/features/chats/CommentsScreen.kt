@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -149,7 +150,7 @@ fun CommentsScreen(
         )
     }
 
-    Scaffold(
+    GlassScaffold(
         modifier = Modifier.imePadding(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {

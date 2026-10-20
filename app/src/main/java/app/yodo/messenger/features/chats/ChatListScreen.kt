@@ -280,21 +280,30 @@ fun ChatListScreen(
                     // настройкой) — отступ, наоборот, УВЕЛИЧЕН (раньше был мелкий
                     // фиксированный 4.dp, из-за чего заголовок оказывался слишком
                     // близко к самому верху экрана).
-                    .liquidGlass(
-                        enabled = experimentalInterface,
-                        shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp),
-                        tint = glassTint(glassDark),
-                        dark = glassDark,
-                        elevation = 10
-                    )
                     .then(
-                        if (hideStatusBarOnChatList) {
+                        if (experimentalInterface) {
+                            // Плавающая плашка: отступ под статус-баром и по бокам снаружи стекла.
+                            if (hideStatusBarOnChatList) {
+                                Modifier.padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 6.dp)
+                            } else {
+                                val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars
+                                    .asPaddingValues().calculateTopPadding()
+                                Modifier.padding(start = 12.dp, end = 12.dp, top = statusBarHeight + 4.dp, bottom = 6.dp)
+                            }
+                        } else if (hideStatusBarOnChatList) {
                             Modifier.padding(top = 20.dp)
                         } else {
                             val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars
                                 .asPaddingValues().calculateTopPadding()
                             Modifier.padding(top = (statusBarHeight - 12.dp).coerceAtLeast(0.dp))
                         }
+                    )
+                    .liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = RoundedCornerShape(26.dp),
+                        tint = glassTint(glassDark),
+                        dark = glassDark,
+                        elevation = 10
                     )
             ) {
                 // Заголовок + иконки

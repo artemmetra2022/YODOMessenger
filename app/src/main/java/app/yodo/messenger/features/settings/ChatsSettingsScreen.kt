@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.RadioButton
@@ -194,7 +196,8 @@ fun ChatsSettingsScreen(
         )
     }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text("Чаты", style = MaterialTheme.typography.titleLarge) },
@@ -210,7 +213,8 @@ fun ChatsSettingsScreen(
     ) { padding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = glassContentPadding()
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
             item {

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -92,7 +93,7 @@ fun SchoolSettingsScreen(
             "Адрес, телефон, почта, сайт и ВКонтакте гимназии", Icons.Filled.Home)
     )
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = { SchoolTopBar("Настройки раздела «Школа»", onBackClick) },
         containerColor = Color.Transparent

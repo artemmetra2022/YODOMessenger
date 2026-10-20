@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
@@ -108,7 +109,7 @@ fun UserProfileScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { },

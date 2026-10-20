@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.auth
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
@@ -58,7 +59,7 @@ fun SwitchAccountScreen(
 
     LaunchedEffect(switched) { if (switched) onSwitched() }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Сменить аккаунт") },

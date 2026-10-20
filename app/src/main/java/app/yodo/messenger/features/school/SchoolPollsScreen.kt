@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +57,7 @@ fun SchoolPollsScreen(
         message?.let { snackbarHostState.showSnackbar(it); viewModel.consumeMessage() }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = { SchoolTopBar("Опросы", onBackClick) },
         containerColor = Color.Transparent

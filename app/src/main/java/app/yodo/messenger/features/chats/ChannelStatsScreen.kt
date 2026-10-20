@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +68,7 @@ fun ChannelStatsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val colorTheme = LocalColorTheme.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = {

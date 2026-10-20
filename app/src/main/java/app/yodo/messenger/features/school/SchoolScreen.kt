@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
@@ -94,7 +95,7 @@ fun SchoolScreen(
 
     fun isShown(id: String) = id in visibleSections
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(

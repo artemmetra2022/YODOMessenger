@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Switch
 import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,7 +72,7 @@ fun AdminHomeScreen(
 ) {
     val requireEmailVerification by viewModel.requireEmailVerification.collectAsState(initial = true)
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             Column {
                 TopAppBar(title = { Text("Админка") })

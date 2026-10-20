@@ -1,6 +1,7 @@
 package app.yodo.messenger.features.profile
 
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.DropdownMenuItem
@@ -172,7 +173,7 @@ fun ProfileScreen(
         return
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.profile_title), style = MaterialTheme.typography.titleLarge) },

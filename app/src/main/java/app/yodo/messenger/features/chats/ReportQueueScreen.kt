@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FilterChip
 import androidx.compose.foundation.background
@@ -56,7 +57,7 @@ fun ReportQueueScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Жалобы", style = MaterialTheme.typography.titleLarge) },

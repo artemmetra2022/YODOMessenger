@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
@@ -89,7 +90,7 @@ fun InviteToChannelScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(

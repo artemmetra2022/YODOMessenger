@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.YodoActionSheet
 import app.yodo.messenger.ui.components.YodoMenuAction
 import app.yodo.messenger.ui.components.TextButton
@@ -76,7 +77,7 @@ fun ForumTopicsScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.forum_topics_title)) },

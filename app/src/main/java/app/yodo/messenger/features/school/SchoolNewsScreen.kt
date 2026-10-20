@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +48,7 @@ fun SchoolNewsScreen(
 ) {
     val news by viewModel.news.collectAsState()
 
-    Scaffold(
+    GlassScaffold(
         topBar = { SchoolTopBar("Новости", onBackClick) },
         containerColor = Color.Transparent
     ) { padding ->

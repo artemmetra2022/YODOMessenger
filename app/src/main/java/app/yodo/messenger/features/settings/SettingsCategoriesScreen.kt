@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
@@ -128,7 +130,8 @@ fun SettingsCategoriesScreen(
         )
     )
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.titleLarge) },
@@ -168,7 +171,8 @@ fun SettingsCategoriesScreen(
                         endY = 400f
                     )
                 )
-                .padding(padding)
+                .padding(padding),
+            contentPadding = glassContentPadding()
         ) {
             item {
                 SettingsSearchBar(

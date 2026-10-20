@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.foundation.layout.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.rememberScrollState
@@ -71,7 +72,7 @@ internal fun CanvasLibraryContent(
         if(renameBoard!=null && state.boards.none { it==renameBoard })renameBoard=null
         if(deleteBoard!=null && state.boards.none { it==deleteBoard })deleteBoard=null
     }
-    Scaffold(
+    GlassScaffold(
         topBar={TopAppBar(
             title={Text(if(selection.active)"Выбрано: ${selected.size}" else "Сохранённые доски",
                 style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=TextOverflow.Ellipsis)},

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FilterChip
 import androidx.compose.foundation.background
@@ -58,7 +59,7 @@ fun ReportInboxScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val statusFilter by viewModel.statusFilter.collectAsState()
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Жалобы") },

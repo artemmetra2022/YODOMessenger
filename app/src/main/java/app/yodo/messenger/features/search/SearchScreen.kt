@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.search
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
@@ -138,7 +139,7 @@ fun SearchScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
@@ -76,7 +77,7 @@ fun SchoolTeacherAdminScreen(
     }
 
     if (!viewModel.isAppAdmin) {
-        Scaffold(
+        GlassScaffold(
             topBar = { SchoolTopBar("Профили учителей", onBackClick) },
             containerColor = Color.Transparent
         ) { padding ->
@@ -94,7 +95,7 @@ fun SchoolTeacherAdminScreen(
         return
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = { SchoolTopBar("Профили учителей", onBackClick) },
         containerColor = Color.Transparent

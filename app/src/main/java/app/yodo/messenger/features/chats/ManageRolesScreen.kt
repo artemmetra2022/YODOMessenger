@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.Checkbox
@@ -68,7 +69,7 @@ fun ManageRolesScreen(
     var showCreateRoleDialog by remember { mutableStateOf(false) }
     var editingRole by remember { mutableStateOf<CustomRole?>(null) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Роли и права", style = MaterialTheme.typography.titleLarge) },
@@ -92,7 +93,7 @@ fun ManageRolesScreen(
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            return@Scaffold
+            return@GlassScaffold
         }
 
         LazyColumn(

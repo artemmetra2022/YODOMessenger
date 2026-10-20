@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.nearby
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -65,7 +66,7 @@ fun NearbyPeopleScreen(
     }
     DisposableEffect(Unit) { onDispose { viewModel.stopSharingLocation() } }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = {

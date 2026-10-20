@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.auth
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
@@ -81,7 +82,7 @@ fun AddAccountScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Добавить аккаунт") },

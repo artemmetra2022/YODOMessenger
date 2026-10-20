@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -60,7 +61,7 @@ fun SchoolReviewScreen(
         message?.let { snackbarHostState.showSnackbar(it); viewModel.consumeMessage() }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = { SchoolTopBar("Оценка и идеи", onBackClick) },
         containerColor = Color.Transparent

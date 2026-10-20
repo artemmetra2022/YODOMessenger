@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.contacts
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.OutlinedButton
 import app.yodo.messenger.ui.components.IconButton
@@ -109,7 +110,7 @@ fun ScanContactScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Сканировать QR") },

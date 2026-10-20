@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.weather
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
@@ -147,7 +148,7 @@ fun WeatherScreen(
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     var cityInput by remember(city) { mutableStateOf(city) }
 
-    Scaffold(
+    GlassScaffold(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -45,7 +46,7 @@ fun ChatStatsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.chat_stats_title), style = MaterialTheme.typography.titleLarge) },
@@ -61,7 +62,7 @@ fun ChatStatsScreen(
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            return@Scaffold
+            return@GlassScaffold
         }
 
         if (uiState.totalMessages == 0) {
@@ -71,7 +72,7 @@ fun ChatStatsScreen(
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
-            return@Scaffold
+            return@GlassScaffold
         }
 
         LazyColumn(

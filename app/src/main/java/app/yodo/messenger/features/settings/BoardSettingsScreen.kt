@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FilterChip
@@ -89,7 +91,8 @@ fun BoardSettingsScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text("Интерактивная доска", style = MaterialTheme.typography.titleLarge) },
@@ -99,7 +102,7 @@ fun BoardSettingsScreen(
         },
         containerColor = Color.Transparent
     ) { padding ->
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(padding)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(padding), contentPadding = glassContentPadding()) {
             item { Spacer(Modifier.height(4.dp)) }
             item {
                 SettingsCard(Modifier.settingsSearchAnchor(SettingsSearchIndex.ANCHOR_BOARD_LIBRARY,anchorPositions,highlightedAnchor,colorTheme)) {

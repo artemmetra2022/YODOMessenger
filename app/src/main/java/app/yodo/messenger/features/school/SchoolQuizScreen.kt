@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +57,7 @@ fun SchoolQuizScreen(
     var currentQuestion by remember { mutableIntStateOf(Random.nextInt(SCHOOL_QUIZ_QUESTIONS.size)) }
     var answeredIndex by remember { mutableStateOf<Int?>(null) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             SchoolTopBar("Викторина", onBackClick)
         },

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,7 @@ fun ArchivedChatsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val colorTheme = LocalColorTheme.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             Row(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),

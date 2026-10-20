@@ -719,9 +719,15 @@ fun ChatScreen(
                 }
 
                 TopAppBar(
-                    modifier = Modifier.liquidGlass(
+                    // Экспериментальный интерфейс: плавающая стеклянная плашка со скруглёнными
+                    // углами под статус-баром (statusBarsPadding заодно «съедает» инсет у TopAppBar).
+                    modifier = (if (experimentalInterface) {
+                        Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp)
+                    } else {
+                        Modifier
+                    }).liquidGlass(
                         enabled = experimentalInterface,
-                        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+                        shape = RoundedCornerShape(26.dp),
                         tint = glassTint(isDarkTheme),
                         dark = isDarkTheme,
                         elevation = 10

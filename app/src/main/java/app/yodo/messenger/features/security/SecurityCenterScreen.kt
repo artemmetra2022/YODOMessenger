@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.security
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.OutlinedButton
 import app.yodo.messenger.ui.components.IconButton
@@ -64,7 +65,7 @@ fun SecurityCenterScreen(
     val screenshotProtection by viewModel.screenshotProtection.collectAsState(initial = false)
     val requireEmailVerification by viewModel.requireEmailVerification.collectAsState(initial = true)
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Центр безопасности") },

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.YodoActionSheet
 import app.yodo.messenger.ui.components.YodoMenuAction
 import app.yodo.messenger.ui.components.Button
@@ -150,7 +151,7 @@ fun ChannelProfileScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(

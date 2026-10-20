@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.tools
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.OutlinedButton
 import app.yodo.messenger.ui.components.IconButton
@@ -81,7 +82,7 @@ fun ToolsScreen(onBackClick: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("yodo_tools", Context.MODE_PRIVATE) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Фишки и инструменты") },

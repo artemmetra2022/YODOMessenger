@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -81,7 +82,7 @@ fun SchoolTeacherPageScreen(
 
     val isOwner = viewModel.isOwner
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             SchoolTopBar(
@@ -113,7 +114,7 @@ fun SchoolTeacherPageScreen(
                     }
                 }
             }
-            return@Scaffold
+            return@GlassScaffold
         }
 
         // История файлов урока без текущего (совпадает по времени обновления).

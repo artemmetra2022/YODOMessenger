@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Spacer
@@ -79,7 +81,8 @@ fun AppSettingsScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text("Приложение", style = MaterialTheme.typography.titleLarge) },
@@ -95,7 +98,8 @@ fun AppSettingsScreen(
     ) { padding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = glassContentPadding()
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
             item {

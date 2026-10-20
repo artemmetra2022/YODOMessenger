@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.foundation.background
 import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +68,7 @@ fun SchoolGameScreen(
     var lastResult by remember { mutableStateOf<String?>(null) }
     var lastResultWin by remember { mutableStateOf<Boolean?>(null) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = { SchoolTopBar("Игра", onBackClick) },
         containerColor = Color.Transparent
     ) { padding ->

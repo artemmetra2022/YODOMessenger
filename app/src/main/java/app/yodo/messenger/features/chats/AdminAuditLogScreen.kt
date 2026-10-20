@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
@@ -67,7 +68,7 @@ fun AdminAuditLogScreen(
     val hasMore by viewModel.hasMore.collectAsState()
     val listState = rememberLazyListState()
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Журнал действий Админки", style = MaterialTheme.typography.titleLarge) },

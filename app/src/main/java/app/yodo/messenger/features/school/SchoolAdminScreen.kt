@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -85,7 +86,7 @@ fun SchoolAdminScreen(
     }
 
     if (!viewModel.isAppAdmin) {
-        Scaffold(
+        GlassScaffold(
             topBar = {
                 Column {
                     SchoolTopBar("Админка", onBackClick)
@@ -113,7 +114,7 @@ fun SchoolAdminScreen(
         return
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {

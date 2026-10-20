@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -74,7 +75,7 @@ fun ReportDetailScreen(
         if (actionCompleted) onBackClick()
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Жалоба", style = MaterialTheme.typography.titleLarge) },
@@ -90,7 +91,7 @@ fun ReportDetailScreen(
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            return@Scaffold
+            return@GlassScaffold
         }
         val report = uiState.report!!
 

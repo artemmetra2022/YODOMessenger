@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.FilterChip
 import androidx.compose.foundation.background
@@ -76,7 +77,7 @@ fun AdminLogScreen(
         if (shouldLoadMore) viewModel.loadMore()
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Журнал действий", style = MaterialTheme.typography.titleLarge) },

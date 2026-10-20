@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.security
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -106,7 +107,7 @@ fun QrLoginScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Вход по QR-коду") },

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +33,7 @@ fun ProfilePlaceholderScreen(
     description: String,
     onBackClick: () -> Unit
 ) {
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title) },

@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.Switch
@@ -131,7 +132,7 @@ fun EditChannelScreen(
         return
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Редактировать канал", style = MaterialTheme.typography.titleLarge) },

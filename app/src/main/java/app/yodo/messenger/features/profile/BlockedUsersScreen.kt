@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.OutlinedButton
 import app.yodo.messenger.ui.components.IconButton
 import app.yodo.messenger.ui.components.DropdownMenuItem
@@ -54,7 +55,7 @@ fun BlockedUsersScreen(
     val uiState by viewModel.uiState.collectAsState()
     val colorTheme = LocalColorTheme.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Заблокированные") },

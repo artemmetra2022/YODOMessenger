@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import app.yodo.messenger.ui.components.Button
 import app.yodo.messenger.ui.components.TextButton
 import app.yodo.messenger.ui.components.OutlinedButton
@@ -73,7 +74,7 @@ fun DevicesScreen(
     val colorTheme = LocalColorTheme.current
     var showTerminateAllDialog by remember { mutableStateOf(false) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.devices_title)) },
