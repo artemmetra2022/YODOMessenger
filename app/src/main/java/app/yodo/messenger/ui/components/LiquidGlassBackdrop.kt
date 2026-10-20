@@ -23,7 +23,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.drawscope.drawOutline
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -136,8 +135,8 @@ internal fun Modifier.glassRefraction(
                 renderer.draw(this, node, offset.x, offset.y, shape, tint, glass, dark)
             } else {
                 // Источник ещё не записан (первый кадр) — простая тонировка вместо стекла.
-                drawOutline(
-                    outline = shape.createOutline(size, layoutDirection, this),
+                drawPath(
+                    path = shape.createOutline(size, layoutDirection, this).path,
                     color = tint.copy(alpha = 0.18f + 0.35f * glass)
                 )
             }
