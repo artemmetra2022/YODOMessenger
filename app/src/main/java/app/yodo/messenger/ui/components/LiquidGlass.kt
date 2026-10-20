@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.animateFloatAsState
@@ -24,6 +25,10 @@ import androidx.compose.ui.unit.dp
  * Полупрозрачная многослойная поверхность для экспериментального интерфейса.
  * Не использует blur(), потому что он размывает сам контент. Вместо этого сочетает
  * прозрачный градиент, световой кант и мягкую тень — текст и иконки остаются чёткими.
+ *
+ * Если выше по дереву есть [LocalGlassBackdrop] (Android 13+), под панелью дополнительно
+ * рисуется настоящее стекло: размытый и преломлённый у краёв фон (см. LiquidGlassBackdrop.kt),
+ * а градиентные слои становятся тоньше, чтобы не перекрывать эффект.
  */
 @Composable
 fun Modifier.liquidGlass(
@@ -34,6 +39,8 @@ fun Modifier.liquidGlass(
     elevation: Int = 8
 ): Modifier {
     if (!enabled) return this
+    val backdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) LocalGlassBackdrop.current else null
+    val refracting = backdrop != null
     val targetIntensity = LocalGlassIntensity.current.coerceIn(0, 100) / 100f
     val intensity by animateFloatAsState(
         targetValue = targetIntensity,
@@ -43,8 +50,10 @@ fun Modifier.liquidGlass(
     // 0%: почти бесцветное настоящее стекло. 100%: плотное матовое стекло,
     // визуально близкое к сильному backdrop blur, но без размытия текста и иконок.
     // Альфы подобраны мягче: спокойная поверхность без ярких бликов и резких кантов.
-    val bodyAlpha = (if (dark) 0.06f else 0.045f) + intensity * (if (dark) 0.44f else 0.40f)
-    val lowerAlpha = (if (dark) 0.04f else 0.028f) + intensity * (if (dark) 0.32f else 0.28f)
+    // При настоящем стекле тонировку делает шейдер — градиентное тело делаем втрое прозрачнее.
+    val bodyScale = if (refracting) 0.35f else 1f
+    val bodyAlpha = ((if (dark) 0.06f else 0.045f) + intensity * (if (dark) 0.44f else 0.40f)) * bodyScale
+    val lowerAlpha = ((if (dark) 0.04f else 0.028f) + intensity * (if (dark) 0.32f else 0.28f)) * bodyScale
     val highlightAlpha = (if (dark) 0.04f else 0.07f) + intensity * (if (dark) 0.06f else 0.10f)
     val edgeAlpha = (if (dark) 0.09f else 0.15f) + intensity * (if (dark) 0.12f else 0.14f)
     val topHighlight = Color.White.copy(alpha = highlightAlpha.coerceIn(0f, 0.96f))
@@ -57,6 +66,11 @@ fun Modifier.liquidGlass(
             tint.copy(alpha = (0.06f + intensity * 0.28f).coerceIn(0f, 0.40f))
         )
     )
+    val refraction = if (backdrop != null) {
+        Modifier.glassRefraction(backdrop, shape, tint, intensity, dark)
+    } else {
+        Modifier
+    }
     return this
         .shadow(
             elevation = elevation.dp,
@@ -65,6 +79,7 @@ fun Modifier.liquidGlass(
             spotColor = Color.Black.copy(alpha = 0.025f + intensity * (if (dark) 0.10f else 0.05f))
         )
         .clip(shape)
+        .then(refraction)
         .background(
             Brush.verticalGradient(
                 colors = listOf(topHighlight, bodyTint, lowerTint, bodyTint)

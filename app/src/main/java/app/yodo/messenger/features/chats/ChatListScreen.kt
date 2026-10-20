@@ -113,7 +113,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.CompositionLocalProvider
+import app.yodo.messenger.ui.components.LocalGlassBackdrop
+import app.yodo.messenger.ui.components.glassBackdropSource
 import androidx.compose.ui.unit.sp
 import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -168,6 +172,9 @@ fun ChatListScreen(
     // НОВОЕ (админ-функции групп): переход к экрану информации о группе по тапу
     // на бейдж заявок (для владельца/админа — сразу к заявкам, без захода в чат).
     onOpenGroupInfo: (String) -> Unit = {},
+    // Экспериментальный интерфейс: список уходит под нижнюю панель (стекло), поэтому её
+    // высота приходит снаружи и добавляется в contentPadding списка.
+    contentBottomInset: Dp = 0.dp,
     viewModel: ChatListViewModel = hiltViewModel(),
     weatherViewModel: WeatherViewModel = hiltViewModel()
 ) {
@@ -408,10 +415,22 @@ fun ChatListScreen(
             }
         }
     ) { padding ->
+        // Экспериментальный интерфейс: список проходит под верхней и нижней стеклянными
+        // панелями (иначе нечего преломлять), поэтому вместо padding используем contentPadding.
+        val glassBackdrop = LocalGlassBackdrop.current
+        val listPadding = if (experimentalInterface) {
+            PaddingValues(
+                top = padding.calculateTopPadding(),
+                bottom = padding.calculateBottomPadding() + contentBottomInset
+            )
+        } else {
+            PaddingValues(0.dp)
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .then(if (experimentalInterface) Modifier else Modifier.padding(padding))
+                .glassBackdropSource(if (experimentalInterface) glassBackdrop else null)
                 .softMessengerBackdrop(
                     enabled = experimentalInterface,
                     primary = colorTheme.primary,
@@ -419,6 +438,7 @@ fun ChatListScreen(
                     dark = glassDark
                 )
         ) {
+            CompositionLocalProvider(LocalGlassBackdrop provides null) {
             when (val state = uiState) {
                 is ChatListUiState.Loading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -443,6 +463,7 @@ fun ChatListScreen(
                     } else {
                         LazyColumn(
                             state = chatListState,
+                            contentPadding = listPadding,
                             modifier = Modifier.fillMaxSize().nestedScroll(hiddenPullConnection)
                         ) {
                             // НОВОЕ (папки): внутри папки — кнопка "Добавить" для быстрого добавления
@@ -609,6 +630,7 @@ fun ChatListScreen(
                     }
                 }
             }
+        }
         }
     }
 

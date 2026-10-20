@@ -21,6 +21,9 @@ import app.yodo.messenger.ui.theme.LocalGlassIntensity
 import app.yodo.messenger.ui.components.glassTint
 import app.yodo.messenger.ui.components.liquidGlass
 import app.yodo.messenger.ui.components.softMessengerBackdrop
+import app.yodo.messenger.ui.components.LocalGlassBackdrop
+import app.yodo.messenger.ui.components.glassBackdropSource
+import app.yodo.messenger.ui.components.rememberGlassBackdrop
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -619,6 +622,10 @@ fun ChatScreen(
     val chatBackground = MaterialTheme.colorScheme.background
     val chatBar = MaterialTheme.colorScheme.surface
 
+    // Экспериментальный интерфейс: сообщения записываются в общий источник фона, а верхняя
+    // панель и панель ввода (стекло) преломляют его. См. ui/components/LiquidGlassBackdrop.kt.
+    val glassBackdrop = if (experimentalInterface) rememberGlassBackdrop() else null
+    CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop) {
     Scaffold(
         modifier = Modifier.imePadding(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -1534,19 +1541,27 @@ fun ChatScreen(
             }
         }
     ) { padding ->
+        // Экспериментальный интерфейс: сообщения идут под верхней панелью и панелью ввода
+        // (иначе под стеклом пусто), поэтому вместо padding используем contentPadding списка.
+        val topBarInset = if (experimentalInterface) padding.calculateTopPadding() else 0.dp
+        val bottomBarInset = if (experimentalInterface) padding.calculateBottomPadding() else 0.dp
+        val insetTopPx = with(androidx.compose.ui.platform.LocalDensity.current) { topBarInset.roundToPx() }
+        val insetBottomPx = with(androidx.compose.ui.platform.LocalDensity.current) { bottomBarInset.roundToPx() }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .then(if (experimentalInterface) Modifier else Modifier.padding(padding))
                 .onGloballyPositioned { coordinates ->
                     val boundsInWindow = coordinates.boundsInWindow()
+                    // Область сообщений — без зоны под стеклянными панелями.
                     messagesAreaWindowBounds = android.graphics.Rect(
                         boundsInWindow.left.toInt(),
-                        boundsInWindow.top.toInt(),
+                        boundsInWindow.top.toInt() + insetTopPx,
                         boundsInWindow.right.toInt(),
-                        boundsInWindow.bottom.toInt()
+                        boundsInWindow.bottom.toInt() - insetBottomPx
                     )
                 }
+                .glassBackdropSource(glassBackdrop)
                 .then(
                     if (chatBackgroundType != app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE) {
                         Modifier
@@ -1573,6 +1588,7 @@ fun ChatScreen(
                 )
                 .swipeToGoBack(onBack = onBackClick)
         ) {
+            CompositionLocalProvider(LocalGlassBackdrop provides null) {
             if (chatBackgroundType == app.yodo.messenger.data.local.ChatBackgroundType.CUSTOM_IMAGE &&
                 chatBackgroundCustomPath.isNotBlank()
             ) {
@@ -1642,7 +1658,12 @@ fun ChatScreen(
                                 }
                             }
                         },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 14.dp),
+                    contentPadding = PaddingValues(
+                        start = 10.dp,
+                        end = 10.dp,
+                        top = 14.dp + topBarInset,
+                        bottom = 14.dp + bottomBarInset
+                    ),
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     var previousDateLabel: String? = null
@@ -1737,6 +1758,8 @@ fun ChatScreen(
                 }
             }
         }
+        }
+    }
     }
 
     infoMessage?.let { message ->
