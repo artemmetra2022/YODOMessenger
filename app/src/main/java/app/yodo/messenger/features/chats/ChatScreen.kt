@@ -19,6 +19,7 @@ import app.yodo.messenger.data.local.InterfaceStyle
 import app.yodo.messenger.ui.theme.LocalInterfaceStyle
 import app.yodo.messenger.ui.theme.LocalGlassIntensity
 import app.yodo.messenger.ui.components.glassTint
+import app.yodo.messenger.ui.components.glassBottomBlur
 import app.yodo.messenger.ui.components.liquidGlass
 import app.yodo.messenger.ui.components.softMessengerBackdrop
 import app.yodo.messenger.ui.components.LocalGlassBackdrop
@@ -3382,6 +3383,12 @@ private fun MessageInputBar(
     val glassFraction = LocalGlassIntensity.current.coerceIn(0, 100) / 100f
     val inputGlassAlpha = (0.04f + glassFraction * 0.78f).coerceIn(0.04f, 0.84f)
     var showEmojiPicker by remember { mutableStateOf(false) }
+    // Полоса размытия под панелью ввода: закрывает и зазор между панелью и краем экрана.
+    Box {
+    if (experimentalInterface) {
+        val stripDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        Box(Modifier.matchParentSize().glassBottomBlur(tint = glassTint(stripDark), dark = stripDark))
+    }
     Surface(
         // Панель ввода (смайлики, поле, вложения, отправка/микрофон) приподнята над нижним краем.
         modifier = Modifier.padding(bottom = 12.dp),
@@ -3560,6 +3567,7 @@ private fun MessageInputBar(
                 }
             }
         }
+    }
     }
 }
 

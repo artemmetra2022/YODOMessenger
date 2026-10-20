@@ -120,7 +120,10 @@ internal fun Modifier.glassRefraction(
     shape: Shape,
     tint: Color,
     glass: Float,
-    dark: Boolean
+    dark: Boolean,
+    // flat = true: только размытие и тонировка, без преломления и блика по краям
+    // (для плоских полос у края экрана).
+    flat: Boolean = false
 ): Modifier {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return this
     val renderer = remember { GlassRefractionRenderer() }
@@ -133,7 +136,7 @@ internal fun Modifier.glassRefraction(
             if (node != null && backdrop.hasContent && !backdrop.isRecording &&
                 drawContext.canvas.nativeCanvas.isHardwareAccelerated
             ) {
-                renderer.draw(this, node, offset.x, offset.y, shape, tint, glass, dark)
+                renderer.draw(this, node, offset.x, offset.y, shape, tint, glass, dark, flat)
             } else {
                 // Источник ещё не записан (первый кадр) — простая тонировка вместо стекла.
                 drawOutline(
@@ -158,17 +161,21 @@ internal class GlassRefractionRenderer {
         shape: Shape,
         tint: Color,
         glass: Float,
-        dark: Boolean
+        dark: Boolean,
+        flat: Boolean = false
     ) {
         val width = scope.size.width
         val height = scope.size.height
         if (width < 2f || height < 2f) return
         val density = scope.density
 
-        // Размытие: от почти прозрачного стекла (0%) до плотного матового (100%).
-        val sigma = (0.3f + glass * 7f) * density
+        // Размытие: от почти прозрачного стекла (0%) до очень плотного матового (100%).
+        // Кубический хвост: низ шкалы почти как раньше, а на максимуме фон практически не виден.
+        val sigma = (0.3f + glass * 7f + glass * glass * glass * 15f) * density
         val blurred = sigma >= 0.75f
-        val pad = if (blurred) ceil(sigma * 2.5f).toInt() + 2 else 0
+        // У плоской полосы у края экрана запас не нужен: за краем экрана фона нет, и с запасом
+        // размытие подмешивало бы прозрачность. Без запаса края просто «растягиваются» (CLAMP).
+        val pad = if (blurred && !flat) ceil(sigma * 2.5f).toInt() + 2 else 0
 
         val widthPx = ceil(width).toInt()
         val heightPx = ceil(height).toInt()
@@ -200,10 +207,12 @@ internal class GlassRefractionRenderer {
         }
 
         val thickness = min(16f * density, min(width, height) * 0.45f)
-        val intensity = 1.0f
+        val intensity = if (flat) 0f else 1.0f
         val index = 1.5f
-        val highlight = if (dark) 0.55f else 0.85f
-        val tintAlpha = ((if (dark) 0.10f else 0.12f) + glass * (if (dark) 0.34f else 0.36f)).coerceIn(0f, 0.8f)
+        // Блик по кромке почти убран — на плитках не должно быть белой засветки.
+        val highlight = if (flat) 0f else if (dark) 0.05f else 0.08f
+        // На максимуме стекло почти непрозрачное (раньше было ~0.45).
+        val tintAlpha = ((if (dark) 0.10f else 0.12f) + glass * (if (dark) 0.62f else 0.64f)).coerceIn(0f, 0.85f)
 
         val params = floatArrayOf(
             width, height, pad.toFloat(), leftTop, rightTop, rightBottom, leftBottom,

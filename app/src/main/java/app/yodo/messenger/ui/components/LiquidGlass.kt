@@ -15,6 +15,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -54,9 +60,9 @@ fun Modifier.liquidGlass(
     val bodyScale = if (refracting) 0.35f else 1f
     val bodyAlpha = ((if (dark) 0.06f else 0.045f) + intensity * (if (dark) 0.44f else 0.40f)) * bodyScale
     val lowerAlpha = ((if (dark) 0.04f else 0.028f) + intensity * (if (dark) 0.32f else 0.28f)) * bodyScale
-    val highlightAlpha = (if (dark) 0.04f else 0.07f) + intensity * (if (dark) 0.06f else 0.10f)
-    val edgeAlpha = (if (dark) 0.09f else 0.15f) + intensity * (if (dark) 0.12f else 0.14f)
-    val topHighlight = Color.White.copy(alpha = highlightAlpha.coerceIn(0f, 0.96f))
+    // Белый «свет» на плитках почти убран: верхняя засветка удалена, кант и блик по кромке
+    // приглушены, а единственный блик — крошечное еле заметное пятно строго посередине.
+    val edgeAlpha = (if (dark) 0.04f else 0.06f) + intensity * (if (dark) 0.04f else 0.05f)
     val bodyTint = tint.copy(alpha = bodyAlpha.coerceIn(0f, 0.92f))
     val lowerTint = tint.copy(alpha = lowerAlpha.coerceIn(0f, 0.86f))
     val borderBrush = Brush.linearGradient(
@@ -82,26 +88,56 @@ fun Modifier.liquidGlass(
         .then(refraction)
         .background(
             Brush.verticalGradient(
-                colors = listOf(topHighlight, bodyTint, lowerTint, bodyTint)
+                colors = listOf(bodyTint, bodyTint, lowerTint, bodyTint)
             )
         )
-        // Верхний локальный блик имитирует отражение источника света на стекле —
-        // ослаблен вдвое против прежнего, чтобы не «блестел» на глазах.
-        .background(
-            Brush.radialGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = (0.03f + intensity * 0.09f).coerceAtMost(0.14f)),
-                    Color.Transparent
-                ),
-                center = Offset(18f, 8f),
-                radius = 520f
+        // Крошечный едва заметный блик посередине панели.
+        .drawBehind {
+            val spotAlpha = (0.010f + intensity * 0.022f).coerceAtMost(0.035f)
+            val spotRadius = (minOf(size.width, size.height) * 0.42f).coerceAtLeast(1f)
+            drawRect(
+                Brush.radialGradient(
+                    colors = listOf(Color.White.copy(alpha = spotAlpha), Color.Transparent),
+                    center = Offset(size.width / 2f, size.height / 2f),
+                    radius = spotRadius
+                )
             )
-        )
+        }
         .border(BorderStroke(0.6.dp, borderBrush), shape)
 }
 
 @Composable
 fun glassTint(dark: Boolean): Color = MaterialTheme.colorScheme.surface
+
+/**
+ * Размытая «подложка» без формы и преломления — для полосы под панелью ввода (зазор между
+ * панелью и краем экрана). Сверху плавно растворяется, чтобы не было резкой границы.
+ * Ставить на отдельный Box (matchParentSize) ПОЗАДИ панели, а не оборачивать ею саму панель.
+ */
+@Composable
+fun Modifier.glassBottomBlur(tint: Color, dark: Boolean): Modifier {
+    val backdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) LocalGlassBackdrop.current else null
+    val intensity = LocalGlassIntensity.current.coerceIn(0, 100) / 100f
+    val body = if (backdrop != null) {
+        Modifier.glassRefraction(backdrop, RectangleShape, tint, intensity, dark, flat = true)
+    } else {
+        Modifier.background(tint.copy(alpha = (0.35f + 0.5f * intensity).coerceIn(0f, 0.9f)))
+    }
+    return this
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.55f to Color.Black,
+                    1f to Color.Black
+                ),
+                blendMode = BlendMode.DstIn
+            )
+        }
+        .then(body)
+}
 
 /** Мягкий фон без резких полос: базовый цвет темы и два больших рассеянных пятна. */
 @Composable
