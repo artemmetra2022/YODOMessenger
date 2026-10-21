@@ -34,14 +34,19 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
+  /* Мобильные браузеры считают 100vh с учётом скрытых панелей (адресная строка и т.п.),
+     из-за этого нижний блок — поле ввода чата — уезжает за видимую область и его
+     не видно. dvh даёт реальную высоту видимой области; строка ниже — fallback для
+     очень старых браузеров, где dvh не поддержан. */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
 .hidden { display: none !important; }
 
 /* ===== Экраны авторизации ===== */
-.screen { display: none; height: 100vh; }
+.screen { display: none; height: 100vh; height: 100dvh; }
 .screen.active { display: flex; }
 
 #screen-login, #screen-register, #screen-verify, #screen-blocked, #screen-qr-login {
