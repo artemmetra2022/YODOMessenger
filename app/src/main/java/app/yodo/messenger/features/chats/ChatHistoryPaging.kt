@@ -28,8 +28,14 @@ internal fun mergeHistoryPages(older: List<Message>, window: List<Message>): Lis
 internal fun hasOlderHistory(page: List<Message>, requestedLimit: Int): Boolean =
     page.size >= requestedLimit.coerceAtLeast(1)
 
-/** Вкладки раздела «Медиа, файлы, ссылки». */
-internal enum class ChatMediaTab { MEDIA, FILES, LINKS }
+/**
+ * Вкладки раздела «Медиа, файлы, ссылки».
+ *
+ * Публичный (не internal), потому что входит в публичный контракт ChatMediaViewModel
+ * (ChatMediaUiState.tab, selectTab): Kotlin запрещает публичным функциям раскрывать
+ * internal-типы.
+ */
+enum class ChatMediaTab { MEDIA, FILES, LINKS }
 
 /**
  * Относится ли сообщение к выбранной вкладке. Правила намеренно повторяют то, что
