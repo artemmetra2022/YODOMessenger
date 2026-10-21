@@ -30,6 +30,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -113,7 +114,14 @@ data class ChatUiState(
     // НОВОЕ (п.7 «вышел из чата и зашёл — сообщений нет»): false, пока от Firestore
     // не пришёл первый снапшот сообщений (даже пустой). До этого момента в UI
     // показывается индикатор загрузки, а не ложное «Сообщений пока нет».
-    val initialMessagesReceived: Boolean = false
+    val initialMessagesReceived: Boolean = false,
+    // НОВОЕ (пагинация истории): в «живом» окне только последние сообщения. Флаг
+    // говорит, есть ли ещё история выше, а isLoadingOlder — идёт ли подгрузка.
+    val hasMoreHistory: Boolean = true,
+    val isLoadingOlder: Boolean = false,
+    // Растёт после каждой подгруженной страницы — ChatScreen по нему возвращает
+    // прокрутку на то же сообщение, чтобы список не прыгал при вставке сверху.
+    val historyPage: Int = 0
 )
 
 // НОВОЕ (FAQ-бот поддержки): три состояния кнопочного бота внутри чата поддержки —
@@ -256,6 +264,17 @@ class ChatViewModel @Inject constructor(
     private var visibleBadgeMessages: List<Message> = emptyList()
     private var badgeClearJob: Job? = null
 
+    // НОВОЕ (пагинация истории): уже подгруженные «старые» страницы и текущая
+    // задача подгрузки. Якорь следующей страницы вычисляется на лету в loadOlderPage
+    // (самое старое из известных сообщений), а не хранится отдельным полем: иначе
+    // при последовательной подгрузке нескольких страниц (loadHistoryUntil) якорь
+    // успевал бы устареть, и одна и та же страница читалась бы повторно.
+    private val olderHistory = MutableStateFlow<List<Message>>(emptyList())
+    private var olderLoadJob: Job? = null
+    // Последнее «живое» окно — чтобы при сдвиге окна (пришло новое сообщение)
+    // перенести выпавшие сообщения в olderHistory, а не потерять их.
+    private var lastWindowMessages: List<Message> = emptyList()
+
     private fun observeUnreadBadge() {
         viewModelScope.launch {
             messageRepository.observeUnreadBadge(chatId, topicId).collect { badge ->
@@ -288,6 +307,15 @@ class ChatViewModel @Inject constructor(
 
     init {
         loadChatInfo()
+        // НОВОЕ («отметить как непрочитанное»): как только чат реально открыт, локальная
+        // пометка снимается — иначе бейдж в списке чатов оставался бы навсегда.
+        viewModelScope.launch {
+            runCatching {
+                if (chatId in userSettingsPreferences.manualUnreadChatIds.first()) {
+                    userSettingsPreferences.setChatManuallyUnread(chatId, false)
+                }
+            }
+        }
         // НОВОЕ (FAQ-бот поддержки): в чате поддержки бот открыт по умолчанию —
         // пользователь сразу видит разделы вопросов вместо пустого поля ввода.
         // Если это чат поддержки не выяснится сразу (chatType грузится асинхронно
@@ -659,7 +687,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val localEchoes = mutableMapOf<String, Message>()
             var previouslyFailedIds = emptySet<String>()
-            combine(messageRepository.observeMessages(chatId, topicId), textOutbox.items) { messages, outbox ->
+            combine(
+                // НОВОЕ (пагинация истории): слушаем только последнюю страницу сообщений,
+                // а не всю историю чата. Старые страницы докидываются в olderHistory по
+                // прокрутке вверх (loadOlderMessages) — см. mergeHistoryPages.
+                messageRepository.observeMessages(chatId, topicId, limit = CHAT_HISTORY_PAGE_SIZE),
+                textOutbox.items,
+                olderHistory
+            ) { window, outbox, older ->
+                val messages = mergeHistoryPages(older, window)
                 val pending = outbox.filter { it.owner == currentUserId && it.chat == chatId && (topicId == null || it.topic == topicId) }
                 localEchoes.keys.removeAll(previouslyFailedIds - pending.map { it.id }.toSet())
                 previouslyFailedIds = pending.filter { it.failed }.map { it.id }.toSet()
@@ -669,13 +705,111 @@ class ChatViewModel @Inject constructor(
                 val acknowledgedIds = messages.filter { it.status != app.yodo.messenger.domain.model.MessageStatus.SENDING }.map { it.id }.toSet()
                 localEchoes.keys.removeAll(acknowledgedIds)
                 localEchoes.entries.removeAll { it.value.senderId != currentUserId }
-                app.yodo.messenger.data.outbox.mergeOutgoingMessages(messages, localEchoes.values.toList()) to pending
-            }.collect { (messages, pending) ->
+                Triple(
+                    app.yodo.messenger.data.outbox.mergeOutgoingMessages(messages, localEchoes.values.toList()),
+                    pending,
+                    window
+                )
+            }.collect { (messages, pending, window) ->
+                // Скользящее окно: когда приходят новые сообщения, самые старые выпадают
+                // из него. Их нельзя терять — пользователь уже видел их выше, поэтому
+                // переносим в olderHistory (удаление сообщений здесь soft-delete, документ
+                // остаётся в окне с isDeleted = true, так что «выпасть» может только по сдвигу).
+                val windowIds = window.map { it.id }.toSet()
+                val windowOldest = window.firstOrNull()?.timestamp
+                val droppedFromWindow = if (windowOldest == null) emptyList() else
+                    lastWindowMessages.filter { old -> old.timestamp < windowOldest && old.id !in windowIds }
+                if (droppedFromWindow.isNotEmpty()) {
+                    olderHistory.value = (olderHistory.value + droppedFromWindow)
+                        .distinctBy { it.id }
+                        .sortedBy { it.timestamp }
+                }
+                lastWindowMessages = window
                 _uiState.value = _uiState.value.copy(messages = messages, initialMessagesReceived = true,
                     queuedTextCount = pending.size, failedTextCount = pending.count { it.failed },
-                    outboxError = pending.firstOrNull { it.failed }?.error)
+                    outboxError = pending.firstOrNull { it.failed }?.error,
+                    // Короткое окно = в чате меньше одной страницы сообщений, значит
+                    // вся история уже загружена и подгружать сверху нечего.
+                    hasMoreHistory = _uiState.value.hasMoreHistory && window.size >= CHAT_HISTORY_PAGE_SIZE)
             }
         }
+    }
+
+    /**
+     * НОВОЕ (пагинация истории): подгрузить следующую страницу старых сообщений.
+     * Вызывается, когда пользователь докрутил чат почти до верхней границы.
+     */
+    fun loadOlderMessages() {
+        if (olderLoadJob?.isActive == true) return
+        if (!_uiState.value.hasMoreHistory) return
+        olderLoadJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingOlder = true)
+            try {
+                loadOlderPage()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось загрузить историю"))
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoadingOlder = false)
+            }
+        }
+    }
+
+    /**
+     * НОВОЕ (переход к старому сообщению): прокручивает историю вверх, пока сообщение
+     * не появится в загруженном окне (ограниченное число страниц — защита от циклов).
+     */
+    fun loadHistoryUntil(messageId: String) {
+        if (olderLoadJob?.isActive == true) return
+        if (isMessageLoaded(messageId)) return
+        olderLoadJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingOlder = true)
+            try {
+                var pages = 0
+                while (pages < 10 && _uiState.value.hasMoreHistory && !isMessageLoaded(messageId)) {
+                    if (!loadOlderPage()) break
+                    pages++
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось загрузить историю"))
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoadingOlder = false)
+            }
+        }
+    }
+
+    /**
+     * Сообщение уже загружено? Проверяем и очередь старых страниц: после loadOlderPage
+     * она обновляется сразу, а uiState.messages — чуть позже, следующим эмитом combine.
+     */
+    private fun isMessageLoaded(messageId: String): Boolean =
+        _uiState.value.messages.any { it.id == messageId } || olderHistory.value.any { it.id == messageId }
+
+    /** Читает одну страницу вверх и добавляет её в olderHistory. false — история кончилась. */
+    private suspend fun loadOlderPage(): Boolean {
+        // Якорь — самое старое из уже известных сообщений: страницы в olderHistory
+        // идут по возрастанию, живое окно тоже, поэтому достаточно двух первых.
+        // Считаем здесь, а не в combine: при последовательной подгрузке нескольких
+        // страниц combine ещё не успевает эмитить, и закешированный якорь был бы старым.
+        val anchor = listOfNotNull(
+            olderHistory.value.firstOrNull()?.timestamp,
+            lastWindowMessages.firstOrNull()?.timestamp,
+            _uiState.value.messages.firstOrNull()?.timestamp
+        ).minOrNull() ?: return false
+        val page = messageRepository.getMessagesPage(chatId, topicId, anchor, CHAT_HISTORY_PAGE_SIZE)
+        if (page.isEmpty()) {
+            _uiState.value = _uiState.value.copy(hasMoreHistory = false)
+            return false
+        }
+        olderHistory.value = (olderHistory.value + page).distinctBy { it.id }
+        _uiState.value = _uiState.value.copy(
+            historyPage = _uiState.value.historyPage + 1,
+            hasMoreHistory = hasOlderHistory(page, CHAT_HISTORY_PAGE_SIZE)
+        )
+        return true
     }
 
     fun retryQueuedMessages() {

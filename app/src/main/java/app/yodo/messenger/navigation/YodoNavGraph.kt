@@ -39,6 +39,7 @@ import app.yodo.messenger.features.auth.GlobalBlockGateScreen
 import app.yodo.messenger.features.auth.GlobalBlockViewModel
 import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatScreen
+import app.yodo.messenger.features.chats.ChatMediaScreen
 import app.yodo.messenger.features.chats.ChatStatsScreen
 // НОВОЕ (переработка каналов): три новых экрана
 import app.yodo.messenger.features.chats.ChannelProfileScreen
@@ -683,6 +684,37 @@ fun YodoNavGraph(
                 // НОВОЕ (поделиться контактом абонента): "Поделиться контактом" → QR-код контакта собеседника.
                 onShareContactQr = { otherUserId ->
                     navController.navigate(Routes.ContactQr.createRoute(otherUserId))
+                },
+                // НОВОЕ (раздел «Медиа, файлы, ссылки»): вложения открытого чата.
+                onOpenChatMedia = { mediaChatId ->
+                    navController.navigate(
+                        Routes.ChatMedia.createRoute(
+                            mediaChatId,
+                            backStackEntry.arguments?.getString(Routes.Chat.ARG_TOPIC_ID)
+                        )
+                    )
+                }
+            )
+        }
+        // НОВОЕ (раздел «Медиа, файлы, ссылки»): фото/голосовые, документы и ссылки чата.
+        composable(
+            route = Routes.ChatMedia.route,
+            arguments = listOf(
+                navArgument(Routes.ChatMedia.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument(Routes.ChatMedia.ARG_TOPIC_ID) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) {
+            ChatMediaScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenImageViewer = { imageBase64, senderName, timestamp ->
+                    ImageViewerHolder.imageBase64 = imageBase64
+                    ImageViewerHolder.senderName = senderName
+                    ImageViewerHolder.timestamp = timestamp
+                    navController.navigate(Routes.ImageViewer.route)
                 }
             )
         }

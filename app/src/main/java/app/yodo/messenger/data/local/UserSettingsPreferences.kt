@@ -108,6 +108,10 @@ class UserSettingsPreferences @Inject constructor(
     private val decoyPinHashKey = stringPreferencesKey("decoy_pin_hash")
     private val decoyPinSaltKey = stringPreferencesKey("decoy_pin_salt")
     private val hiddenChatIdsKey = stringSetPreferencesKey("hidden_chat_ids")
+    // НОВОЕ («отметить как непрочитанное»): локальная пометка чата. Сервер хранит только
+    // счётчик непрочитанных, «вернуть» его нельзя, поэтому пометка живёт на устройстве
+    // и снимается, как только чат открыли (см. ChatViewModel.init).
+    private val manualUnreadChatIdsKey = stringSetPreferencesKey("manual_unread_chat_ids")
     // НОВОЕ (закрепление официального канала): см. officialChannelPinned.
     private val officialChannelPinnedKey = booleanPreferencesKey("official_channel_pinned")
     private val notificationPermissionAskedKey = booleanPreferencesKey("notification_permission_asked")
@@ -200,6 +204,9 @@ class UserSettingsPreferences @Inject constructor(
     // НОВОЕ (скрытые чаты): установлен ли ложный PIN и множество скрытых чатов.
     val isDecoyPinSet: Flow<Boolean> = context.settingsDataStore.data.map { !it[decoyPinHashKey].isNullOrBlank() }
     val hiddenChatIds: Flow<Set<String>> = context.settingsDataStore.data.map { it[hiddenChatIdsKey] ?: emptySet() }
+    /** НОВОЕ («отметить как непрочитанное»): чаты, помеченные вручную на этом устройстве. */
+    val manualUnreadChatIds: Flow<Set<String>> =
+        context.settingsDataStore.data.map { it[manualUnreadChatIdsKey] ?: emptySet() }
     /** НОВОЕ (скрытые чаты): активен ли сейчас режим ложного PIN (только runtime). */
     val decoyMode: kotlinx.coroutines.flow.StateFlow<Boolean> = appLockState.decoyMode
 
@@ -343,6 +350,14 @@ class UserSettingsPreferences @Inject constructor(
         context.settingsDataStore.edit { prefs ->
             val current = prefs[hiddenChatIdsKey] ?: emptySet()
             prefs[hiddenChatIdsKey] = if (hidden) current + chatId else current - chatId
+        }
+    }
+
+    // НОВОЕ («отметить как непрочитанное»): включить/снять локальную пометку непрочитанного.
+    suspend fun setChatManuallyUnread(chatId: String, unread: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[manualUnreadChatIdsKey] ?: emptySet()
+            prefs[manualUnreadChatIdsKey] = if (unread) current + chatId else current - chatId
         }
     }
 

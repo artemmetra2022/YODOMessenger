@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.MarkChatUnread
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.Icons
@@ -355,7 +356,7 @@ fun ChatListScreen(
                 val tabs = buildList {
                     add(FilterTab(ChatFilter.ALL, stringResource(R.string.chat_filter_all)))
                     add(FilterTab(ChatFilter.UNREAD, stringResource(R.string.chat_filter_unread), 
-                        badge = allActive.count { it.unreadCount > 0 }))
+                        badge = allActive.count { it.unreadCount > 0 || it.isManuallyUnread }))
                     add(FilterTab(ChatFilter.PRIVATE, stringResource(R.string.chat_filter_private)))
                     add(FilterTab(ChatFilter.GROUPS, stringResource(R.string.chat_filter_groups)))
                     // НОВОЕ (расширение интерфейса каналов): отдельный таб «Каналы» —
@@ -538,7 +539,7 @@ fun ChatListScreen(
                                 ChatListSortOrder.RECENT -> state.chats
                                 ChatListSortOrder.UNREAD_FIRST -> state.chats.sortedWith(
                                     compareByDescending<ChatPreview> { it.isPinned }
-                                        .thenByDescending { it.unreadCount > 0 }
+                                        .thenByDescending { it.unreadCount > 0 || it.isManuallyUnread }
                                         .thenByDescending { it.lastMessageTimestamp }
                                 )
                                 ChatListSortOrder.ALPHABETICAL -> state.chats.sortedWith(
@@ -558,6 +559,7 @@ fun ChatListScreen(
                                     onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
                                     isHidden = chat.chatId in hiddenChatIds,
                                     onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) },
+                                    onMarkUnread = { viewModel.markChatUnread(chat.chatId) },
                                     // НОВОЕ (админ-функции групп): тап по бейджу заявок —
                                     // сразу к экрану группы с заявками.
                                     onRequestsClick = { onOpenGroupInfo(chat.chatId) },
@@ -1235,6 +1237,8 @@ internal fun SwipeableChatListItem(
     onToggleArchive: () -> Unit = {},
     isHidden: Boolean = false,
     onToggleHidden: () -> Unit = {},
+    // НОВОЕ («отметить как непрочитанное»): локальная пометка, снимается при открытии.
+    onMarkUnread: () -> Unit = {},
     // НОВОЕ (админ-функции групп): тап по бейджу заявок на карточке группы.
     onRequestsClick: () -> Unit = {},
     compact: Boolean = false,
@@ -1335,6 +1339,9 @@ internal fun SwipeableChatListItem(
                     YodoMenuAction(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute), if (chat.isMuted) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, "Уведомления") { onToggleMute() },
                     YodoMenuAction(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action), if (chat.isArchived) Icons.Filled.Unarchive else Icons.Filled.Archive, "В списке чатов") { onToggleArchive() },
                     YodoMenuAction(if (isHidden) "Показать чат" else "Скрыть чат", if (isHidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, "Приватность") { onToggleHidden() },
+                    // НОВОЕ («отметить как непрочитанное»): только локально, серверный
+                    // счётчик непрочитанных вернуть нельзя — пометка снимается при открытии.
+                    YodoMenuAction("Отметить как непрочитанное", Icons.Filled.MarkChatUnread, "Основное") { onMarkUnread() },
                     YodoMenuAction(stringResource(R.string.chat_list_clear), Icons.Filled.CleaningServices, "Опасные действия", destructive = true) { confirmMenuAction = "clear" },
                     YodoMenuAction(stringResource(R.string.chat_list_delete), Icons.Filled.Delete, "Опасные действия", destructive = true) { confirmMenuAction = "delete" }
                 ))
@@ -1384,7 +1391,7 @@ private fun ChatListItem(
     // Непрочитанный чат должен читаться с одного взгляда — не только по бейджу
     // с числом, но и по весу заголовка и цвету превью. Прочитанные чаты уходят
     // на второй план, чтобы глаз сам находил, куда нужно вернуться.
-    val hasUnread = chat.unreadCount > 0
+    val hasUnread = chat.unreadCount > 0 || chat.isManuallyUnread
     val titleColor = MaterialTheme.colorScheme.onSurface
     val previewColor = if (hasUnread) {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
@@ -1678,7 +1685,7 @@ private fun ChatListItem(
                     // всплытием — сообщает "здесь что-то изменилось" тем же языком,
                     // которым бейджи говорят на иконке приложения и в уведомлениях.
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = chat.unreadCount > 0,
+                        visible = hasUnread,
                         enter = androidx.compose.animation.scaleIn(
                             animationSpec = YodoMotion.confirm(),
                             initialScale = 0.4f
@@ -1691,14 +1698,21 @@ private fun ChatListItem(
                         Box(
                             modifier = Modifier.padding(start = 6.dp)
                                 .clip(CircleShape).background(colorTheme.primary)
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                // НОВОЕ («отметить как непрочитанное»): без числа рисуем
+                                // точку 8dp, как в Telegram, — серверного счётчика нет.
+                                .padding(
+                                    horizontal = if (chat.unreadCount > 0) 7.dp else 4.dp,
+                                    vertical = if (chat.unreadCount > 0) 2.dp else 4.dp
+                                )
                         ) {
-                            Text(
-                                text = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            if (chat.unreadCount > 0) {
+                                Text(
+                                    text = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }

@@ -84,7 +84,10 @@ fun ArchivedChatsScreen(
                                     onToggleMute = { viewModel.toggleMuteChat(chat.chatId) },
                                     onDelete = { viewModel.deleteChat(chat.chatId) },
                                     onClearHistory = { viewModel.clearChatHistory(chat.chatId) },
-                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) }
+                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
+                                    // НОВОЕ («отметить как непрочитанное»): тот же локальный
+                                    // флаг, что и в основном списке чатов.
+                                    onMarkUnread = { viewModel.markChatUnread(chat.chatId) }
                                 )
                             }
                         }

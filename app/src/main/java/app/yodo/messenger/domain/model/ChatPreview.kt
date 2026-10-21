@@ -49,5 +49,9 @@ data class ChatPreview(
     // ссылке/приглашению/QR — см. ChannelAccessMode). Не путать с isHidden в
     // ChatListScreen — тот отвечает за отдельный PIN-замок конкретного чата
     // именно у меня на устройстве и от accessMode никак не зависит.
-    val isHiddenAccessGroup: Boolean = false
+    val isHiddenAccessGroup: Boolean = false,
+    // НОВОЕ («отметить как непрочитанное»): чат помечен вручную на этом устройстве.
+    // Серверный unreadCount при этом остаётся 0 — в списке показываем точку-бейдж,
+    // а при открытии чата пометка снимается (ChatViewModel.init).
+    val isManuallyUnread: Boolean = false
 )

@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Campaign
@@ -250,6 +251,13 @@ import kotlin.math.roundToInt
 
 private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
+/**
+ * НОВОЕ (пагинация истории): якорь прокрутки. key — ключ первого видимого элемента
+ * LazyColumn (id сообщения или "date_<id>" у разделителя даты), offset — его смещение
+ * в пикселях, page/size — состояние списка в момент запуска подгрузки.
+ */
+private data class HistoryScrollAnchor(val key: String, val offset: Int, val page: Int, val size: Int)
+
 @Composable
 fun ChatScreen(
     chatId: String,
@@ -267,6 +275,8 @@ fun ChatScreen(
     onOpenCanvas: (String?, Int, String?) -> Unit = { _, _, _ -> },
     // Общая доска чата: живая карточка в чате; нажатие открывает редактор.
     onOpenSharedBoard: (String) -> Unit = {},
+    // НОВОЕ (раздел «Медиа, файлы, ссылки»): переход к списку вложений этого чата.
+    onOpenChatMedia: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -331,6 +341,12 @@ fun ChatScreen(
         )
     }
     var focusMessageHandled by remember(viewModel.initialMessageId) { mutableStateOf(false) }
+    // НОВОЕ (пагинация истории): false, пока список не спозиционирован (вниз при входе
+    // в чат или на сообщение из уведомления). Иначе подгрузка вверх сработала бы на
+    // первом кадре, когда firstVisibleItemIndex ещё равен 0.
+    var firstListPositioned by remember(viewModel) { mutableStateOf(false) }
+    // НОВОЕ (пагинация истории): попыток догрузить историю до нужного сообщения.
+    var focusLoadAttempts by remember(viewModel.initialMessageId) { mutableStateOf(0) }
     reminderTarget?.let { message ->
         app.yodo.messenger.features.reminders.ReminderDialog(
             onDismiss = { reminderTarget = null },
@@ -380,20 +396,23 @@ fun ChatScreen(
         if (targetId != null && !focusMessageHandled && uiState.initialMessagesReceived) {
             val target = uiState.messages.firstOrNull { it.id == targetId && !it.isDeleted }
             if (target != null) {
-                var index = 0
-                var previousDate: String? = null
-                for (message in uiState.messages) {
-                    val label = formatDateSeparator(message.timestamp)
-                    if (label != previousDate) { index++; previousDate = label }
-                    if (message.id == targetId) break
-                    index++
-                }
+                val index = lazyItemIndexForMessage(uiState.messages, targetId, ::formatDateSeparator)
                 kotlinx.coroutines.delay(100)
-                listState.scrollToItem(index)
+                if (index >= 0) listState.scrollToItem(index)
+            } else if (uiState.hasMoreHistory && focusLoadAttempts < 3) {
+                // НОВОЕ (пагинация истории): сообщение может быть старше загруженного
+                // окна — догружаем страницы вверх, пока не найдём его. Эффект
+                // перезапустится, когда придут новые сообщения.
+                focusLoadAttempts++
+                viewModel.loadHistoryUntil(targetId)
+                return@LaunchedEffect
             } else {
                 kotlinx.coroutines.delay(2000)
                 snackbarHostState.showSnackbar(context.getString(R.string.reminder_message_unavailable))
             }
+            // Разрешаем подгрузку истории по прокрутке: при переходе к сообщению
+            // автоскролл вниз не выполнялся и флаг оставался false.
+            firstListPositioned = true
             focusMessageHandled = true
         }
     }
@@ -558,7 +577,6 @@ fun ChatScreen(
         uiState.messages
     }
     var previousTail by remember(viewModel) { mutableStateOf<String?>(null) }
-    var firstListPositioned by remember(viewModel) { mutableStateOf(false) }
     LaunchedEffect(displayedMessages.lastOrNull()?.id, displayedMessages.size) {
         val tail = displayedMessages.lastOrNull() ?: return@LaunchedEffect
         val wasNearBottom = !listState.canScrollForward ||
@@ -573,6 +591,64 @@ fun ChatScreen(
             firstListPositioned = true
         }
         previousTail = tail.id
+    }
+    // НОВОЕ (пагинация истории): докрутили почти до верхней границы — подгружаем
+    // следующую страницу. Ключ первого видимого элемента запоминаем ДО загрузки:
+    // после вставки старых сообщений Compose сдвинул бы содержимое вниз, и пользователь
+    // «прыгал» бы по истории. Возвращаем прокрутку к тому же элементу.
+    var historyAnchor by remember(viewModel) { mutableStateOf<HistoryScrollAnchor?>(null) }
+    val messageItemKeys = remember(displayedMessages) {
+        val keys = ArrayList<String>(displayedMessages.size + 8)
+        var previousLabel: String? = null
+        for (message in displayedMessages) {
+            val label = formatDateSeparator(message.timestamp)
+            if (label != previousLabel) {
+                keys.add("date_${message.id}")
+                previousLabel = label
+            }
+            keys.add(message.id)
+        }
+        keys
+    }
+    // Эффект подписки на прокрутку не должен перезапускаться на каждый флаг
+    // (иначе сразу после загрузки страницы он снова видел бы index 0 и просил ещё
+    // одну страницу). Актуальные значения читаем через rememberUpdatedState.
+    val latestUiState by androidx.compose.runtime.rememberUpdatedState(uiState)
+    val latestItemKeys by androidx.compose.runtime.rememberUpdatedState(messageItemKeys)
+    LaunchedEffect(listState, uiState.isSearchActive) {
+        if (uiState.isSearchActive) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
+            if (!firstListPositioned) return@collect
+            // Пока предыдущая страница не вставлена и прокрутка не восстановлена,
+            // новую не запрашиваем — иначе читаем по две страницы на одно прокручивание.
+            if (historyAnchor != null) return@collect
+            val state = latestUiState
+            if (index <= 2 && state.hasMoreHistory && !state.isLoadingOlder) {
+                latestItemKeys.getOrNull(index)?.let { key ->
+                    historyAnchor = HistoryScrollAnchor(key, listState.firstVisibleItemScrollOffset,
+                        state.historyPage, displayedMessages.size)
+                }
+                viewModel.loadOlderMessages()
+            }
+        }
+    }
+    LaunchedEffect(uiState.historyPage, displayedMessages.size) {
+        val anchor = historyAnchor ?: return@LaunchedEffect
+        // Ждём именно прихода новой страницы: страница выросла И список стал длиннее.
+        if (uiState.historyPage <= anchor.page || displayedMessages.size <= anchor.size) return@LaunchedEffect
+        val index = messageItemKeys.indexOf(anchor.key)
+        if (index >= 0) listState.scrollToItem(index, anchor.offset)
+        historyAnchor = null
+    }
+    LaunchedEffect(uiState.historyPage, uiState.isLoadingOlder) {
+        val anchor = historyAnchor ?: return@LaunchedEffect
+        // Страница не пришла (ошибка сети): номер страницы не изменился — снимаем
+        // якорь, чтобы подгрузку можно было повторить. Если же страница пришла,
+        // якорь снимет эффект восстановления прокрутки после вставки сообщений
+        // (даже если это последняя, короткая страница).
+        if (!uiState.isLoadingOlder && uiState.historyPage == anchor.page) {
+            historyAnchor = null
+        }
     }
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     var chatResumed by remember(lifecycleOwner) { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) }
@@ -905,6 +981,7 @@ fun ChatScreen(
                                                 }
                                             }
                                             ChatMenuId.SEARCH -> YodoMenuAction("Поиск по сообщениям", Icons.Filled.Search, "Основное") { viewModel.toggleSearch() }
+                                            ChatMenuId.MEDIA -> YodoMenuAction("Медиа, файлы, ссылки", Icons.Filled.PermMedia, "Основное") { onOpenChatMedia(chatId) }
                                             ChatMenuId.BOARD -> YodoMenuAction("Интерактивная доска", Icons.Filled.Dashboard, "Основное") { onOpenCanvas(null, 0, null) }
                                             ChatMenuId.VERIFY_KEYS -> YodoMenuAction(stringResource(R.string.security_keys_title), Icons.Filled.Security, "Приватность") {
                                                 showKeyVerification = true; viewModel.refreshConversationSecurity()

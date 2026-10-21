@@ -20,7 +20,25 @@ interface MessageRepository {
 
     suspend fun clearLegacyPrivatePreview(chatId: String)
 
-    fun observeMessages(chatId: String, topicId: String? = null): Flow<List<Message>>
+    /**
+     * НОВОЕ (пагинация истории): limit != null — подписка только на последние `limit`
+     * сообщений (по возрастанию timestamp), вместо всей истории чата. null — прежнее
+     * поведение без ограничения (используется там, где нужна полная история, например
+     * в статистике канала).
+     */
+    fun observeMessages(chatId: String, topicId: String? = null, limit: Int? = null): Flow<List<Message>>
+
+    /**
+     * НОВОЕ (пагинация истории): одна страница истории «вверх» — сообщения старше
+     * beforeTimestamp (null = самая свежая страница), по возрастанию timestamp.
+     * Нужна для кнопки/скролла «загрузить ещё» и для раздела «Медиа, файлы, ссылки».
+     */
+    suspend fun getMessagesPage(
+        chatId: String,
+        topicId: String? = null,
+        beforeTimestamp: Long? = null,
+        limit: Int = 50
+    ): List<Message>
     // НОВОЕ (переработка каналов): одно сообщение (для превью поста в экране комментариев).
     fun observeMessage(chatId: String, messageId: String): Flow<Message?>
     // НОВОЕ (per-message исчезающие сообщения, как в Telegram): hasTtlOverride = true означает,

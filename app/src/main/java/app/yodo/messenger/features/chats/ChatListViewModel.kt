@@ -105,6 +105,12 @@ class ChatListViewModel @Inject constructor(
     private val _activeFilter = MutableStateFlow<ChatFilter>(ChatFilter.ALL)
     val activeFilter: StateFlow<ChatFilter> = _activeFilter
 
+    // НОВОЕ («отметить как непрочитанное»): локальные пометки чатов на этом устройстве.
+    // Объявлено до init{}, т.к. читается из observeChats() — см. комментарий выше.
+    private val manualUnreadChatIds: StateFlow<Set<String>> =
+        userSettingsPreferences.manualUnreadChatIds
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     init {
         observeNetworkState()
         observeChats()
@@ -184,6 +190,11 @@ class ChatListViewModel @Inject constructor(
     // НОВОЕ (скрытые чаты): проверка пин-кода для шторки (без побочных эффектов).
     suspend fun checkHiddenPin(pin: String): HiddenPinResult = userSettingsPreferences.checkHiddenPin(pin)
 
+    /** Пометить чат непрочитанным локально (снимается при открытии чата). */
+    fun markChatUnread(chatId: String) {
+        viewModelScope.launch { userSettingsPreferences.setChatManuallyUnread(chatId, true) }
+    }
+
     // НОВОЕ (чат поддержки): является ли текущий пользователь админом поддержки —
     // тогда в меню показывается пункт "Админ-панель поддержки".
     val isSupportAdmin: Boolean get() = chatRepository.isSupportAdmin()
@@ -250,8 +261,10 @@ class ChatListViewModel @Inject constructor(
             combine(
                 baseInfo,
                 chatFolders.onStart { emit(emptyList()) },
-                hiddenInfo
-            ) { (result, drafts, filter), folders, hidden ->
+                hiddenInfo,
+                // НОВОЕ («отметить как непрочитанное»): локальные пометки чатов.
+                manualUnreadChatIds
+            ) { (result, drafts, filter), folders, hidden, manualUnreadIds ->
                 when (result) {
                     is ChatListResult.Success -> {
                         val chatsWithDrafts = if (drafts.isEmpty()) {
@@ -280,9 +293,17 @@ class ChatListViewModel @Inject constructor(
                                 chat.chatId.startsWith("support_") ||
                                 chat.lastMessage.isNotBlank() ||
                                 chat.draftText.isNotBlank() ||
-                                chat.lastMessageTimestamp == 0L
+                                chat.lastMessageTimestamp == 0L ||
+                                // НОВОЕ («отметить как непрочитанное»): вручную помеченный
+                                // пустой чат не должен исчезать из списка.
+                                chat.chatId in manualUnreadIds
                         }
-                        val (archived, active) = chatsWithContent.partition { it.isArchived }
+                        // НОВОЕ («отметить как непрочитанное»): флаг с устройства.
+                        val flaggedChats = if (manualUnreadIds.isEmpty()) chatsWithContent else
+                            chatsWithContent.map { chat ->
+                                if (chat.chatId in manualUnreadIds) chat.copy(isManuallyUnread = true) else chat
+                            }
+                        val (archived, active) = flaggedChats.partition { it.isArchived }
                         
                         // Применяем фильтр
                         val filtered = when (filter) {
@@ -292,7 +313,7 @@ class ChatListViewModel @Inject constructor(
                             // НОВОЕ (расширение интерфейса каналов): таб «Мои каналы» — только CHANNEL,
                             // включая владельца/админа и просто подписанта.
                             ChatFilter.CHANNELS -> active.filter { it.type == ChatType.CHANNEL }
-                            ChatFilter.UNREAD   -> active.filter { it.unreadCount > 0 }
+                            ChatFilter.UNREAD   -> active.filter { it.unreadCount > 0 || it.isManuallyUnread }
                             is ChatFilter.Folder -> {
                                 // НОВОЕ (п.4): фильтрация по пользовательской папке
                                 val folder = folders.find { it.id == filter.folderId }

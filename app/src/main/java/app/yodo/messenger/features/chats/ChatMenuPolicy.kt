@@ -1,6 +1,6 @@
 package app.yodo.messenger.features.chats
 
-internal enum class ChatMenuId { PROFILE, SEARCH, BOARD, VERIFY_KEYS, INVITE, SCHEDULED, CHANNEL_STATS,
+internal enum class ChatMenuId { PROFILE, SEARCH, MEDIA, BOARD, VERIFY_KEYS, INVITE, SCHEDULED, CHANNEL_STATS,
     SUBSCRIPTION, DISAPPEARING, SHARE_CONTACT, CHAT_STATS, EXPORT, SCREENSHOT, CLEAR, DELETE_CHAT, DELETE_CHANNEL }
 
 internal data class ChatMenuContext(
@@ -17,6 +17,8 @@ internal fun chatMenuIds(context: ChatMenuContext): List<ChatMenuId> = with(cont
     buildList {
         if (chatType in setOf("GROUP", "CHANNEL") || hasOtherUser) add(ChatMenuId.PROFILE)
         add(ChatMenuId.SEARCH)
+        // НОВОЕ (раздел «Медиа, файлы, ссылки»): доступен во всех типах чатов.
+        add(ChatMenuId.MEDIA)
         add(ChatMenuId.BOARD)
         if (chatType == "PRIVATE" && !chatId.startsWith("support_") && !chatId.startsWith("saved_")) add(ChatMenuId.VERIFY_KEYS)
         if (channel && isAdmin) {

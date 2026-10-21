@@ -56,7 +56,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val receiptScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val receiptInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    override fun observeMessages(chatId: String, topicId: String?): Flow<List<Message>> = callbackFlow {
+    override fun observeMessages(chatId: String, topicId: String?, limit: Int?): Flow<List<Message>> = callbackFlow {
         // п.7: последний успешно отправленный список — отправляется повторно при ошибке
         // листенера, чтобы сбой сети не очищал уже показанные на экране сообщения.
         var lastEmittedMessages: List<Message>? = null
@@ -68,8 +68,18 @@ class MessageRepositoryImpl @Inject constructor(
         if (topicId != null) {
             query = query.whereEqualTo("topicId", topicId)
         }
+        // НОВОЕ (пагинация истории): с limit слушаем только последние N сообщений —
+        // без него Firestore читал всю историю чата при каждом открытии и на каждое
+        // изменение. Слушатель отдаёт их по возрастанию, как и раньше, чтобы UI
+        // не пришлось менять порядок отрисовки.
+        val pageSize = limit?.takeIf { it > 0 }
+        val paged = pageSize != null
+        query = if (paged) {
+            query.orderBy("timestamp", Query.Direction.DESCENDING).limit(pageSize!!.toLong())
+        } else {
+            query.orderBy("timestamp", Query.Direction.ASCENDING)
+        }
         val listener = query
-            .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 // п.7 («вышел из чата и зашёл — сообщений нет»): при ошибке листенера
                 // (сбой сети в момент подписки, permission denied при устаревшем токене)
@@ -80,6 +90,8 @@ class MessageRepositoryImpl @Inject constructor(
                     .mapNotNull { doc -> mapDocToMessage(doc, chatId) }
                     // п.38: истёкшие исчезающие сообщения не показываем в UI
                     .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
+                    // пейджинг читает историю в обратном порядке — возвращаем хронологию
+                    .let { if (paged) it.sortedBy { msg -> msg.timestamp } else it }
                 lastEmittedMessages = messages
                 trySend(messages)
                 // ИСПРАВЛЕНО (индикатор доставлено): как только чужое сообщение со
@@ -1620,6 +1632,36 @@ class MessageRepositoryImpl @Inject constructor(
                 .get().await()
             snapshot.documents.mapNotNull { mapDocToMessage(it, chatId) }.reversed()
         } catch (e: Exception) { emptyList() }
+    }
+
+    /**
+     * НОВОЕ (пагинация истории): одна страница истории старше beforeTimestamp.
+     * Читает с сервера (Source.SERVER не задаём — допустим кэш), возвращает
+     * сообщения по возрастанию timestamp, как их ждёт UI. Истёкшие исчезающие
+     * сообщения отфильтрованы так же, как в observeMessages.
+     *
+     * Ошибку не глотаем: в отличие от «история кончилась» (пустой список), сбой сети
+     * не должен навсегда выключать подгрузку — ViewModel показывает сообщение и
+     * позволяет повторить попытку.
+     */
+    override suspend fun getMessagesPage(
+        chatId: String,
+        topicId: String?,
+        beforeTimestamp: Long?,
+        limit: Int
+    ): List<Message> {
+        var query: Query = firestore.collection("chats").document(chatId)
+            .collection("messages")
+        if (topicId != null) query = query.whereEqualTo("topicId", topicId)
+        if (beforeTimestamp != null) query = query.whereLessThan("timestamp", beforeTimestamp)
+        val snapshot = query
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(limit.coerceIn(1, 200).toLong())
+            .get().await()
+        return snapshot.documents
+            .mapNotNull { mapDocToMessage(it, chatId) }
+            .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
+            .sortedBy { it.timestamp }
     }
 
     /** НОВОЕ: общий маппинг документа в Message — используется в observeMessages,

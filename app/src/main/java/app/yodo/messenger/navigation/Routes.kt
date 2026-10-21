@@ -215,6 +215,15 @@ sealed class Routes(val route: String) {
         fun createRoute(userId: String) = "call/$userId"
         const val ARG_USER_ID = "userId"
     }
+    // НОВОЕ (раздел «Медиа, файлы, ссылки»): все вложения одного чата/темы форума.
+    data object ChatMedia : Routes("chat_media/{chatId}?topicId={topicId}") {
+        fun createRoute(chatId: String, topicId: String? = null): String {
+            val base = "chat_media/${android.net.Uri.encode(chatId)}"
+            return if (topicId.isNullOrBlank()) base else "$base?topicId=${android.net.Uri.encode(topicId)}"
+        }
+        const val ARG_CHAT_ID = "chatId"
+        const val ARG_TOPIC_ID = "topicId"
+    }
     data object UserProfile : Routes("user_profile/{userId}") {
         fun createRoute(userId: String) = "user_profile/$userId"
         const val ARG_USER_ID = "userId"
