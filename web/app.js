@@ -223,6 +223,21 @@ let allMessagesLoaded = false;
 // Вложение (фото) для следующей отправки
 let pendingImageBase64 = null;
 
+// Голосовое сообщение: состояние записи (MediaRecorder).
+// Модель данных — как в Android (MessageRepositoryImpl.sendVoiceMessage):
+// voiceBase64 + voiceDurationMs в документе сообщения, text = "".
+const VOICE_MAX_BASE64_LENGTH = 900_000;      // как AudioUtils.kt (лимит документа Firestore — 1 МБ)
+const VOICE_MAX_RECORDING_MS = 3 * 60 * 1000; // как AudioUtils.kt (≈ 240 КБ/мин base64)
+let voiceRecorder = null;
+let voiceStream = null;
+let voiceChunks = [];
+let voiceMimeType = "";
+let voiceRecording = false;
+let voiceStartedAt = 0;
+let voiceAction = null; // "send" | "discard" — что сделать, когда recorder остановится
+let voiceTimerInterval = null;
+let voiceMaxTimer = null;
+
 // Сообщение, на которое отвечаем (reply/цитирование)
 let pendingReply = null; // { id, senderId, senderName, text }
 
@@ -606,9 +621,14 @@ $("btn-resend-verification").addEventListener("click", async () => {
   }
 });
 
-$("btn-logout-from-verify").addEventListener("click", () => signOut(auth));
-$("btn-logout-from-blocked").addEventListener("click", () => signOut(auth));
-$("btn-logout").addEventListener("click", () => signOut(auth));
+function signOutWithCleanup() {
+  discardVoiceRecording(); // не оставляем запись после выхода
+  return signOut(auth);
+}
+
+$("btn-logout-from-verify").addEventListener("click", () => signOutWithCleanup());
+$("btn-logout-from-blocked").addEventListener("click", () => signOutWithCleanup());
+$("btn-logout").addEventListener("click", () => signOutWithCleanup());
 
 /* ------------------------------------------------------------------ */
 /* Auth state / навигация                                              */
@@ -1182,6 +1202,7 @@ function openChat(chatId) {
   $("typing-indicator").classList.add("hidden");
   cancelPendingImage();
   cancelReply();
+  discardVoiceRecording();
   oldestLoadedMessageDoc = null;
   allMessagesLoaded = false;
   renderChatList();
@@ -1273,7 +1294,7 @@ function listenActiveMessages() {
       const msg = change.doc.data();
       if (msg.senderId && msg.senderId !== currentUser.uid && Date.now() - (msg.timestamp || 0) < 5000) {
         const name = activeChatData ? chatDisplayName(activeChatData) : "YODO";
-        notifyNewMessage(name, msg.text || (msg.imageBase64 ? "📷 Фото" : "Новое сообщение"), chatId);
+        notifyNewMessage(name, msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : "Новое сообщение")), chatId);
       }
     });
   });
@@ -1316,6 +1337,7 @@ $("btn-back").addEventListener("click", () => {
   if (typingUnsub) { typingUnsub(); typingUnsub = null; }
   cancelPendingImage();
   cancelReply();
+  discardVoiceRecording();
   $("btn-load-more").classList.add("hidden");
   $("chat-active").classList.add("hidden");
   $("chat-empty").classList.remove("hidden");
@@ -1388,7 +1410,7 @@ function startReply(msg) {
     id: msg.id,
     senderId: msg.senderId,
     senderName: msg.senderId === currentUser.uid ? "Вы" : senderNameForReply(msg.senderId),
-    text: msg.text || (msg.imageBase64 ? "📷 Фото" : ""),
+    text: msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : "")),
   };
   $("reply-preview-name").textContent = pendingReply.senderName;
   $("reply-preview-text").textContent = pendingReply.text;
@@ -1488,9 +1510,12 @@ function openForwardModal(msg) {
   forwardingMessage = {
     text: msg.text || "",
     imageBase64: msg.imageBase64 || null,
+    voiceBase64: msg.voiceBase64 || null,
+    voiceDurationMs: msg.voiceDurationMs || 0,
+    voiceMimeType: msg.voiceMimeType || "",
     senderId: msg.senderId,
   };
-  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : "");
+  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : ""));
   $("forward-search-input").value = "";
   renderForwardResults(forwardableChatsList());
   $("modal-forward").classList.remove("hidden");
@@ -1557,11 +1582,20 @@ async function sendForward(targetChatId) {
     };
     if (fwd.text) msgData.text = fwd.text;
     if (fwd.imageBase64) msgData.imageBase64 = fwd.imageBase64;
+    if (fwd.voiceBase64) {
+      msgData.voiceBase64 = fwd.voiceBase64;
+      msgData.voiceDurationMs = fwd.voiceDurationMs || 0;
+      msgData.text = ""; // как sendVoiceMessage в Android: у голосовых text пустой
+      if (fwd.voiceMimeType) msgData.voiceMimeType = fwd.voiceMimeType;
+    }
     batch.set(msgRef, msgData);
 
     const chatRef = doc(db, "chats", targetChatId);
     const chatUpdate = {
-      lastMessage: (fwd.text || "📷 Фото"),
+      lastMessage: (fwd.text
+        || (fwd.imageBase64 ? "📷 Фото" : "")
+        || (fwd.voiceBase64 ? "🎤 Голосовое сообщение" : "")
+        || "Пересланное сообщение"),
       lastMessageTimestamp: now,
       lastMessageSenderId: currentUser.uid,
       lastMessageStatus: "SENT",
@@ -1623,6 +1657,9 @@ function renderMessage(msg) {
     }
     if (msg.imageBase64) {
       bubble.appendChild(buildImageElement(msg.imageBase64));
+    }
+    if (msg.voiceBase64) {
+      bubble.appendChild(buildVoicePlayer(msg));
     }
     if (msg.replyToText) {
       bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText));
@@ -1698,6 +1735,9 @@ function senderNameFor(uid) {
 $("form-send").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $("message-input");
+  // Во время записи кнопка-отправка/Enter — «остановить и отправить голосовое»;
+  // набранный текст останется в поле и уйдёт следующим сообщением.
+  if (voiceRecording) { sendVoiceRecording(); return; }
   const text = input.value.trim();
   const imageBase64 = pendingImageBase64;
   if ((!text && !imageBase64) || !activeChatId) return;
@@ -1855,6 +1895,308 @@ function downscaleImageToBase64(file, maxDim, quality) {
     reader.readAsDataURL(file);
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Голосовые сообщения (запись через MediaRecorder)                     */
+/* ------------------------------------------------------------------ */
+
+// Preferenc-порядок форматов: AAC в M4A — тот же формат записи, что в Android
+// (AudioUtils.kt). Если браузер не умеет AAC (Firefox) — opus в webm/ogg.
+function pickVoiceMimeType() {
+  if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+  const candidates = [
+    "audio/mp4;codecs=mp4a.40.2",
+    "audio/mp4",
+    "audio/webm;codecs=opus",
+    "audio/ogg;codecs=opus",
+  ];
+  for (const mime of candidates) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return "";
+}
+
+function formatVoiceDuration(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+}
+
+function showVoiceRecordingUi() {
+  $("voice-recording").classList.remove("hidden");
+  $("voice-recording-timer").textContent = "0:00";
+  $("btn-attach").disabled = true;
+  $("btn-record-voice").title = "Остановить и отправить";
+  $("message-input").placeholder = "Можно писать текст — отправится следом";
+}
+
+function hideVoiceRecordingUi() {
+  $("voice-recording").classList.add("hidden");
+  $("btn-attach").disabled = false;
+  $("btn-record-voice").title = "Голосовое сообщение";
+  $("message-input").placeholder = "Сообщение...";
+}
+
+async function startVoiceRecording() {
+  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("Запись голосовых сообщений не поддерживается этим браузером");
+    return;
+  }
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false,
+    });
+  } catch (err) {
+    alert("Не удалось получить доступ к микрофону: " + (err.name || "ошибка"));
+    return;
+  }
+  voiceMimeType = pickVoiceMimeType();
+  try {
+    const options = { audioBitsPerSecond: 32_000 }; // 32 kbps моно — как в AudioUtils.kt
+    if (voiceMimeType) options.mimeType = voiceMimeType;
+    voiceRecorder = new MediaRecorder(voiceStream, options);
+  } catch (err) {
+    console.error("MediaRecorder init:", err);
+    cleanupVoiceCapture();
+    alert("Не удалось запустить запись: " + (err.message || "ошибка"));
+    return;
+  }
+  voiceChunks = [];
+  voiceAction = null;
+  voiceRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) voiceChunks.push(e.data);
+  };
+  voiceRecorder.onerror = () => discardVoiceRecording();
+  voiceRecorder.onstop = () => finishVoiceRecording();
+  voiceRecorder.start(250);
+  voiceRecording = true;
+  voiceStartedAt = Date.now();
+  showVoiceRecordingUi();
+  voiceTimerInterval = setInterval(() => {
+    $("voice-recording-timer").textContent = formatVoiceDuration(Date.now() - voiceStartedAt);
+  }, 250);
+  // Автостоп на 3 минутах — как MAX_RECORDING_MS в Android
+  voiceMaxTimer = setTimeout(() => {
+    if (voiceRecording) sendVoiceRecording();
+  }, VOICE_MAX_RECORDING_MS);
+}
+
+// Остановить запись и отправить (кнопка отправки, повторный 🎤 или лимит 3 мин)
+function sendVoiceRecording() {
+  if (!voiceRecorder || !voiceRecording) return;
+  voiceAction = "send";
+  try { voiceRecorder.stop(); } catch (e) { finishVoiceRecording(); }
+}
+
+// Остановить запись и выбросить результат (крестик)
+function discardVoiceRecording() {
+  voiceAction = "discard";
+  if (voiceRecorder && voiceRecording) {
+    try { voiceRecorder.stop(); } catch (e) { /**/ }
+  }
+  finishVoiceRecording(); // если recorder.stop() уже отработал — просто подчистим
+}
+
+function cleanupVoiceCapture() {
+  if (voiceTimerInterval) { clearInterval(voiceTimerInterval); voiceTimerInterval = null; }
+  if (voiceMaxTimer) { clearTimeout(voiceMaxTimer); voiceMaxTimer = null; }
+  if (voiceStream) {
+    voiceStream.getTracks().forEach((t) => t.stop());
+    voiceStream = null;
+  }
+  voiceRecorder = null;
+  voiceRecording = false;
+  voiceMimeType = "";
+}
+
+async function finishVoiceRecording() {
+  const elapsedMs = voiceRecording && voiceStartedAt ? Date.now() - voiceStartedAt : 0;
+  const chunks = voiceChunks;
+  const mimeType = voiceMimeType;
+  cleanupVoiceCapture();
+  voiceChunks = [];
+  hideVoiceRecordingUi();
+  if (voiceAction !== "send") { voiceAction = null; return; }
+  voiceAction = null;
+
+  try {
+    if (!activeChatId) return;
+    const blob = new Blob(chunks, mimeType ? { type: mimeType } : {});
+    if (blob.size === 0) { alert("Записать не удалось — сообщение не отправлено."); return; }
+    const base64 = await blobToBase64(blob);
+    if (base64.length > VOICE_MAX_BASE64_LENGTH) {
+      alert("Голосовое сообщение слишком длинное. Максимум — примерно 3 минуты.");
+      return;
+    }
+    await sendVoiceMessage(base64, elapsedMs, mimeType);
+  } catch (err) {
+    console.error("Ошибка обработки голосового:", err);
+    alert("Не удалось обработать голосовое сообщение");
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const result = reader.result || "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : "");
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Отправка: writeBatch «сообщение + lastMessage чата», как sendRawMessage в Android.
+// voiceMimeType — доп. поле, полезное только веб-клиенту для воспроизведения;
+// Android такие неизвестные поля просто игнорирует при разборе.
+async function sendVoiceMessage(voiceBase64, durationMs, mimeType) {
+  if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
+  const privacyChat = activeChatData || findChatData(activeChatId);
+  if (privacyChat && privacyChat.type === "PRIVATE" && !activeChatId.startsWith("support_") && !activeChatId.startsWith("saved_")) {
+    alert("Для защищённой личной переписки используйте обновлённое Android-приложение. Веб-клиент не поддерживает эти ключи.");
+    return;
+  }
+
+  // Rate limiting: тот же лимитер, что и для текста
+  if (!sendRateLimiter.tryAcquire()) {
+    const waitSec = Math.ceil(sendRateLimiter.retryAfterMillis() / 1000);
+    alert("Слишком много сообщений подряд. Подождите " + waitSec + " сек.");
+    return;
+  }
+
+  const now = Date.now();
+  const chat = activeChatData || findChatData(activeChatId);
+  const batch = writeBatch(db);
+  const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
+  const msgData = {
+    senderId: currentUser.uid,
+    timestamp: now,
+    status: "SENT",
+    notified: false,
+    text: "",
+    voiceBase64,
+    voiceDurationMs: durationMs,
+  };
+  if (mimeType) msgData.voiceMimeType = mimeType;
+  batch.set(msgRef, msgData);
+
+  const chatRef = doc(db, "chats", activeChatId);
+  const chatUpdate = {
+    lastMessage: "🎤 Голосовое сообщение",
+    lastMessageTimestamp: now,
+    lastMessageSenderId: currentUser.uid,
+    lastMessageStatus: "SENT",
+  };
+  const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
+  if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
+  recipients.delete(currentUser.uid);
+  for (const uid of recipients) {
+    chatUpdate["unreadCounts." + uid] = increment(1);
+  }
+  batch.update(chatRef, chatUpdate);
+
+  try {
+    await batch.commit();
+  } catch (err) {
+    console.error("Ошибка отправки голосового:", err);
+    alert("Не удалось отправить голосовое сообщение");
+  }
+}
+
+/* Проигрывание голосового сообщения.
+   Mime-тип в документе не хранится (Android не пишет его), поэтому: если есть
+   поле voiceMimeType (наши веб-записи) — берём его; иначе «прощупываем» контейнер
+   по сигнатурам байт — ftyp/M4A (Android), EBML/WebM (Firefox) или OggS/OGG. */
+function voiceBase64ToBlob(voiceBase64, mimeHint) {
+  const bin = atob(voiceBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  let mime = mimeHint || "";
+  if (!mime && bytes.length > 12) {
+    if (String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) === "ftyp") mime = "audio/mp4";
+  }
+  if (!mime && bytes.length > 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) mime = "audio/webm";
+  if (!mime && bytes.length > 4 && bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) mime = "audio/ogg";
+  return new Blob([bytes], mime ? { type: mime } : {});
+}
+
+function buildVoicePlayer(msg) {
+  const wrap = document.createElement("div");
+  wrap.className = "voice-msg";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "voice-play";
+  btn.textContent = "▶";
+  btn.title = "Прослушать голосовое сообщение";
+
+  const duration = document.createElement("span");
+  duration.className = "voice-duration";
+  duration.textContent = msg.voiceDurationMs ? formatVoiceDuration(msg.voiceDurationMs) : "🎤";
+
+  wrap.appendChild(btn);
+  wrap.appendChild(duration);
+
+  let audio = null;
+  let objectUrl = null;
+
+  btn.addEventListener("click", () => {
+    if (audio && !audio.paused) {
+      audio.pause();
+      btn.textContent = "▶";
+      return;
+    }
+    if (audio) {
+      btn.textContent = "⏸";
+      audio.play().catch(() => { btn.textContent = "▶"; });
+      return;
+    }
+    try {
+      const blob = voiceBase64ToBlob(msg.voiceBase64, msg.voiceMimeType);
+      if (!blob.size) throw new Error("пустое аудио");
+      objectUrl = URL.createObjectURL(blob);
+      audio = new Audio(objectUrl);
+      audio.addEventListener("ended", () => {
+        btn.textContent = "▶";
+        if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+        audio = null; // следующее прослушивание — с чистого листа
+      });
+      audio.addEventListener("error", () => {
+        btn.textContent = "▶";
+        releaseVoiceAudio();
+      });
+      btn.textContent = "⏸";
+      audio.play().catch(() => { btn.textContent = "▶"; });
+    } catch (err) {
+      console.error("Ошибка воспроизведения:", err);
+      releaseVoiceAudio();
+      alert("Не удалось воспроизвести голосовое сообщение");
+    }
+  });
+
+  function releaseVoiceAudio() {
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    audio = null;
+    btn.textContent = "▶";
+  }
+
+  return wrap;
+}
+
+/* Обработчики кнопок */
+$("btn-record-voice").addEventListener("click", () => {
+  if (voiceRecording) sendVoiceRecording();
+  else startVoiceRecording();
+});
+$("btn-cancel-voice").addEventListener("click", () => {
+  if (voiceRecording) discardVoiceRecording();
+  else { hideVoiceRecordingUi(); cleanupVoiceCapture(); }
+});
+window.addEventListener("beforeunload", () => {
+  if (voiceRecording) discardVoiceRecording();
+});
 
 /* ------------------------------------------------------------------ */
 /* Новый чат: поиск пользователей                                       */

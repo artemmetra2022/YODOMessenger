@@ -433,6 +433,55 @@ body {
   border-radius: 8px;
 }
 
+/* ===== Запись голосового сообщения ===== */
+#voice-recording {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid #101921;
+}
+#voice-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+@keyframes voice-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  #voice-recording-dot { animation: none; }
+}
+#voice-recording-timer { font-weight: 700; font-variant-numeric: tabular-nums; }
+#voice-recording-hint { flex: 1; min-width: 0; color: var(--text-dim); font-size: 12.5px; }
+
+/* ===== Голосовое сообщение в чате ===== */
+.voice-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+.voice-play {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.voice-play:hover { background: var(--accent-dark); }
+.voice-duration { font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.voice-ico { font-size: 15px; }
+
 .modal-actions {
   display: flex;
   gap: 10px;

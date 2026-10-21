@@ -246,9 +246,18 @@
         <form id="form-send">
           <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
           <input type="file" id="file-input" accept="image/*" class="hidden">
+          <button type="button" id="btn-record-voice" class="icon-btn" title="Голосовое сообщение">🎤</button>
           <input type="text" id="message-input" placeholder="Сообщение..." autocomplete="off">
           <button type="submit" class="btn-send">➤</button>
         </form>
+        <!-- Запись голосового сообщения: появляется во время записи (аудио хранится в
+             документе сообщения как base64, как на Android — см. AudioUtils.kt). -->
+        <div id="voice-recording" class="hidden">
+          <span id="voice-recording-dot" aria-hidden="true"></span>
+          <span id="voice-recording-timer">0:00</span>
+          <span id="voice-recording-hint">Идёт запись… отправка — кнопка сообщения или 🎤 ещё раз</span>
+          <button type="button" id="btn-cancel-voice" class="icon-btn" title="Отменить запись">✕</button>
+        </div>
         <div id="image-preview" class="hidden">
           <img id="image-preview-img" src="" alt="">
           <button type="button" id="btn-cancel-image" class="icon-btn">✕</button>
