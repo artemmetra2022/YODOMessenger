@@ -27,6 +27,8 @@ import {
   getFirestore,
   doc,
   getDoc,
+  getDocFromServer,
+  runTransaction,
   getDocs,
   setDoc,
   collection,
@@ -47,6 +49,11 @@ import {
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { initQrLogin } from "./qr-login.js";
+import { initBoards } from "./boards.mjs";
+import { initNotifications } from "./notifications.mjs";
+import { initShortcuts } from "./shortcuts.mjs";
+import { sharedBoardApi } from "./board-firebase.mjs";
+import { protectPrivateData, isPrivate, keyFingerprint } from "./private-send.mjs";
 
 /* ------------------------------------------------------------------ */
 /* Firebase init                                                       */
@@ -173,30 +180,32 @@ const sendRateLimiter = new RateLimiter(5, 10_000);
 /* Уведомления браузера                                                 */
 /* ------------------------------------------------------------------ */
 
-let notificationsEnabled = false;
-
-async function ensureNotificationPermission() {
-  if (!("Notification" in window)) return false;
-  if (Notification.permission === "granted") { notificationsEnabled = true; return true; }
-  if (Notification.permission === "denied") return false;
-  const perm = await Notification.requestPermission();
-  notificationsEnabled = perm === "granted";
-  return notificationsEnabled;
-}
-
-function notifyNewMessage(title, body, chatId) {
-  if (!notificationsEnabled) return;
-  if (document.visibilityState === "visible" && activeChatId === chatId) return;
-  try {
-    const n = new Notification(title, { body, tag: "yodo-" + chatId, icon: undefined });
-    n.onclick = () => { window.focus(); n.close(); };
-  } catch (e) { /* игнорируем */ }
+const chatNotificationHeads = new Map();
+function observeChatNotification(chatId, chat) {
+  if (!currentUser || !chat) return;
+  const head = chat.lastMessageId || [chat.lastMessageTimestamp, chat.lastMessageSenderId].join(":");
+  const previous = chatNotificationHeads.get(chatId);
+  chatNotificationHeads.set(chatId, head);
+  if (previous == null || previous === head || !chat.lastMessageSenderId || chat.lastMessageSenderId === currentUser.uid || Date.now() - (chat.lastMessageTimestamp || 0) > 120000) return;
+  const owner = currentUser.uid;
+  const event = { chatId, messageId: head, senderId: chat.lastMessageSenderId,
+    title: chatDisplayName(chat), body: chat.lastMessage || "Новое сообщение", protectedText: isPrivate(chatId, chat) };
+  if (!chat.lastMessageId) { notifications.notify(event); return; }
+  getDocFromServer(doc(db, "chats", chatId, "messages", chat.lastMessageId)).then(snap => {
+    if (currentUser?.uid !== owner || !snap.exists()) return;
+    const m = snap.data();
+    if (m.isDeleted || (m.expiresAt && m.expiresAt <= Date.now())) return;
+    notifications.notify({...event, silent: m.silent === true, protectedText: event.protectedText || m.encrypted === true,
+      body: m.text || (m.imageBase64 ? "Фото" : m.voiceBase64 ? "Голосовое сообщение" : event.body) });
+  }).catch(() => { /* No plaintext fallback and no stale banner when message access fails. */ });
 }
 
 /* ------------------------------------------------------------------ */
 /* Состояние приложения                                                */
 /* ------------------------------------------------------------------ */
 
+const sentTextSession = new Map();
+let sendingMessage = false;
 let currentUser = null; // { uid, email, displayName, username }
 let chatsUnsub = null; // отписка слушателя списка чатов
 let messagesUnsub = null; // отписка слушателя сообщений
@@ -635,6 +644,11 @@ $("btn-logout").addEventListener("click", () => signOutWithCleanup());
 /* ------------------------------------------------------------------ */
 
 function resetSessionState() {
+  sentTextSession.clear();
+  notifications.setOwner(null);
+  shortcuts.reset();
+  chatNotificationHeads.clear();
+  boards.setContext(null, null, null);
   if (chatsUnsub) { chatsUnsub(); chatsUnsub = null; }
   if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
   if (blockedUnsub) { blockedUnsub(); blockedUnsub = null; }
@@ -651,6 +665,8 @@ function resetSessionState() {
   isAdmin = false;
   activeChatId = null;
   activeChatData = null;
+  notifications.setChat(null);
+  boards.setContext(currentUser?.uid, null, null);
   isBlocked = false;
   chatsCache.clear();
   oldestLoadedMessageDoc = null;
@@ -691,6 +707,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = { uid: user.uid, email: user.email };
+  notifications.setOwner(user.uid);
 
   // Глобальная блокировка: слушатель на свой документ (как Android-оверлей)
   blockedUnsub = onSnapshot(
@@ -786,6 +803,7 @@ function loadAppBanner() {
 
 async function enterApp() {
   if (!currentUser) return;
+  boards.setContext(currentUser.uid, null, null);
   // Подтягиваем профиль
   try {
     const snap = await getDoc(doc(db, "users", currentUser.uid));
@@ -802,7 +820,7 @@ async function enterApp() {
   listenChats();
   listenOfficialChannel();
   startPresenceHeartbeat();
-  ensureNotificationPermission();
+
 
   if (isAdmin) {
     // Админ: гарантируем существование официального канала, показываем кнопку "Поддержка".
@@ -853,6 +871,7 @@ function listenOfficialChannel() {
         const data = snap.data();
         data.id = snap.id;
         officialChannelData = data;
+        observeChatNotification(snap.id, data);
       } else {
         officialChannelData = null;
       }
@@ -931,6 +950,7 @@ function listenSupportChat() {
         const data = snap.data();
         data.id = snap.id;
         supportChatData = data;
+        observeChatNotification(snap.id, data);
       } else {
         supportChatData = null;
       }
@@ -965,6 +985,8 @@ $("btn-support-inbox").addEventListener("click", () => {
   viewingSupportInbox = true;
   activeChatId = null;
   activeChatData = null;
+  notifications.setChat(null);
+  boards.setContext(currentUser?.uid, null, null);
   $("chat-active").classList.add("hidden");
   $("chat-empty").classList.remove("hidden");
   document.getElementById("screen-app").classList.remove("chat-open");
@@ -1038,6 +1060,8 @@ function listenChats() {
     snap.docChanges().forEach((change) => {
       const data = change.doc.data();
       data.id = change.doc.id;
+      if(change.type === "removed") { chatsCache.delete(change.doc.id); chatNotificationHeads.delete(change.doc.id); return; }
+      observeChatNotification(change.doc.id, data);
       chatsCache.set(change.doc.id, data);
     });
     // Удалённые чаты убираем
@@ -1190,6 +1214,9 @@ function updateChannelSubscribeButton() {
 function openChat(chatId) {
   activeChatId = chatId;
   activeChatData = findChatData(chatId);
+  notifications.setChat(chatId, activeChatData ? chatDisplayName(activeChatData) : "YODO");
+  boards.setContext(currentUser?.uid, chatId, activeChatData);
+  $("private-web-notice").classList.toggle("hidden", !isPrivate(chatId, activeChatData));
   viewingSupportInbox = false;
   $("chat-subtitle").textContent = "";
   $("chat-subtitle").classList.remove("online");
@@ -1281,22 +1308,15 @@ function listenActiveMessages() {
       // (обновлять status может только сам получатель личного/группового чата).
       const readableHere = chatId !== OFFICIAL_CHANNEL_ID &&
         !(isAdmin && chatId.startsWith(SUPPORT_CHAT_PREFIX) && chatId !== supportChatIdFor(currentUser.uid));
-      if (readableHere && msg.senderId !== currentUser.uid && msg.status && msg.status !== "READ") {
-        updateDoc(doc(db, "chats", chatId, "messages", d.id), { status: "READ" }).catch(() => {});
+      if (readableHere && msg.senderId !== currentUser.uid && msg.status !== "READ" && !msg.encrypted && !document.hidden) {
+        acknowledgeRead(chatId, d.id).catch(() => {});
       }
     });
 
     if (wasNearBottom) container.scrollTop = container.scrollHeight;
 
-    // Уведомление о новом входящем сообщении
-    snap.docChanges().forEach((change) => {
-      if (change.type !== "added") return;
-      const msg = change.doc.data();
-      if (msg.senderId && msg.senderId !== currentUser.uid && Date.now() - (msg.timestamp || 0) < 5000) {
-        const name = activeChatData ? chatDisplayName(activeChatData) : "YODO";
-        notifyNewMessage(name, msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : "Новое сообщение")), chatId);
-      }
-    });
+    // Notifications are handled by chat-head subscriptions, including inactive chats.
+
   });
 }
 
@@ -1332,6 +1352,8 @@ $("btn-back").addEventListener("click", () => {
   clearTypingState();
   activeChatId = null;
   activeChatData = null;
+  notifications.setChat(null);
+  boards.setContext(currentUser?.uid, null, null);
   if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
   if (presenceUnsub) { presenceUnsub(); presenceUnsub = null; }
   if (typingUnsub) { typingUnsub(); typingUnsub = null; }
@@ -1406,6 +1428,8 @@ function cancelReply() {
 
 function startReply(msg) {
   if (!msg || msg.isDeleted) return;
+  if (msg.encrypted && !sentTextSession.has(msg.id)) { alert("Этот текст недоступен браузеру. Для ответа с цитатой откройте Android-приложение."); return; }
+  if (msg.encrypted) msg = { ...msg, ...sentTextSession.get(msg.id) };
   pendingReply = {
     id: msg.id,
     senderId: msg.senderId,
@@ -1560,57 +1584,15 @@ $("modal-forward").addEventListener("click", (e) => {
 async function sendForward(targetChatId) {
   if (!forwardingMessage) return;
   const fwd = forwardingMessage;
-  $("modal-forward").classList.add("hidden");
-  forwardingMessage = null;
-
+  const data = { forwardedFromSenderId: fwd.senderId, forwardedFromSenderName: senderNameForReply(fwd.senderId) };
+  if (fwd.text) data.text = fwd.text;
+  if (fwd.imageBase64) data.imageBase64 = fwd.imageBase64;
+  if (fwd.voiceBase64) Object.assign(data, { voiceBase64: fwd.voiceBase64, voiceDurationMs: fwd.voiceDurationMs || 0, voiceMimeType: fwd.voiceMimeType || "" });
   try {
-    const now = Date.now();
-    const chat = findChatData(targetChatId) || chatsCache.get(targetChatId);
-    if (chat && chat.type === "PRIVATE" && !targetChatId.startsWith("support_") && !targetChatId.startsWith("saved_")) {
-      alert("Пересылка в защищённый личный чат доступна в обновлённом Android-приложении.");
-      return;
-    }
-
-    const batch = writeBatch(db);
-    const msgRef = doc(collection(db, "chats", targetChatId, "messages"));
-    const msgData = {
-      senderId: currentUser.uid,
-      timestamp: now,
-      status: "SENT",
-      notified: false,
-      forwardedFromId: fwd.senderId,
-    };
-    if (fwd.text) msgData.text = fwd.text;
-    if (fwd.imageBase64) msgData.imageBase64 = fwd.imageBase64;
-    if (fwd.voiceBase64) {
-      msgData.voiceBase64 = fwd.voiceBase64;
-      msgData.voiceDurationMs = fwd.voiceDurationMs || 0;
-      msgData.text = ""; // как sendVoiceMessage в Android: у голосовых text пустой
-      if (fwd.voiceMimeType) msgData.voiceMimeType = fwd.voiceMimeType;
-    }
-    batch.set(msgRef, msgData);
-
-    const chatRef = doc(db, "chats", targetChatId);
-    const chatUpdate = {
-      lastMessage: (fwd.text
-        || (fwd.imageBase64 ? "📷 Фото" : "")
-        || (fwd.voiceBase64 ? "🎤 Голосовое сообщение" : "")
-        || "Пересланное сообщение"),
-      lastMessageTimestamp: now,
-      lastMessageSenderId: currentUser.uid,
-      lastMessageStatus: "SENT",
-    };
-    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
-    recipients.delete(currentUser.uid);
-    for (const uid of recipients) {
-      chatUpdate["unreadCounts." + uid] = increment(1);
-    }
-    batch.update(chatRef, chatUpdate);
-    await batch.commit();
-  } catch (err) {
-    console.error("Ошибка пересылки:", err);
-    alert("Не удалось переслать сообщение");
-  }
+    await sendWebMessage(targetChatId, data);
+    $("modal-forward").classList.add("hidden");
+    forwardingMessage = null;
+  } catch (err) { alert(err.message || "Не удалось переслать сообщение"); }
 }
 
 function buildMessageMeta(msg) {
@@ -1650,7 +1632,7 @@ function renderMessage(msg) {
   } else {
     const isGroupLike = activeChatData && (activeChatData.type === "GROUP" || activeChatData.type === "CHANNEL");
     const isSupportLike = activeChatData && activeChatData.type === "SUPPORT";
-    if (msg.forwardedFromId) {
+    if (msg.forwardedFromId || msg.forwardedFromSenderId) {
       bubble.appendChild(buildForwardedLabel());
     } else if (msg.senderId !== currentUser.uid && (isGroupLike || isSupportLike)) {
       bubble.appendChild(buildSenderLabel(msg.senderId));
@@ -1665,7 +1647,9 @@ function renderMessage(msg) {
       bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText));
     }
     if (msg.encrypted === true) {
-      bubble.appendChild(document.createTextNode("🔒 Защищённый текст. Откройте Android-приложение."));
+      const own = sentTextSession.get(msg.id);
+      if (own?.replyToText) bubble.appendChild(buildReplyPreview(own.replyToSenderName, own.replyToText));
+      bubble.appendChild(document.createTextNode(own?.text || "🔒 Защищённый текст. Откройте Android-приложение."));
     } else if (msg.text) {
       bubble.appendChild(document.createTextNode(msg.text));
     }
@@ -1734,81 +1718,24 @@ function senderNameFor(uid) {
 
 $("form-send").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const input = $("message-input");
-  // Во время записи кнопка-отправка/Enter — «остановить и отправить голосовое»;
-  // набранный текст останется в поле и уйдёт следующим сообщением.
   if (voiceRecording) { sendVoiceRecording(); return; }
-  const text = input.value.trim();
-  const imageBase64 = pendingImageBase64;
-  if ((!text && !imageBase64) || !activeChatId) return;
-  if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
-  const privacyChat = activeChatData || findChatData(activeChatId);
-  if (privacyChat && privacyChat.type === "PRIVATE" && !activeChatId.startsWith("support_") && !activeChatId.startsWith("saved_")) {
-    alert("Для защищённой личной переписки используйте обновлённое Android-приложение. Веб-клиент не поддерживает эти ключи.");
-    return;
-  }
-
-  // Rate limiting: не больше 5 отправок за 10 секунд (порт RateLimiter.kt)
-  if (!sendRateLimiter.tryAcquire()) {
-    const waitSec = Math.ceil(sendRateLimiter.retryAfterMillis() / 1000);
-    alert("Слишком много сообщений подряд. Подождите " + waitSec + " сек.");
-    return;
-  }
-
-  const replySnapshot = pendingReply;
-  input.value = "";
-  cancelPendingImage();
-  cancelReply();
-  clearTypingState();
-
+  if (sendingMessage || !activeChatId || !canSendInActiveChat()) return;
+  const input = $("message-input"), text = input.value.trim(), imageBase64 = pendingImageBase64;
+  if (!text && !imageBase64) return;
+  const targetId = activeChatId, uid = currentUser.uid, reply = pendingReply;
+  const data = {};
+  if (text) data.text = text;
+  if (imageBase64) data.imageBase64 = imageBase64;
+  if (reply) Object.assign(data, { replyToMessageId: reply.id, replyToSenderName: reply.senderName, replyToText: reply.text });
+  sendingMessage = true;
+  input.disabled = true;
   try {
-    const now = Date.now();
-    const chat = activeChatData || findChatData(activeChatId);
-
-    // WriteBatch: сообщение + обновление чата (как sendRawMessage в Android)
-    const batch = writeBatch(db);
-    const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
-    const msgData = {
-      senderId: currentUser.uid,
-      timestamp: now,
-      status: "SENT",
-      notified: false,
-    };
-    if (text) msgData.text = text;
-    if (imageBase64) msgData.imageBase64 = imageBase64;
-    if (replySnapshot) {
-      msgData.replyToId = replySnapshot.id;
-      msgData.replyToSenderName = replySnapshot.senderName;
-      msgData.replyToText = replySnapshot.text;
+    await sendWebMessage(targetId, data);
+    if (currentUser?.uid === uid && activeChatId === targetId) {
+      input.value = ""; cancelPendingImage(); cancelReply(); clearTypingState();
     }
-    batch.set(msgRef, msgData);
-
-    const chatRef = doc(db, "chats", activeChatId);
-    const chatUpdate = {
-      lastMessage: text || "📷 Фото",
-      lastMessageTimestamp: now,
-      lastMessageSenderId: currentUser.uid,
-      lastMessageStatus: "SENT",
-    };
-
-    // Получатели непрочитанных: обычно все participantIds, кроме себя. Для беседы
-    // поддержки, когда отвечает админ, реальный получатель — владелец беседы
-    // (supportUserId), который в participantIds чата поддержки уже присутствует —
-    // но на случай расхождения схемы подстрахуемся им явно.
-    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
-    if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
-    recipients.delete(currentUser.uid);
-    for (const uid of recipients) {
-      chatUpdate["unreadCounts." + uid] = increment(1);
-    }
-
-    batch.update(chatRef, chatUpdate);
-    await batch.commit();
-  } catch (err) {
-    console.error("Ошибка отправки:", err);
-    input.value = text; // возвращаем текст в поле, чтобы не потерять
-    if (replySnapshot) startReply({ id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text, isDeleted: false });
-  }
+  } catch (err) { alert(err.message || "Не удалось отправить сообщение. Текст и вложение сохранены."); }
+  finally { sendingMessage = false; input.disabled = false; }
 });
 
 /* ------------------------------------------------------------------ */
@@ -2052,57 +1979,10 @@ function blobToBase64(blob) {
 // voiceMimeType — доп. поле, полезное только веб-клиенту для воспроизведения;
 // Android такие неизвестные поля просто игнорирует при разборе.
 async function sendVoiceMessage(voiceBase64, durationMs, mimeType) {
-  if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
-  const privacyChat = activeChatData || findChatData(activeChatId);
-  if (privacyChat && privacyChat.type === "PRIVATE" && !activeChatId.startsWith("support_") && !activeChatId.startsWith("saved_")) {
-    alert("Для защищённой личной переписки используйте обновлённое Android-приложение. Веб-клиент не поддерживает эти ключи.");
-    return;
-  }
-
-  // Rate limiting: тот же лимитер, что и для текста
-  if (!sendRateLimiter.tryAcquire()) {
-    const waitSec = Math.ceil(sendRateLimiter.retryAfterMillis() / 1000);
-    alert("Слишком много сообщений подряд. Подождите " + waitSec + " сек.");
-    return;
-  }
-
-  const now = Date.now();
-  const chat = activeChatData || findChatData(activeChatId);
-  const batch = writeBatch(db);
-  const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
-  const msgData = {
-    senderId: currentUser.uid,
-    timestamp: now,
-    status: "SENT",
-    notified: false,
-    text: "",
-    voiceBase64,
-    voiceDurationMs: durationMs,
-  };
-  if (mimeType) msgData.voiceMimeType = mimeType;
-  batch.set(msgRef, msgData);
-
-  const chatRef = doc(db, "chats", activeChatId);
-  const chatUpdate = {
-    lastMessage: "🎤 Голосовое сообщение",
-    lastMessageTimestamp: now,
-    lastMessageSenderId: currentUser.uid,
-    lastMessageStatus: "SENT",
-  };
-  const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
-  if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
-  recipients.delete(currentUser.uid);
-  for (const uid of recipients) {
-    chatUpdate["unreadCounts." + uid] = increment(1);
-  }
-  batch.update(chatRef, chatUpdate);
-
-  try {
-    await batch.commit();
-  } catch (err) {
-    console.error("Ошибка отправки голосового:", err);
-    alert("Не удалось отправить голосовое сообщение");
-  }
+  if (!canSendInActiveChat()) return;
+  const data = { text: "", voiceBase64, voiceDurationMs: durationMs };
+  if (mimeType) data.voiceMimeType = mimeType;
+  await sendWebMessage(activeChatId, data);
 }
 
 /* Проигрывание голосового сообщения.
@@ -2771,14 +2651,7 @@ function resetSettingsModalFields() {
   $("settings-new-password-confirm").value = "";
   $("settings-pin-new").value = "";
   $("settings-pin-confirm").value = "";
-  $("settings-notifications-hint").textContent =
-    ("Notification" in window)
-      ? (Notification.permission === "denied"
-          ? "Уведомления заблокированы в настройках браузера."
-          : "")
-      : "Ваш браузер не поддерживает уведомления.";
-  $("settings-notifications-toggle").checked = notificationsEnabled;
-  $("settings-notifications-toggle").disabled = ("Notification" in window) ? Notification.permission === "denied" : true;
+  notifications.refresh();
 
   updatePinStatusLabel();
 }
@@ -3173,17 +3046,8 @@ $("btn-save-autodelete").addEventListener("click", async () => {
 /* Уведомления                                                          */
 /* ------------------------------------------------------------------ */
 
-$("settings-notifications-toggle").addEventListener("change", async (e) => {
-  if (e.target.checked) {
-    const granted = await ensureNotificationPermission();
-    e.target.checked = granted;
-    if (!granted) {
-      $("settings-notifications-hint").textContent = "Разрешение на уведомления не выдано.";
-    }
-  } else {
-    notificationsEnabled = false;
-  }
-});
+// Notification preference handlers live in notifications.mjs.
+
 
 
 /* ------------------------------------------------------------------ */
@@ -3357,3 +3221,121 @@ $("settings-notifications-toggle").addEventListener("change", async (e) => {
   updateFaqState();
   setInterval(updateFaqState, 300);
 })();
+
+/* Web/Android compatibility: one protected send path for text, media and forwards. */
+async function browserTrust(owner, uid, encoded) {
+  const fingerprint = await keyFingerprint(encoded);
+  const storageKey = "yodo-web-key-trust:" + owner + ":" + uid;
+  const old = localStorage.getItem(storageKey);
+  if (old && old !== fingerprint) {
+    const label = uid === owner ? "вашего аккаунта" : "собеседника";
+    throw new Error("Ключ " + label + " изменился. Отправка остановлена. Откройте «Ключи» в уведомлении над полем ввода и сверьте отпечатки.");
+  }
+  if (!old) localStorage.setItem(storageKey, fingerprint);
+}
+async function sendWebMessage(chatId, original) {
+  const uid = currentUser?.uid;
+  if (!uid) throw new Error("Войдите в аккаунт");
+  if (!sendRateLimiter.tryAcquire()) throw new Error("Слишком много сообщений. Подождите несколько секунд.");
+  const chatRef = doc(db, "chats", chatId);
+  const snapshot = await getDocFromServer(chatRef);
+  if (!snapshot.exists()) throw new Error("Чат недоступен");
+  const chat = snapshot.data();
+  const data = await protectPrivateData(chatId, chat, uid, original,
+    async recipient => (await getDocFromServer(doc(db, "users", recipient))).data()?.publicKey,
+    (recipient, key) => browserTrust(uid, recipient, key));
+  if (currentUser?.uid !== uid) throw new Error("Аккаунт изменился. Сообщение не отправлено.");
+  const now = Date.now(), recipients = [...new Set(chat.participantIds || [])].filter(id => id !== uid);
+  Object.assign(data, { senderId: uid, timestamp: now, status: "SENT", notified: false,
+    sentAt: serverTimestamp(), recipientIds: recipients, deliveredTo: [], readBy: [] });
+  if (chat.disappearingTtlSeconds > 0) data.expiresAt = now + chat.disappearingTtlSeconds * 1000;
+  const msgRef = doc(collection(db, "chats", chatId, "messages"));
+  const preview = isPrivate(chatId, chat) ? (data.encrypted ? "🔒 Сообщение" : "Личное сообщение") :
+    (original.text || (data.imageBase64 ? "📷 Фото" : "🎤 Голосовое сообщение"));
+  const updates = { lastMessage: preview, lastMessageTimestamp: now, lastMessageSenderId: uid,
+    lastMessageStatus: "SENT", lastMessageId: msgRef.id, lastMessagePlain: deleteField() };
+  for (const id of recipients) updates["unreadCounts." + id] = increment(1);
+  // Cache only in this authenticated tab, never in Firestore or browser persistent storage.
+  if (data.encrypted) sentTextSession.set(msgRef.id, { ...original });
+  try {
+    if (chatId === "support_" + uid) {
+      await runTransaction(db, async tx => {
+        const fresh = await tx.get(chatRef);
+        if (currentUser?.uid !== uid) throw new Error("Аккаунт изменился");
+        if (fresh.data()?.lastMessageSenderId === uid && fresh.data()?.lastMessage) throw new Error("Дождитесь ответа поддержки.");
+        tx.set(msgRef, data); tx.update(chatRef, updates);
+      });
+    } else {
+      const batch = writeBatch(db); batch.set(msgRef, data); batch.update(chatRef, updates); await batch.commit();
+    }
+  } catch (e) { sentTextSession.delete(msgRef.id); throw e; }
+  return msgRef.id;
+}
+async function acknowledgeRead(chatId, messageId) {
+  const uid = currentUser?.uid;
+  const ref = doc(db, "chats", chatId, "messages", messageId);
+  await runTransaction(db, async tx => {
+    const s = await tx.get(ref); if (!s.exists() || currentUser?.uid !== uid) return;
+    const m = s.data(); if (m.senderId === uid || m.encrypted) return;
+    if (!Array.isArray(m.recipientIds)) { tx.update(ref, { status: "READ" }); return; }
+    if (!m.recipientIds.includes(uid) || (m.readBy || []).includes(uid)) return;
+    const readBy = [...new Set([...(m.readBy || []), uid])], deliveredTo = [...new Set([...(m.deliveredTo || []), uid])];
+    const status = m.recipientIds.every(id => readBy.includes(id)) ? "READ" : m.recipientIds.every(id => deliveredTo.includes(id)) ? "DELIVERED" : "SENT";
+    tx.update(ref, { readBy, deliveredTo, status });
+  });
+}
+$("btn-web-keys").onclick = async () => {
+  const uid = currentUser?.uid, chat = activeChatData;
+  if (!uid || !isPrivate(activeChatId || "", chat)) return;
+  try {
+    for (const id of [...new Set(chat.participantIds || [])]) {
+      const encoded = (await getDocFromServer(doc(db, "users", id))).data()?.publicKey;
+      const fp = await keyFingerprint(encoded), key = "yodo-web-key-trust:" + uid + ":" + id;
+      const old = localStorage.getItem(key);
+      const readable = fp.match(/.{1,4}/g).join(" ");
+      if (confirm((id === uid ? "Ключ вашего телефона" : "Ключ собеседника") + "\nSHA-256: " + readable +
+        (old && old !== fp ? "\nВНИМАНИЕ: ключ изменился!" : "") +
+        "\nСверьте отпечаток в Android → Проверка ключей по независимому каналу. Подтверждаете совпадение?")) {
+        const again = (await getDocFromServer(doc(db, "users", id))).data()?.publicKey;
+        if (currentUser?.uid !== uid || await keyFingerprint(again) !== fp) throw new Error("Ключ или аккаунт изменился. Повторите проверку.");
+        localStorage.setItem(key, fp);
+      }
+    }
+  } catch(e) { alert(e.message); }
+};
+const boards = initBoards({
+  showShortcuts: () => shortcuts.showHelp(),
+  ...sharedBoardApi(db, auth, { doc, collection, onSnapshot, runTransaction, serverTimestamp }),
+  canSend: () => canSendInActiveChat(),
+  async sendImage(canvas) {
+    const chatId = activeChatId;
+    if (!chatId || !canSendInActiveChat()) throw new Error("Выберите чат для отправки рисунка");
+    // Match Android image messages; JPEG bounds the Firestore document size.
+    const scaled = document.createElement("canvas");
+    const factor = Math.min(1, 1600 / Math.max(canvas.width, canvas.height));
+    scaled.width = Math.round(canvas.width * factor); scaled.height = Math.round(canvas.height * factor);
+    scaled.getContext("2d").drawImage(canvas, 0, 0, scaled.width, scaled.height);
+    let quality = .88, imageBase64;
+    do { imageBase64 = scaled.toDataURL("image/jpeg", quality).split(",")[1]; quality -= .1; } while (imageBase64.length > 900000 && quality > .25);
+    if (imageBase64.length > 900000) throw new Error("Рисунок слишком большой для отправки. Скачайте PNG.");
+    await sendWebMessage(chatId, { imageBase64, text: "" });
+  },
+});
+
+const notifications = initNotifications({ activeChatId: () => activeChatId, openChat });
+const shortcuts = initShortcuts({
+  signedIn: () => !!currentUser && !isBlocked && $("screen-app").classList.contains("active"),
+  activeChatId: () => activeChatId,
+  chats: () => {
+    const all = new Map(chatsCache);
+    if (officialChannelData) all.set(officialChannelData.id, officialChannelData);
+    if (supportChatData) all.set(supportChatData.id, supportChatData);
+    return [...all.values()].sort((a,b) => (b.lastMessageTimestamp||0)-(a.lastMessageTimestamp||0)).map(c=>({id:c.id,name:chatDisplayName(c)}));
+  },
+  openChat,
+  settings: () => $("btn-open-settings").click(),
+  boards: () => $("btn-boards").click(),
+  shared: () => { if(activeChatId&&!$("btn-shared-board").classList.contains("hidden")) $("btn-shared-board").click(); },
+  send: () => { if(activeChatId&&canSendInActiveChat()) $("form-send").requestSubmit(); },
+  mute: () => notifications.toggleMute(),
+});

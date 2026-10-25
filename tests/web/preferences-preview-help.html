@@ -1,0 +1,31 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>YODO — настройки веб-версии</title><link rel="stylesheet" href="../../web/styles.css"><link rel="stylesheet" href="../../web/boards.css"></head><body data-state="help"><button id="btn-chat-notifications" hidden></button><button id="btn-shortcuts" hidden></button><div class="modal"><section class="modal-card web-preferences-card">        <div class="settings-panel" data-panel="notifications">
+          <div class="settings-section-title">Уведомления</div>
+          <div class="settings-toggle-row">
+            <div>
+              <div class="settings-toggle-title">Уведомления в этом браузере</div>
+              <div class="settings-toggle-desc">Баннеры и выбранный звук для новых сообщений</div>
+            </div>
+            <label class="settings-switch">
+              <input type="checkbox" id="settings-notifications-toggle">
+              <span class="settings-switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-hint" id="settings-notifications-hint" role="status"></div>
+          <div class="web-notification-actions"><button type="button" class="btn-secondary" id="settings-notifications-permission">Разрешить баннеры браузера</button><button type="button" class="btn-secondary" id="settings-notifications-test">Проверить звук и баннер</button></div>
+          <label class="web-checkbox"><input type="checkbox" id="settings-notifications-sound"> Звук новых сообщений</label>
+          <label class="web-checkbox"><input type="checkbox" id="settings-notifications-previews"> Показывать текст в баннерах</label>
+          <p class="settings-hint">Защищённый текст личных чатов в баннерах не раскрывается. Звук после перезагрузки доступен после взаимодействия со страницей.</p>
+          <label class="web-field" for="settings-notifications-quiet">Не беспокоить<select id="settings-notifications-quiet"><option value="off">Выключено</option><option value="3600000">На 1 час</option><option value="28800000">На 8 часов</option><option value="86400000">На 24 часа</option><option value="forever">До ручного включения</option></select></label>
+          <p id="settings-notifications-quiet-status" class="settings-hint" role="status"></p>
+          <p class="settings-hint">Настройки сохраняются отдельно для аккаунта в этом браузере. Для отдельного чата нажмите «Звук» / «Тихо» в его заголовке. Уведомления работают, пока страница открыта; это не фоновые push-уведомления при закрытом браузере.</p>
+        </div>
+
+</section></div><script type="module">
+import {initNotifications} from '../../web/notifications.mjs';import {initShortcuts} from '../../web/shortcuts.mjs';
+Object.defineProperty(window,'Notification',{value:class {static permission='granted';static requestPermission(){return Promise.resolve('granted');}},configurable:true});
+const n=initNotifications({activeChatId:()=>null,openChat(){}});n.setOwner('preview-account');n.setChat('demo-chat','Команда YODO');const toggle=document.getElementById('settings-notifications-toggle');toggle.checked=true;toggle.dispatchEvent(new Event('change'));
+const k=initShortcuts({signedIn:()=>true,chats:()=>[{id:'demo-chat',name:'Команда YODO'}],activeChatId:()=>null,openChat(){},settings(){},boards(){},shared(){},send(){},mute(){}});
+if(document.body.dataset.state==='chat'){n.openChat();document.getElementById('notification-chat-mute').value='28800000';document.getElementById('notification-chat-mute').dispatchEvent(new Event('change'));}
+if(document.body.dataset.state==='help')k.showHelp();
+if(document.body.dataset.state==='search')k.search();
+window.preferencesTest={notifications:n,shortcuts:k};window.previewReady=true;</script></body></html>
