@@ -27,6 +27,12 @@
   color: #fff;
 }
 
+/* Явное скрытие: атрибут hidden перекрывался display:flex этого класса,
+   из-за чего после анимации экран «возвращался» обратно в вид. */
+.lock-screen[hidden] {
+  display: none !important;
+}
+
 /* Плавные цветные пятна (blur-эффект обоев Win11) */
 .lock-blob {
   position: absolute;
