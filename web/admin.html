@@ -124,9 +124,14 @@
           <p class="card-hint">Владельцы из кода имеют все права всегда. Остальным можно выдать ограниченную роль: модератор видит только жалобы, блокировки и аудит, поддержка — обращения и FAQ, редактор — контент. Массовые удаления доступны только владельцу и администратору.</p>
           <form id="form-role-grant" class="form-row">
             <input type="email" id="role-grant-email" placeholder="email админа" autocomplete="off">
+            <!-- НОВОЕ (роли): выбор роли — таблица прав под формой сразу
+                 показывает, что может выданная роль (+/-). -->
             <select id="role-grant-role"></select>
             <button type="submit" class="btn-primary">Выдать роль</button>
           </form>
+          <!-- НОВОЕ (роли): таблица «кто что может», строится из
+               ROLE_PERMISSIONS в admin.js. Столбец выбранной роли подсвечен. -->
+          <div id="roles-matrix" class="roles-matrix"></div>
           <div id="roles-list" class="item-list"></div>
         </div>
 

@@ -5637,6 +5637,54 @@ function applyRolePermissions() {
   }
 }
 
+/** Есть ли право у произвольной роли (вне зависимости от того, кто в панели). */
+function roleCan(role, permission) {
+  const perms = ROLE_PERMISSIONS[role] || [];
+  if (perms.includes("*")) return true;
+  if (perms.includes(permission)) return true;
+  // Подправо вида "content.faq" также даётся корневым "content".
+  return perms.includes(permission.split(".")[0]);
+}
+
+/**
+ * НОВОЕ (роли): краткая таблица «кто что может» в карточке выдачи ролей
+ * (+/-). Строится из ROLE_PERMISSIONS 1:1, поэтому не рассинхронизируется.
+ * Столбец выбранной роли в select подсвечивается.
+ */
+const ROLE_MATRIX_ROWS = [
+  { label: "Обзор и настройки, push-рассылки", perm: "settings" },
+  { label: "Контент: новости, опросы, канал, школа", perm: "content" },
+  { label: "FAQ-бот поддержки", perm: "content.faq" },
+  { label: "Обращения в поддержку, вопросы учеников", perm: "support" },
+  { label: "Жалобы и обжалования", perm: "moderation" },
+  { label: "Блокировки, муты и санкции", perm: "users.block" },
+  { label: "Видеть список пользователей", perm: "users.view" },
+  { label: "Журнал аудита", perm: "audit" },
+  { label: "Массовые удаления и чистки", perm: "destructive" },
+  { label: "Выдача и отзыв ролей админам", perm: "roles" },
+];
+
+function renderRolesMatrix(selectedRole) {
+  const box = $("roles-matrix");
+  if (!box) return;
+  // Роли, которые можно выдать: все, кроме владельца (owner из ADMIN_EMAILS).
+  const grantable = Object.keys(ROLE_PERMISSIONS).filter((r) => r !== "owner");
+  const rows = [];
+  rows.push("<thead><tr><th>Возможность</th>" +
+    grantable.map((r) => `<th>${esc(ROLE_LABELS[r] || r)}</th>`).join("") +
+    "</tr></thead>");
+  rows.push("<tbody>" + ROLE_MATRIX_ROWS.map((row) => {
+    const cells = grantable.map((r) => {
+      const yes = roleCan(r, row.perm);
+      const active = r === selectedRole ? " matrix-cell-active" : "";
+      return `<td class="${yes ? "matrix-yes" : "matrix-no"}${active}">${yes ? "+" : "−"}</td>`;
+    }).join("");
+    return `<tr><td>${esc(row.label)}</td>${cells}</tr>`;
+  }).join("") + "</tbody>");
+  box.innerHTML = `<table class="roles-matrix-table">${rows.join("")}</table>
+    <p class="card-hint">Владелец (${esc(Object.keys(ADMIN_EMAILS).length)} аккаунт${ADMIN_EMAILS.length === 1 ? "" : "а"} из списка владельцев) — всегда все права, включая выдачу ролей.</p>`;
+}
+
 /** Список админов и их ролей в разделе «Обзор». */
 function renderRolesList() {
   const box = $("roles-list");
@@ -5706,6 +5754,11 @@ async function startAccessControl() {
         select.appendChild(opt);
       });
       enhanceSelect(select);
+    }
+    // Краткая таблица прав и подсветка выбранного столбца (+/-).
+    if (select) {
+      renderRolesMatrix(select.value);
+      select.addEventListener("change", () => renderRolesMatrix(select.value));
     }
     form.addEventListener("submit", async (e) => {
       e.preventDefault();

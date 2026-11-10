@@ -1215,3 +1215,53 @@ h1 {
 .modal-actions {
   margin-top: 10px;
 }
+
+/* ===== НОВОЕ (роли): таблица прав «кто что может» в карточке выдачи ролей ===== */
+.roles-matrix {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.roles-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  table-layout: auto;
+}
+.roles-matrix-table th,
+.roles-matrix-table td {
+  border: 1px solid var(--bg-panel-2);
+  padding: 6px 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+.roles-matrix-table th:first-child,
+.roles-matrix-table td:first-child {
+  text-align: left;
+  white-space: normal;
+  color: var(--text-dim);
+  min-width: 190px;
+}
+.roles-matrix-table thead th {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+}
+.roles-matrix-table .matrix-yes {
+  color: #34d399;
+  font-weight: 700;
+}
+.roles-matrix-table .matrix-no {
+  color: #6b7a8a;
+  font-weight: 400;
+}
+/* Подсветка столбца выбранной роли в списке выдачи. */
+.roles-matrix-table .matrix-cell-active {
+  background: rgba(61, 220, 132, 0.10);
+  border-color: rgba(61, 220, 132, 0.45);
+}
+.roles-matrix .card-hint {
+  margin-top: 6px;
+}
