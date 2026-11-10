@@ -5,8 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YODO Admin</title>
   <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="admin-lock.css">
 </head>
 <body>
+
+  <!-- НОВОЕ (экран блокировки): окно входа в стиле Windows 11 —
+       полный экран поверх остальной панели, часы с датой, аватар
+       и поле пароля. Пароль хранится локально как SHA-256-хеш в
+       localStorage, по умолчанию 8213. Смена пароля — в самой панели:
+       раздел «Обзор → Экран блокировки». Дальше по-прежнему требуется
+       обычный вход аккаунта администратора (Firebase Auth), этот экран —
+       только первый замок.
+       Сброс пароля: localStorage.removeItem("yodoAdminLockHash"). -->
+  <div id="screen-lock" class="lock-screen">
+    <div class="lock-bg" aria-hidden="true">
+      <div class="lock-blob lock-blob-1"></div>
+      <div class="lock-blob lock-blob-2"></div>
+      <div class="lock-blob lock-blob-3"></div>
+    </div>
+
+    <div class="lock-top">
+      <div class="lock-clock" id="lock-clock-time">00:00</div>
+      <div class="lock-date" id="lock-clock-date"></div>
+    </div>
+
+    <div class="lock-panel">
+      <div class="lock-avatar">Y</div>
+      <div class="lock-user">YODO Admin</div>
+
+      <form id="form-lock" autocomplete="off">
+        <div class="lock-field-wrap">
+          <input id="lock-password" class="lock-field" type="password" placeholder="Пароль" autocomplete="off">
+          <!-- НОВОЕ (фейковая загрузка): над полем заливается «зарядная»
+               полоса — как при зарядке телефона. Пока идёт, ввод закрыт
+               (readonly). По завершении полоса гаснет и поле разблокируется. -->
+          <div id="lock-progress" class="lock-progress" hidden></div>
+          <button type="button" id="btn-lock-eye" class="lock-eye" aria-label="Показать пароль" hidden>👁</button>
+          <button type="submit" id="btn-lock-enter" class="lock-go" aria-label="Войти">→</button>
+        </div>
+      </form>
+
+      <div id="lock-error" class="lock-error" hidden></div>
+    </div>
+
+    <div class="lock-footer">YODO Messenger · панель администратора</div>
+  </div>
 
   <!-- ЭКРАН: Логин -->
   <div id="screen-login" class="auth-wrap">
@@ -146,6 +189,25 @@
             <input type="checkbox" id="toggle-require-email-verification">
             <span>Требовать подтверждение email при входе (для всех новых входов)</span>
           </label>
+        </div>
+
+        <!-- НОВОЕ (экран блокировки): смена пароля экрана блокировки
+             в стиле Windows 11. Сам экран открывается до формы входа,
+             пароль хранится только в этом браузере (localStorage,
+             SHA-256-хеш), поэтому задаётся отдельно на каждом компьютере. -->
+        <div class="card overview-card" data-admin-area="messenger">
+          <h2>Экран блокировки</h2>
+          <p class="card-hint">Пароль экрана блокировки, который открывается перед формой входа в панель. По умолчанию — 8213. Хранится локально в этом браузере и нужен отдельно на каждом устройстве: с одного браузера другой пароль не наследует. Если пароль забыт — откройте консоль браузера и выполните localStorage.removeItem(&quot;yodoAdminLockHash&quot;), после обновления снова заработает пароль по умолчанию.</p>
+          <form id="form-admin-lock" class="form-col">
+            <div class="form-row">
+              <input type="password" id="admin-lock-new" placeholder="Новый пароль (минимум 4 символа)" autocomplete="new-password">
+              <input type="password" id="admin-lock-repeat" placeholder="Повторите пароль" autocomplete="new-password">
+            </div>
+            <div class="form-row">
+              <button type="submit" class="btn-primary">Задать пароль</button>
+            </div>
+          </form>
+          <p class="card-hint" id="admin-lock-status"></p>
         </div>
 
         <!-- НОВОЕ (баннер): объявление вверху веб-вер��ии мессенджера
@@ -858,6 +920,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="faq-data.js"></script>
+  <script src="admin-lock.js"></script>
   <script type="module" src="admin.js"></script>
 </body>
 </html>
