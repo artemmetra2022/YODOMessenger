@@ -67,10 +67,14 @@
     return "fnv-" + h1.toString(16) + "-" + h2.toString(16);
   }
 
-  /** Пароль, с которым админка встречает администратора. */
+  /** Хеш действующего пароля: из localStorage либо хеш дефолта 8213.
+   *  Возвращает Promise — дефолт считается той же hashPassword(), что и
+   *  ввод (SHA-256 на проде, запасной хеш на file://), иначе на проде
+   *  дефолт-пароль не совпадал бы с вводом. */
   function getStoredHash() {
     var stored = localStorage.getItem(LOCK_HASH_KEY);
-    return stored || simpleHash(DEFAULT_PASSWORD);
+    if (stored) return Promise.resolve(stored);
+    return hashPassword(DEFAULT_PASSWORD);
   }
 
   /* ------------------------------------------------------------------ */
@@ -220,15 +224,23 @@
         return;
       }
       hashPassword(entered).then(function (computed) {
-        if (computed === getStoredHash()) {
-          clearError();
-          input.value = "";
-          unlock();
-        } else {
-          showError("Неверный пароль. Попробуйте ещё раз.");
+        Promise.all([getStoredHash(), hashPassword(DEFAULT_PASSWORD)]).then(function (hashes) {
+          var expected = hashes[0];
+          var isDefault = hashes[0] === hashes[1];
+          if (computed === expected) {
+            clearError();
+            input.value = "";
+            unlock();
+            return;
+          }
+          // Подсказка, если замок ещё на дефолтном 8213.
+          var message = isDefault
+            ? "Неверный пароль. По умолчанию используется 8213."
+            : "Неверный пароль. Попробуйте ещё раз.";
+          showError(message);
           input.value = "";
           input.focus();
-        }
+        });
       });
     });
 
@@ -279,23 +291,25 @@
         setPanelStatus("Пароли не совпадают.", false);
         return;
       }
-      if (next === DEFAULT_PASSWORD && getStoredHash() !== simpleHash(DEFAULT_PASSWORD)) {
-        setPanelStatus("Нельзя возвращать пароль по умолчанию 8213 — придумайте свой.", false);
-        return;
-      }
 
-      hashPassword(next).then(function (nextHash) {
-        try {
-          localStorage.setItem(LOCK_HASH_KEY, nextHash);
-        } catch (e) {
-          setPanelStatus("Не удалось сохранить пароль (нет доступа к локальному хранилищу).", false);
+      Promise.all([getStoredHash(), hashPassword(DEFAULT_PASSWORD)]).then(function (hashes) {
+        var lockOnDefault = hashes[0] === hashes[1];
+
+        if (next === DEFAULT_PASSWORD && !lockOnDefault) {
+          setPanelStatus("Нельзя возвращать пароль по умолчанию 8213 — придумайте свой.", false);
           return;
         }
-        form.reset();
-        setPanelStatus("Пароль экрана блокировки обновлён. Действует при следующем открытии панели в этом браузере.", true);
-        // Смена уже применена: сбрасываем «разблокировано», чтобы новый
-        // пароль сразу проверился при обновлении страницы (неожиданно для
-        // пользователя быть не должно — экран уже пропущен в этой вкладке).
+
+        hashPassword(next).then(function (nextHash) {
+          try {
+            localStorage.setItem(LOCK_HASH_KEY, nextHash);
+          } catch (e) {
+            setPanelStatus("Не удалось сохранить пароль (нет доступа к локальному хранилищу).", false);
+            return;
+          }
+          form.reset();
+          setPanelStatus("Пароль экрана блокировки обновлён. Действует при следующем открытии панели в этом браузере.", true);
+        });
       });
     });
 
