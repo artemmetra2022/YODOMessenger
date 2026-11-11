@@ -615,13 +615,29 @@ fun YodoNavGraph(
         composable(Routes.SecurityCenter.route) {
             app.yodo.messenger.features.security.SecurityCenterScreen(
                 onBackClick = { navController.popBackStack() },
-                onOpenQrLogin = { navController.navigate(Routes.QrLogin.route) }
+                onOpenQrLogin = { navController.navigate(Routes.QrLogin.createRoute()) }
             )
         }
         // НОВОЕ (вход по QR-коду): сканер QR с веб-версии.
-        composable(Routes.QrLogin.route) {
+        // НОВОЕ (обычные считыватели): при переходе по deep link sessionId и pk
+        // приходят аргументами — сессия считается отсканированной сразу.
+        composable(
+            route = Routes.QrLogin.route,
+            arguments = listOf(
+                navArgument(Routes.QrLogin.ARG_SESSION_ID) {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+                navArgument(Routes.QrLogin.ARG_PK) {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+            )
+        ) { entry ->
             app.yodo.messenger.features.security.QrLoginScreen(
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                deepLinkSessionId = entry.arguments?.getString(Routes.QrLogin.ARG_SESSION_ID).orEmpty(),
+                deepLinkPk = entry.arguments?.getString(Routes.QrLogin.ARG_PK).orEmpty(),
             )
         }
         composable(

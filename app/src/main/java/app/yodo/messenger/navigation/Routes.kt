@@ -111,7 +111,17 @@ sealed class Routes(val route: String) {
 
     data object SecurityCenter : Routes("security_center")
     // НОВОЕ (вход по QR-коду): сканер QR из веб-версии в «Центре безопасности».
-    data object QrLogin : Routes("qr_login")
+    // НОВОЕ (обычные считыватели): deep link yodo://qrlogin/{sessionId}?pk=... открывает
+    // этот же экран с уже «отсканированной» сессией — sessionId и ключ приходят
+    // необязательными аргументами (без них — обычное сканирование камерой).
+    data object QrLogin : Routes("qr_login?sessionId={sessionId}&pk={pk}") {
+        const val ARG_SESSION_ID = "sessionId"
+        const val ARG_PK = "pk"
+        fun createRoute(sessionId: String = "", pk: String = ""): String =
+            if (sessionId.isBlank() || pk.isBlank()) "qr_login"
+            else "qr_login?sessionId=" + java.net.URLEncoder.encode(sessionId, "UTF-8") +
+                "&pk=" + java.net.URLEncoder.encode(pk, "UTF-8")
+    }
     // НОВОЕ (Y): смена аккаунта и добавление нового аккаунта.
     data object SwitchAccount : Routes("switch_account")
     data object AddAccount : Routes("add_account")

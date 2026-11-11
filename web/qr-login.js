@@ -6,7 +6,10 @@
  *     Приватный ключ НИКОГДА никуда не отправляется — существует только в памяти
  *     этой вкладки и удаляется при закрытии экрана.
  *  2. Создаём документ qrLogins/{sessionId} с нашим публичным ключом и статусом
- *     "pending", рисуем QR с URL yodo://qrlogin/{sessionId}?pk={base64url(pk)}.
+ *     "pending", рисуем QR со ссылкой https://yodomessenger.web.app/qr-login.html
+ *     ?s={sessionId}&pk={base64url(pk)}. НОВОЕ: в QR теперь обычная https-ссылка —
+ *     её распознаёт любой стандартный считыватель QR и камера телефона; страница-
+ *     мост сама открывает deep link yodo://qrlogin/... в приложении YODO.
  *  3. Слушаем документ через onSnapshot. Приложение на телефоне (уже авторизовано)
  *     сканирует QR, пользователь подтверждает вход, телефон шифрует свои сохранённые
  *     email+пароль под нашим публичным ключом (ECDH + HKDF-SHA256 + AES-256-GCM) и
@@ -233,18 +236,25 @@ export function initQrLogin({
     const sessionId = randomSessionId();
     currentSessionId = sessionId;
 
-    await setDoc(doc(db, "qrLogins", sessionId), {
-      publicKey: publicKeyB64,
-      status: "pending",
-      createdAt: serverTimestamp(),
-    });
-
-    if (cancelled) return; // экран уже закрыли, пока ждали сеть
-
-    const qrContent = `yodo://qrlogin/${sessionId}?pk=${publicKeyB64}`;
+    // НОВОЕ (скорость): QR рисуем СРАЗУ — его содержимое (sessionId + публичный
+    // ключ) не зависит от записи в Firestore. Раньше ждали завершения setDoc,
+    // и на холодном соединении код появлялся через несколько секунд.
+    const qrContent = `https://yodomessenger.web.app/qr-login.html?s=${sessionId}&pk=${publicKeyB64}`;
     await drawQrCode(qrContent);
     sessionStartedAt = Date.now();
     setStatus(`Ожидание сканирования… новый код через ${fmtCountdown(QR_LOGIN_TTL_MS)}`);
+
+    // Запись документа идёт в фоне: onSnapshot спокойно дождётся его появления,
+    // а телефон не успеет отсканировать код раньше завершения записи.
+    setDoc(doc(db, "qrLogins", sessionId), {
+      publicKey: publicKeyB64,
+      status: "pending",
+      createdAt: serverTimestamp(),
+    }).catch((e) => {
+      if (cancelled || sessionId !== currentSessionId) return;
+      console.error("QR login session create failed", e);
+      setStatus("Не удалось создать QR-сессию. Проверьте соединение.", "error");
+    });
 
     // НОВОЕ (ротация QR): через 5 минут автоматически создаём новую сессию.
     stopTimers(); // на случай повторного вызова (сбрасывает awaitingScan)

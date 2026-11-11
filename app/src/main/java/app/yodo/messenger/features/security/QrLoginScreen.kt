@@ -77,6 +77,10 @@ import java.util.concurrent.Executors
 @Composable
 fun QrLoginScreen(
     onBackClick: () -> Unit,
+    // НОВОЕ (обычные считыватели): сессия, пришедшая deep link'ом
+    // yodo://qrlogin/{sessionId}?pk=... — считаем её отсканированной сразу.
+    deepLinkSessionId: String = "",
+    deepLinkPk: String = "",
     viewModel: QrLoginViewModel = hiltViewModel()
 ) {
     val colorTheme = LocalColorTheme.current
@@ -96,6 +100,14 @@ fun QrLoginScreen(
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    // НОВОЕ (обычные считыватели): если сессия пришла по deep link — обрабатываем
+    // её как отсканированный QR, без наведения камеры на код.
+    LaunchedEffect(deepLinkSessionId, deepLinkPk) {
+        if (deepLinkSessionId.isNotBlank() && deepLinkPk.isNotBlank()) {
+            viewModel.consumeExternalSession(deepLinkSessionId, deepLinkPk)
+        }
     }
 
     // Автоматически закрываем экран через небольшую паузу после успешного входа.

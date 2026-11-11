@@ -60,8 +60,9 @@ body {
 }
 
 /* НОВОЕ (современный вход): мягкий градиентный фон + два «пятна света»
-   за карточкой. Позиционируются абсолютно, blur — только на псевдоэлементах,
-   чтобы не тормозить основные экраны приложения. */
+   за карточкой. Позиционируются абсолютно; свечение сделано радиальным
+   градиентом, а не filter: blur — так отрисовка экрана не нагружает GPU
+   и экран входа открывается мгновенно даже на слабых машинах. */
 #screen-login, #screen-register, #screen-verify, #screen-blocked, #screen-qr-login {
   position: relative;
   overflow: hidden;
@@ -76,23 +77,21 @@ body {
 #screen-blocked::after, #screen-qr-login::after {
   content: "";
   position: absolute;
-  border-radius: 50%;
-  filter: blur(90px);
   pointer-events: none;
   z-index: 0;
 }
 #screen-login::before, #screen-register::before, #screen-verify::before,
 #screen-blocked::before, #screen-qr-login::before {
-  width: 380px; height: 380px;
-  top: -120px; right: -80px;
-  background: rgba(74, 163, 255, 0.16);
+  width: 640px; height: 640px;
+  top: -260px; right: -200px;
+  background: radial-gradient(circle closest-side, rgba(74, 163, 255, 0.14), transparent 70%);
   animation: auth-orb 14s ease-in-out infinite alternate;
 }
 #screen-login::after, #screen-register::after, #screen-verify::after,
 #screen-blocked::after, #screen-qr-login::after {
-  width: 300px; height: 300px;
-  bottom: -110px; left: -70px;
-  background: rgba(63, 191, 111, 0.10);
+  width: 520px; height: 520px;
+  bottom: -240px; left: -180px;
+  background: radial-gradient(circle closest-side, rgba(63, 191, 111, 0.10), transparent 70%);
   animation: auth-orb 18s ease-in-out infinite alternate-reverse;
 }
 @keyframes auth-orb {

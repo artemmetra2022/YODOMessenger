@@ -52,10 +52,16 @@ class MainActivity : ComponentActivity() {
     // yodo://channel/<chatId> — проверяется в Compose-дереве и открывает профиль канала.
     private val pendingChannelDeepLink = mutableStateOf<String?>(null)
 
+    // НОВОЕ (QR-вход из обычных считывателей): ссылка yodo://qrlogin/{sessionId}?pk=...
+    // открывается со страницы-моста qr-login.html. Приложение переходит на экран
+    // сканера с уже «отсканированной» сессией — пользователю остаётся подтвердить вход.
+    private val pendingQrLoginDeepLink = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingChannelDeepLink.value = extractChannelIdFromIntent(intent)
+        pendingQrLoginDeepLink.value = extractQrLoginDataFromIntent(intent)
 
         val startDestination = if (authRepository.isLoggedIn()) {
             Routes.ChatList.route
@@ -211,6 +217,23 @@ class MainActivity : ComponentActivity() {
                                     pendingChannelDeepLink.value = null
                                 }
                             }
+                            // НОВОЕ (QR-вход из обычных считывателей): deep link
+                            // yodo://qrlogin/{sessionId}?pk=... открывает экран сканера
+                            // с готовой сессией — остаётся только подтвердить вход.
+                            LaunchedEffect(pendingQrLoginDeepLink.value, authRepository.isLoggedIn()) {
+                                val rawData = pendingQrLoginDeepLink.value
+                                if (rawData != null && authRepository.isLoggedIn()) {
+                                    pendingQrLoginDeepLink.value = null
+                                    val data = android.net.Uri.parse(rawData)
+                                    val sessionId = data.pathSegments?.firstOrNull().orEmpty()
+                                    val pk = data.getQueryParameter("pk").orEmpty()
+                                    if (sessionId.isNotBlank() && pk.isNotBlank()) {
+                                        navController.navigate(
+                                            app.yodo.messenger.navigation.Routes.QrLogin.createRoute(sessionId, pk)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -224,6 +247,7 @@ class MainActivity : ComponentActivity() {
         // НОВОЕ: launchMode="singleTask" — при повторном открытии ссылки, когда активити
         // уже запущена, новый intent приходит сюда, а не в onCreate.
         extractChannelIdFromIntent(intent)?.let { pendingChannelDeepLink.value = it }
+        extractQrLoginDataFromIntent(intent)?.let { pendingQrLoginDeepLink.value = it }
     }
 
     /** Извлекает chatId канала из ссылки вида yodo://channel/<chatId>, если она есть в intent. */
@@ -231,5 +255,16 @@ class MainActivity : ComponentActivity() {
         val data = intent?.data ?: return null
         if (data.scheme != "yodo" || data.host != "channel") return null
         return data.pathSegments?.firstOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * НОВОЕ (QR-вход из обычных считывателей): распознаёт ссылку вида
+     * yodo://qrlogin/{sessionId}?pk={base64url-ключ}. Возвращает data-URI целиком —
+     * sessionId и pk вынимаются из него при переходе на экран.
+     */
+    private fun extractQrLoginDataFromIntent(intent: android.content.Intent?): android.net.Uri? {
+        val data = intent?.data ?: return null
+        if (data.scheme != "yodo" || data.host != "qrlogin") return null
+        return data
     }
 }
