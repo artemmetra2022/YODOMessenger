@@ -1,9 +1,19 @@
-name: Build Release APK
+﻿name: Build Release APK
 
 on:
   workflow_dispatch:        # запуск вручную кнопкой "Run workflow" на вкладке Actions
   push:
     branches: [ main ]
+    # НОВОЕ (скорость сборки): APK-сборка запускается только когда реально
+    # изменился Android-код или конфигурация Gradle. Правки только в web/
+    # (стили, админка, страницы) APK не трогают — не тратим ~5 минут
+    # раннера на бессмысленную пересборку.
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/build-apk.yml'
 
 # Прикрепление APK к релизу требует права записи в содержимое репозитория.
 permissions:
@@ -16,6 +26,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # НОВОЕ (скорость сборки): кэш скачанных зависимостей Maven (modules-2) и
+      # дистрибутива Gradle. Это НЕ build cache задач (KSP/Hilt с ним ломались
+      # ложными ошибками Dagger — поэтому cache-disabled ниже остаётся), а только
+      # библиотеки и метаданные: их восстановление безопасно и экономит ~минуту
+      # сетевых загрузок на каждую сборку. Ключ зависит от хешей build-файлов.
+      - name: Restore Gradle dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: gradle-deps-${{ hashFiles('**/*.gradle.kts', '**/*.gradle', 'gradle.properties') }}
+          restore-keys: |
+            gradle-deps-
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -155,3 +180,4 @@ jobs:
         with:
           name: yodo-messenger-release-apk
           path: ${{ steps.apk.outputs.name }}
+
