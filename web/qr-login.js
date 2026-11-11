@@ -124,6 +124,12 @@ export function initQrLogin({
   let currentSessionId = null;
   let currentPrivateKey = null;
   let cancelled = false;
+  // НОВОЕ (ротация QR): таймеры автосмены кода через 5 минут + обратный отсчёт.
+  let expiryTimer = null;
+  let countdownTimer = null;
+  let sessionStartedAt = 0;
+  let awaitingScan = false; // true, пока ждём именно сканирование (не подтверждение/ошибку)
+  let rotating = false; // защита от двойной ротации (таймер + проверка в onSnapshot)
 
   function setStatus(text, kind) {
     const el = $("qr-login-status");
@@ -131,8 +137,53 @@ export function initQrLogin({
     el.className = "qr-login-status" + (kind ? " qr-login-" + kind : "");
   }
 
+  /** «4:32» для обратного отсчёта до смены кода. */
+  function fmtCountdown(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return minutes + ":" + String(seconds).padStart(2, "0");
+  }
+
+  function stopTimers() {
+    if (expiryTimer) {
+      clearTimeout(expiryTimer);
+      expiryTimer = null;
+    }
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    awaitingScan = false;
+  }
+
+  /**
+   * НОВОЕ (ротация QR): через 5 минут сессия протухает — тихо гасим старую
+   * (ключ и документ qrLogins), и создаём новую с новым QR-кодом.
+   */
+  async function rotateSession() {
+    if (cancelled || rotating) return;
+    rotating = true;
+    stopTimers();
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+    if (currentSessionId) {
+      deleteDoc(doc(db, "qrLogins", currentSessionId)).catch(() => {});
+    }
+    currentSessionId = null;
+    currentPrivateKey = null;
+    try {
+      await startSession();
+    } finally {
+      rotating = false;
+    }
+  }
+
   function cleanup() {
     cancelled = true;
+    stopTimers();
     if (unsubscribe) {
       unsubscribe();
       unsubscribe = null;
@@ -192,9 +243,25 @@ export function initQrLogin({
 
     const qrContent = `yodo://qrlogin/${sessionId}?pk=${publicKeyB64}`;
     await drawQrCode(qrContent);
-    setStatus("Ожидание сканирования…");
+    sessionStartedAt = Date.now();
+    setStatus(`Ожидание сканирования… новый код через ${fmtCountdown(QR_LOGIN_TTL_MS)}`);
 
-    const createdAtLocal = Date.now();
+    // НОВОЕ (ротация QR): через 5 минут автоматически создаём новую сессию.
+    stopTimers(); // на случай повторного вызова (сбрасывает awaitingScan)
+    awaitingScan = true;
+    expiryTimer = setTimeout(() => {
+      rotateSession().catch((e) => {
+        console.error("QR login rotation failed", e);
+        setStatus("Не удалось обновить QR-код. Обновите страницу.", "error");
+      });
+    }, QR_LOGIN_TTL_MS);
+    countdownTimer = setInterval(() => {
+      if (!awaitingScan) return;
+      const left = QR_LOGIN_TTL_MS - (Date.now() - sessionStartedAt);
+      if (left <= 0) return; // сработает expiryTimer
+      setStatus(`Ожидание сканирования… новый код через ${fmtCountdown(left)}`);
+    }, 1000);
+
     unsubscribe = onSnapshot(
       doc(db, "qrLogins", sessionId),
       async (snap) => {
@@ -202,13 +269,18 @@ export function initQrLogin({
         if (!snap.exists()) return;
         const data = snap.data();
 
-        if (Date.now() - createdAtLocal > QR_LOGIN_TTL_MS) {
-          setStatus("Код устарел. Обновите страницу, чтобы получить новый.", "error");
-          cleanup();
+        if (Date.now() - sessionStartedAt > QR_LOGIN_TTL_MS) {
+          // НОВОЕ (ротация QR): не просим обновить страницу — сами меняем код.
+          rotateSession().catch((e) => {
+            console.error("QR login rotation failed", e);
+            setStatus("Не удалось обновить QR-код. Обновите страницу.", "error");
+          });
           return;
         }
 
         if (data.status === "approved" && data.encryptedPayload) {
+          awaitingScan = false;
+          stopTimers();
           setStatus("Подтверждено на телефоне, выполняем вход…", "approved");
           try {
             const { email, password } = await decryptPayload(
@@ -227,7 +299,14 @@ export function initQrLogin({
             currentPrivateKey = null;
             // Дальше onAuthStateChanged в app.js сам переключит экран на чат-лист.
           } catch (e) {
-            setStatus("Не удалось войти. Попробуйте отсканировать код ещё раз.", "error");
+            // Не удалось расшифровать/войти — код уже потрачен, начинаем заново
+            // с новой сессией, чтобы "отсканируйте ещё раз" имело смысл.
+            setStatus("Не удалось войти. Готовим новый QR-код…", "error");
+            setTimeout(() => {
+              rotateSession().catch(() => {
+                setStatus("Не удалось обновить QR-код. Обновите страницу.", "error");
+              });
+            }, 2000);
           }
         }
       },

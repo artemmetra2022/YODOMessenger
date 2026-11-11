@@ -11,6 +11,11 @@
   --bubble-out: #2b5278;
   --bubble-in: #182533;
   --radius: 12px;
+  /* НОВОЕ (современный вход): стеклянная карточка и границы полей */
+  --auth-card-bg: rgba(23, 33, 43, 0.72);
+  --auth-card-border: rgba(255, 255, 255, 0.08);
+  --input-border: rgba(255, 255, 255, 0.06);
+  --input-border-hover: rgba(255, 255, 255, 0.14);
 }
 
 html.theme-light {
@@ -26,6 +31,11 @@ html.theme-light {
   --bubble-out: #d3e6fb;
   --bubble-in: #f0f2f5;
   --radius: 12px;
+  /* НОВОЕ (современный вход): светлый вариант стеклянной карточки */
+  --auth-card-bg: rgba(255, 255, 255, 0.78);
+  --auth-card-border: rgba(23, 33, 43, 0.08);
+  --input-border: rgba(23, 33, 43, 0.10);
+  --input-border-hover: rgba(23, 33, 43, 0.22);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -49,36 +59,108 @@ body {
   justify-content: center;
 }
 
+/* НОВОЕ (современный вход): мягкий градиентный фон + два «пятна света»
+   за карточкой. Позиционируются абсолютно, blur — только на псевдоэлементах,
+   чтобы не тормозить основные экраны приложения. */
+#screen-login, #screen-register, #screen-verify, #screen-blocked, #screen-qr-login {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(74, 163, 255, 0.10), transparent 60%),
+    radial-gradient(1000px 600px at -10% 110%, rgba(74, 163, 255, 0.07), transparent 55%),
+    var(--bg);
+}
+#screen-login::before, #screen-register::before, #screen-verify::before,
+#screen-blocked::before, #screen-qr-login::before,
+#screen-login::after, #screen-register::after, #screen-verify::after,
+#screen-blocked::after, #screen-qr-login::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+}
+#screen-login::before, #screen-register::before, #screen-verify::before,
+#screen-blocked::before, #screen-qr-login::before {
+  width: 380px; height: 380px;
+  top: -120px; right: -80px;
+  background: rgba(74, 163, 255, 0.16);
+  animation: auth-orb 14s ease-in-out infinite alternate;
+}
+#screen-login::after, #screen-register::after, #screen-verify::after,
+#screen-blocked::after, #screen-qr-login::after {
+  width: 300px; height: 300px;
+  bottom: -110px; left: -70px;
+  background: rgba(63, 191, 111, 0.10);
+  animation: auth-orb 18s ease-in-out infinite alternate-reverse;
+}
+@keyframes auth-orb {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(-60px, 50px) scale(1.15); }
+}
+
 .auth-card {
-  width: min(380px, 92vw);
-  background: var(--bg-panel);
-  border-radius: 16px;
-  padding: 36px 28px;
+  position: relative;
+  z-index: 1;
+  width: min(400px, 92vw);
+  background: var(--auth-card-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid var(--auth-card-border);
+  border-radius: 24px;
+  padding: 40px 32px 32px;
   text-align: center;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.18);
+  animation: auth-in 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes auth-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-card { animation: none; }
+  #screen-login::before, #screen-register::before, #screen-verify::before,
+  #screen-blocked::before, #screen-qr-login::before,
+  #screen-login::after, #screen-register::after, #screen-verify::after,
+  #screen-blocked::after, #screen-qr-login::after { animation: none; }
 }
 
 .auth-logo {
   margin: 0;
-  font-size: 42px;
+  font-size: 40px;
   font-weight: 800;
-  letter-spacing: 4px;
-  color: var(--accent);
+  letter-spacing: 6px;
+  background: linear-gradient(135deg, var(--accent) 0%, #7cc4ff 55%, #a4d4ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--accent); /* запасной цвет для браузеров без background-clip */
 }
 
-.auth-subtitle { color: var(--text-dim); margin: 6px 0 24px; font-size: 15px; }
+.auth-subtitle { color: var(--text-dim); margin: 8px 0 26px; font-size: 15px; }
 
 .auth-card form { display: flex; flex-direction: column; gap: 12px; }
 
 .auth-card input {
   background: var(--bg-input);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  padding: 13px 16px;
+  border: 1px solid var(--input-border);
+  border-radius: 14px;
+  padding: 14px 16px;
   color: var(--text);
   font-size: 15px;
   outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
-.auth-card input:focus { border-color: var(--accent); }
+.auth-card input::placeholder { color: var(--text-dim); opacity: 0.75; }
+.auth-card input:hover { border-color: var(--input-border-hover); }
+.auth-card input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(74, 163, 255, 0.16);
+  background: var(--bg-input);
+}
 
 .modal-card select,
 .modal-card input[type="text"] {
@@ -95,17 +177,25 @@ body {
 .modal-card select:focus, .modal-card input[type="text"]:focus { border-color: var(--accent); }
 
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
   color: #fff;
   border: none;
-  border-radius: var(--radius);
-  padding: 13px;
+  border-radius: 14px;
+  padding: 14px;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.2px;
   cursor: pointer;
+  box-shadow: 0 6px 18px rgba(74, 163, 255, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
-.btn-primary:hover { background: var(--accent-dark); }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
+.btn-primary:hover {
+  filter: brightness(1.07);
+  box-shadow: 0 8px 22px rgba(74, 163, 255, 0.32);
+  transform: translateY(-1px);
+}
+.btn-primary:active { transform: translateY(0) scale(0.985); box-shadow: 0 4px 12px rgba(74, 163, 255, 0.22); }
+.btn-primary:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
 
 .btn-secondary {
   background: transparent;
@@ -225,18 +315,23 @@ body {
   align-items: center;
   gap: 12px;
   background: var(--bg-input);
-  border: none;
-  border-radius: var(--radius);
+  border: 1px solid var(--input-border);
+  border-radius: 14px;
   padding: 12px 14px;
   color: var(--text);
   font-size: 14px;
   cursor: pointer;
   margin-bottom: 10px;
   text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.15s ease;
 }
-.auth-provider-btn:hover { background: var(--bg-panel-2); }
+.auth-provider-btn:hover {
+  background: var(--bg-panel-2);
+  border-color: var(--input-border-hover);
+  transform: translateY(-1px);
+}
 .auth-provider-icon {
-  width: 22px; height: 22px;
+  width: 24px; height: 24px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px;
@@ -244,6 +339,16 @@ body {
   background: var(--bg-panel-2);
 }
 .auth-provider-icon-google { background: #4285F4; color: #fff; font-weight: 700; }
+
+/* Мобильная адаптация входа: карточка центрируется через margin:auto и
+   экран может прокручиваться, если форма регистрации выше вьюпорта. */
+@media (max-width: 720px) {
+  #screen-login, #screen-register, #screen-verify, #screen-blocked, #screen-qr-login {
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .auth-card { margin: auto; padding: 30px 22px 26px; }
+}
 
 .auth-success-icon { font-size: 44px; margin-bottom: 4px; }
 
