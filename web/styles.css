@@ -85,14 +85,20 @@ body {
   width: 640px; height: 640px;
   top: -260px; right: -200px;
   background: radial-gradient(circle closest-side, rgba(74, 163, 255, 0.14), transparent 70%);
-  animation: auth-orb 14s ease-in-out infinite alternate;
+  animation: auth-orb 14s ease-in-out infinite alternate, auth-hue 24s linear infinite;
 }
 #screen-login::after, #screen-register::after, #screen-verify::after,
 #screen-blocked::after, #screen-qr-login::after {
   width: 520px; height: 520px;
   bottom: -240px; left: -180px;
   background: radial-gradient(circle closest-side, rgba(63, 191, 111, 0.10), transparent 70%);
-  animation: auth-orb 18s ease-in-out infinite alternate-reverse;
+  animation: auth-orb 18s ease-in-out infinite alternate-reverse, auth-hue 30s linear infinite reverse;
+}
+/* НОВОЕ (перелив): цвет «пятен света» плавно проходит по кругу оттенков
+   (hue-rotate — GPU-операция, не перерисовывает фон, поэтому дёшево). */
+@keyframes auth-hue {
+  from { filter: hue-rotate(0deg); }
+  to   { filter: hue-rotate(360deg); }
 }
 @keyframes auth-orb {
   from { transform: translate(0, 0) scale(1); }
@@ -125,6 +131,7 @@ body {
   #screen-blocked::before, #screen-qr-login::before,
   #screen-login::after, #screen-register::after, #screen-verify::after,
   #screen-blocked::after, #screen-qr-login::after { animation: none; }
+  .auth-logo { animation: none; }
 }
 
 .auth-logo {
@@ -132,11 +139,25 @@ body {
   font-size: 40px;
   font-weight: 800;
   letter-spacing: 6px;
-  background: linear-gradient(135deg, var(--accent) 0%, #7cc4ff 55%, #a4d4ff 100%);
+  /* НОВОЕ (перелив): градиент длиннее текста и медленно «течёт» по буквам. */
+  background: linear-gradient(
+    120deg,
+    var(--accent) 0%,
+    #7cc4ff 30%,
+    #a4d4ff 50%,
+    #7cc4ff 70%,
+    var(--accent) 100%
+  );
+  background-size: 220% 220%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: var(--accent); /* запасной цвет для браузеров без background-clip */
+  animation: auth-logo-shift 7s ease-in-out infinite;
+}
+@keyframes auth-logo-shift {
+  from { background-position: 0% 0%; }
+  to   { background-position: 100% 100%; }
 }
 
 .auth-subtitle { color: var(--text-dim); margin: 8px 0 26px; font-size: 15px; }
