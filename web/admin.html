@@ -398,7 +398,11 @@
           <h2>Создать профиль учителя</h2>
           <form id="form-add-teacher" class="form-row">
             <input type="text" id="teacher-name" placeholder="Имя учителя (например, Егорова С.В.)" required>
-            <input type="text" id="teacher-subject" placeholder="Предмет (необязательно)">
+            <!-- НОВОЕ: предмет — обязательный выпадающий список; «＋ Своя категория…» открывает поле ввода -->
+            <select id="teacher-subject" required>
+              <option value="" disabled selected>Предмет…</option>
+            </select>
+            <input type="text" id="teacher-subject-custom" class="hidden" placeholder="Название своего предмета (категории)" maxlength="60">
             <button type="submit" class="btn-primary">Создать</button>
           </form>
         </div>
@@ -449,7 +453,7 @@
         <h1>Жалобы <span id="reports-count" class="badge badge-yellow hidden"></span></h1>
         <div class="card">
           <div class="card-head">
-            <p class="card-hint">Все жалобы из всех чатов, включая обжалования блокировок. Удаление сообщения и блокировка автора закрывают жалобу; пользователь получает push.</p>
+            <p class="card-hint">Все жалобы из всех чатов, включая обжалования блокировок. Удаление сообщения и блокировка автора закрывают жалобу; пользователь получает push. Если на одного нарушителя жалуются повторно, на карточке появится счётчик «⚠ N жалоб» — клик по нему показывает все жалобы на этого пользователя.</p>
             <button type="button" class="btn-secondary" id="btn-export-reports">⬇ CSV</button>
           </div>
           <div class="filter-row" id="reports-filters">
@@ -459,6 +463,8 @@
             <button type="button" class="filter-btn" data-filter="ALL">Все</button>
           </div>
           <div class="filter-row" id="reports-reason-filters"></div>
+          <!-- НОВОЕ: чип фильтра «жалобы только на этого нарушителя» (появляется по клику на счётчик повторных жалоб) -->
+          <div class="filter-row hidden" id="reports-target-row"></div>
           <!-- НОВОЕ (очередь жалоб): период, сортировка, «только мои» -->
           <div class="form-row reports-extra-filters">
             <select id="reports-period">

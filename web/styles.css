@@ -126,6 +126,11 @@ body {
 .auth-switch { margin-top: 18px; font-size: 14px; color: var(--text-dim); }
 .auth-switch a { color: var(--accent); text-decoration: none; }
 
+/* Ссылка на админку с экрана входа — приглушённая, чтобы не цеплять взгляд обычных пользователей */
+.auth-admin-link { margin-top: 10px; font-size: 13px; }
+.auth-admin-link a { color: var(--text-dim); text-decoration: none; }
+.auth-admin-link a:hover { text-decoration: underline; color: var(--accent); }
+
 /* ===== Пароль: показать/скрыть, генератор ===== */
 .password-field { position: relative; display: flex; align-items: center; }
 .password-field input { flex: 1; padding-right: 76px; }
