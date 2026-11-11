@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
     // НОВОЕ (QR-вход из обычных считывателей): ссылка yodo://qrlogin/{sessionId}?pk=...
     // открывается со страницы-моста qr-login.html. Приложение переходит на экран
     // сканера с уже «отсканированной» сессией — пользователю остаётся подтвердить вход.
-    private val pendingQrLoginDeepLink = mutableStateOf<String?>(null)
+    private val pendingQrLoginDeepLink = mutableStateOf<android.net.Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -221,10 +221,9 @@ class MainActivity : ComponentActivity() {
                             // yodo://qrlogin/{sessionId}?pk=... открывает экран сканера
                             // с готовой сессией — остаётся только подтвердить вход.
                             LaunchedEffect(pendingQrLoginDeepLink.value, authRepository.isLoggedIn()) {
-                                val rawData = pendingQrLoginDeepLink.value
-                                if (rawData != null && authRepository.isLoggedIn()) {
+                                val data = pendingQrLoginDeepLink.value
+                                if (data != null && authRepository.isLoggedIn()) {
                                     pendingQrLoginDeepLink.value = null
-                                    val data = android.net.Uri.parse(rawData)
                                     val sessionId = data.pathSegments?.firstOrNull().orEmpty()
                                     val pk = data.getQueryParameter("pk").orEmpty()
                                     if (sessionId.isNotBlank() && pk.isNotBlank()) {
