@@ -207,12 +207,23 @@
       <header id="sidebar-header">
         <span class="app-title">YODO</span>
         <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
-        <button id="btn-new-channel" class="icon-btn" title="Новый канал">📢</button>
-        <button id="btn-new-group" class="icon-btn" title="Новая группа">👥</button>
-        <button id="btn-new-chat" class="icon-btn" title="Новый чат">＋</button>
+        <!-- НОВОЕ (Telegram-меню): одна кнопка «+», при наведении раскрывается
+             по горизонтали, показывая кнопки канала, группы и чата. -->
+        <div id="new-actions">
+          <button id="btn-new-toggle" class="icon-btn" title="Создать">＋</button>
+          <button id="btn-new-chat" class="icon-btn new-action" title="Новый чат">💬</button>
+          <button id="btn-new-group" class="icon-btn new-action" title="Новая группа">👥</button>
+          <button id="btn-new-channel" class="icon-btn new-action" title="Новый канал">📢</button>
+          <button id="btn-new-board" class="icon-btn new-action" title="Доски">🎨</button>
+        </div>
         <button id="btn-open-settings" class="icon-btn" title="Настройки">⚙️</button>
         <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
       </header>
+      <!-- НОВОЕ (Telegram-дизайн): строка поиска по списку чатов -->
+      <div id="sidebar-search">
+        <input type="text" id="chat-search" placeholder="Поиск" autocomplete="off">
+        <button type="button" id="chat-search-clear" class="hidden" title="Очистить">✕</button>
+      </div>
       <div id="chat-list"></div>
     </aside>
     <main id="chat-area">
@@ -245,10 +256,19 @@
         <button type="button" id="btn-faq-reopen" class="faq-reopen-btn">Открыть список вопросов</button>
         <form id="form-send">
           <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
-          <input type="file" id="file-input" accept="image/*" class="hidden">
+          <input type="file" id="file-input" accept="*/*" class="hidden">
           <input type="text" id="message-input" placeholder="Сообщение..." autocomplete="off">
           <button type="submit" class="btn-send">➤</button>
         </form>
+        <!-- НОВОЕ (вложения): превью несímage-файла перед отправкой -->
+        <div id="file-preview" class="hidden">
+          <span class="file-preview-icon" id="file-preview-icon">📄</span>
+          <div class="file-preview-info">
+            <div id="file-preview-name"></div>
+            <div id="file-preview-size"></div>
+          </div>
+          <button type="button" id="btn-cancel-file" class="icon-btn">✕</button>
+        </div>
         <div id="image-preview" class="hidden">
           <img id="image-preview-img" src="" alt="">
           <button type="button" id="btn-cancel-image" class="icon-btn">✕</button>
@@ -312,12 +332,81 @@
         </div>
       </div>
     </div>
+    <!-- Модалка: доски (список) -->
+    <div id="modal-boards" class="modal hidden">
+      <div class="modal-card boards-card">
+        <div class="settings-header">
+          <h3>Доски</h3>
+          <button type="button" class="icon-btn" id="btn-close-boards-modal">✕</button>
+        </div>
+        <div class="boards-hint">Рисуйте от руки — доски сохраняются автоматически, их можно открыть снова и продолжить.</div>
+        <button type="button" class="btn-primary" id="btn-create-board">＋ Новая доска</button>
+        <div id="boards-list"></div>
+      </div>
+    </div>
+
+    <!-- Модалка: редактор доски -->
+    <div id="modal-board-editor" class="modal hidden">
+      <div class="modal-card board-editor-card">
+        <div class="board-editor-header">
+          <button type="button" class="icon-btn" id="btn-board-back" title="К списку досок">←</button>
+          <input type="text" id="board-title-input" placeholder="Название доски" maxlength="60" autocomplete="off">
+          <button type="button" class="icon-btn" id="btn-close-board-editor" title="Закрыть">✕</button>
+        </div>
+        <div class="board-toolbar">
+          <div class="board-swatches" id="board-swatches">
+            <button type="button" class="board-swatch selected" data-color="#1c1c1e" style="background:#1c1c1e"></button>
+            <button type="button" class="board-swatch" data-color="#e74c3c" style="background:#e74c3c"></button>
+            <button type="button" class="board-swatch" data-color="#3498db" style="background:#3498db"></button>
+            <button type="button" class="board-swatch" data-color="#2ecc71" style="background:#2ecc71"></button>
+            <button type="button" class="board-swatch" data-color="#f1c40f" style="background:#f1c40f"></button>
+            <button type="button" class="board-swatch" data-color="#ffffff" style="background:#ffffff"></button>
+          </div>
+          <div class="board-sizes" id="board-sizes">
+            <button type="button" class="board-size-btn" data-size="3"><span style="width:5px;height:5px"></span></button>
+            <button type="button" class="board-size-btn selected" data-size="6"><span style="width:9px;height:9px"></span></button>
+            <button type="button" class="board-size-btn" data-size="12"><span style="width:14px;height:14px"></span></button>
+            <button type="button" class="board-size-btn" data-size="22"><span style="width:20px;height:20px"></span></button>
+          </div>
+          <button type="button" class="board-tool-btn" id="btn-board-eraser" title="Ластик">🧽</button>
+          <button type="button" class="board-tool-btn" id="btn-board-undo" title="Отменить">↩️</button>
+          <button type="button" class="board-tool-btn" id="btn-board-clear" title="Очистить доску">🗑️</button>
+          <button type="button" class="board-send-btn" id="btn-board-send" title="Отправить в открытый чат">📤 В чат</button>
+          <span class="board-save-status" id="board-save-status"></span>
+        </div>
+        <div class="board-canvas-wrap">
+          <canvas id="board-canvas" width="1000" height="700"></canvas>
+        </div>
+      </div>
+    </div>
+
     <!-- Модалка: настройки -->
     <div id="modal-settings" class="modal hidden">
       <div class="modal-card settings-card">
         <div class="settings-header">
-          <h3>Настройки</h3>
+          <button type="button" class="icon-btn hidden" id="btn-settings-back" title="Назад">←</button>
+          <h3 id="settings-title">Настройки</h3>
           <button type="button" class="icon-btn" id="btn-close-settings-modal">✕</button>
+        </div>
+
+        <!-- НОВОЕ: главное меню настроек (как в Telegram) — разделы открываются
+             по одному, список виден только на главном экране настроек. -->
+        <div class="settings-nav" id="settings-nav">
+          <button type="button" class="settings-nav-item" data-panel="profile">
+            <span class="settings-nav-icon">👤</span><span class="settings-nav-text">Профиль</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="privacy">
+            <span class="settings-nav-icon">🔒</span><span class="settings-nav-text">Приватность</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="security">
+            <span class="settings-nav-icon">🛡️</span><span class="settings-nav-text">Безопасность</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="notifications">
+            <span class="settings-nav-icon">🔔</span><span class="settings-nav-text">Уведомления</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="theme">
+            <span class="settings-nav-icon">🎨</span><span class="settings-nav-text">Тема</span><span class="settings-nav-arrow">›</span>
+          </button>
         </div>
 
         <div class="settings-body">
