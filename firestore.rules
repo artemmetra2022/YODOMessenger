@@ -571,6 +571,28 @@ service cloud.firestore {
         resource.data.uid == request.auth.uid;
     }
 
+    // НОВОЕ (доски, веб-версия): рисование от руки с автосохранением.
+    // create/delete — только владелец (ownerUid == свой uid). Чтение —
+    // любому авторизованному, иначе получатель не откроет доску,
+    // отправленную в чат. Update разрешён любому авторизованному, но со
+    // строгими ограничениями: нельзя подменить владельца, нельзя раздуть
+    // документ (лимит штрихов), менять можно только title/strokes/updatedAt.
+    match /boards/{boardId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid;
+
+      allow read: if isSignedIn();
+
+      allow update: if isSignedIn() &&
+        request.resource.data.ownerUid == resource.data.ownerUid &&
+        request.resource.data.strokes.size() <= 1000 &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['title', 'strokes', 'updatedAt']);
+
+      allow delete: if isSignedIn() &&
+        resource.data.ownerUid == request.auth.uid;
+    }
+
     match /chats/{chatId} {
       // п.41: официальный канал YodoMessenger должен быть виден и открываем
       // ВСЕМ авторизованным пользователям (это рассылка от админов, а не
