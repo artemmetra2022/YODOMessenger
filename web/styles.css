@@ -716,19 +716,10 @@ html.theme-light #group-search-results:hover, html.theme-light .settings-card:ho
   }
 }
 
-/* НОВОЕ (Telegram-дизайн): чат-колонка центрируется по ширине окна. */
-#chat-active > #chat-header,
-#chat-active > #messages,
-#chat-active > #typing-indicator,
-#chat-active > #btn-load-more,
-#chat-active > #reply-preview-bar,
-#chat-active > #support-faq-panel,
-#chat-active > .faq-reopen-btn,
-#chat-active > #form-send,
-#chat-active > #image-preview {
-  width: min(100%, 920px);
-  align-self: center;
-}
+/* ИСПРАВЛЕНО: чат-колонка больше не центрируется по ширине окна — на
+   широких экранах это оставляло просветы между сайдбаром и шапкой/полем
+   ввода. Теперь колонка чата занимает всю ширину справа от списка чатов
+   и автоматически подстраивается под размер окна. */
 
 #chat-header {
   display: flex;
