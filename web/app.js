@@ -28,6 +28,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  addDoc,
   setDoc,
   collection,
   query,
@@ -925,9 +926,10 @@ function listenSupportChat() {
 }
 
 // Для админов: список всех бесед поддержки (собираем через chats where type == SUPPORT).
+// НОВОЕ: лимит 100 бесед — инбокс остаётся быстрым при большом потоке обращений.
 function listenSupportConversations() {
   if (supportConversationsUnsub) supportConversationsUnsub();
-  const q = query(collection(db, "chats"), where("type", "==", "SUPPORT"));
+  const q = query(collection(db, "chats"), where("type", "==", "SUPPORT"), limit(100));
   supportConversationsUnsub = onSnapshot(q, (snap) => {
     supportConversationsCache.clear();
     snap.forEach((d) => {
@@ -951,53 +953,143 @@ $("btn-support-inbox").addEventListener("click", () => {
   renderSupportInbox();
 });
 
+// НОВОЕ (инбокс поддержки): состояние фильтров вида.
+let supportInboxFilter = "all"; // all | waiting | done
+let supportInboxSearch = "";
+const SUPPORT_INBOX_CAP = 100;
+
+function isSupportConversationWaiting(conv) {
+  return conv.lastMessageSenderId === conv.supportUserId &&
+    (conv.lastMessage || "").trim() !== "";
+}
+
 function renderSupportInbox() {
   const listEl = $("chat-list");
+
+  // Сохраняем фокус/курсор поиска, если снапшот перерисовал вид во время набора.
+  const oldSearch = document.getElementById("support-inbox-search");
+  const hadFocus = oldSearch && document.activeElement === oldSearch;
+  const caretPos = oldSearch ? oldSearch.selectionStart : 0;
+
+  const all = Array.from(supportConversationsCache.values());
+  const waitingCount = all.filter(isSupportConversationWaiting).length;
+
   listEl.innerHTML = "";
 
-  const header = document.createElement("div");
-  header.className = "search-empty";
-  header.style.padding = "10px 16px";
-  header.textContent = "Обращения в поддержку (" + supportConversationsCache.size + ")";
-  listEl.appendChild(header);
+  // Статистика: всего / ожидают ответа / отвечено.
+  const stats = document.createElement("div");
+  stats.className = "support-stats";
+  stats.innerHTML =
+    '<div class="support-stat"><div class="support-stat-num">' + all.length + '</div><div class="support-stat-label">Всего</div></div>' +
+    '<div class="support-stat support-stat-waiting"><div class="support-stat-num">' + waitingCount + '</div><div class="support-stat-label">Ожидают</div></div>' +
+    '<div class="support-stat"><div class="support-stat-num">' + (all.length - waitingCount) + '</div><div class="support-stat-label">Отвечено</div></div>';
+  listEl.appendChild(stats);
 
-  const conversations = Array.from(supportConversationsCache.values())
-    .sort((a, b) => {
-      // Ожидающие ответа (последнее сообщение от пользователя) — выше.
-      const aWaiting = a.lastMessageSenderId === a.supportUserId ? 1 : 0;
-      const bWaiting = b.lastMessageSenderId === b.supportUserId ? 1 : 0;
-      if (aWaiting !== bWaiting) return bWaiting - aWaiting;
-      return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
-    });
-
-  for (const conv of conversations) {
-    const item = document.createElement("div");
-    const awaitingReply = conv.lastMessageSenderId === conv.supportUserId &&
-      (conv.lastMessage || "").trim() !== "";
-    item.className = "chat-item" + (conv.id === activeChatId ? " selected" : "");
-    const letter = (conv.supportUserName || "?")[0].toUpperCase();
-    item.innerHTML = `
-      <div class="chat-avatar">${esc(letter)}</div>
-      <div class="chat-item-info">
-        <div class="chat-item-top">
-          <span class="chat-item-name">${esc(conv.supportUserName || "Пользователь")}</span>
-          <span class="chat-item-time">${esc(formatTime(conv.lastMessageTimestamp))}</span>
-        </div>
-        <div class="chat-item-bottom">
-          <span class="chat-item-preview">${esc(conv.lastMessage || "")}</span>
-          ${awaitingReply ? '<span class="chat-badge">!</span>' : ""}
-        </div>
-      </div>`;
-    item.addEventListener("click", () => openChat(conv.id));
-    listEl.appendChild(item);
+  // Поиск по имени / email / тексту последнего сообщения.
+  const searchRow = document.createElement("div");
+  searchRow.className = "support-search-row";
+  searchRow.innerHTML = '<input type="text" id="support-inbox-search" class="support-search" placeholder="Имя, email или текст…" autocomplete="off">';
+  listEl.appendChild(searchRow);
+  const searchEl = searchRow.querySelector("#support-inbox-search");
+  searchEl.value = supportInboxSearch;
+  let searchTimer = null;
+  searchEl.addEventListener("input", () => {
+    supportInboxSearch = searchEl.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderSupportInboxList, 180);
+  });
+  if (hadFocus) {
+    searchEl.focus();
+    try { searchEl.setSelectionRange(caretPos, caretPos); } catch (e) { /* не критично */ }
   }
 
-  if (conversations.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "search-empty";
-    empty.style.padding = "10px 16px";
-    empty.textContent = "Обращений пока нет";
-    listEl.appendChild(empty);
+  // Вкладки-фильтры: все / ожидают ответа / отвеченные.
+  const tabs = document.createElement("div");
+  tabs.className = "support-filters";
+  [["all", "Все"], ["waiting", "Ожидают ответа"], ["done", "Отвеченные"]].forEach(([key, label]) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "support-filter-tab" + (supportInboxFilter === key ? " active" : "");
+    tab.textContent = label;
+    tab.addEventListener("click", () => {
+      supportInboxFilter = key;
+      renderSupportInboxList();
+      tabs.querySelectorAll(".support-filter-tab").forEach((b) => b.classList.remove("active"));
+      tab.classList.add("active");
+    });
+    tabs.appendChild(tab);
+  });
+  listEl.appendChild(tabs);
+
+  // Контейнер результатов + рендер.
+  const results = document.createElement("div");
+  results.id = "support-inbox-results";
+  listEl.appendChild(results);
+  renderSupportInboxList();
+}
+
+function renderSupportInboxList() {
+  const box = document.getElementById("support-inbox-results");
+  if (!box) return;
+
+  const q = supportInboxSearch.trim().toLowerCase();
+  let items = Array.from(supportConversationsCache.values());
+
+  if (supportInboxFilter === "waiting") items = items.filter(isSupportConversationWaiting);
+  else if (supportInboxFilter === "done") items = items.filter((c) => !isSupportConversationWaiting(c));
+
+  if (q) {
+    items = items.filter((c) =>
+      (c.supportUserName || "").toLowerCase().includes(q) ||
+      (c.supportUserEmail || "").toLowerCase().includes(q) ||
+      (c.lastMessage || "").toLowerCase().includes(q)
+    );
+  }
+
+  items.sort((a, b) => {
+    const aWaiting = isSupportConversationWaiting(a) ? 1 : 0;
+    const bWaiting = isSupportConversationWaiting(b) ? 1 : 0;
+    if (aWaiting !== bWaiting) return bWaiting - aWaiting;
+    return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+  });
+
+  box.innerHTML = "";
+
+  if (!items.length) {
+    box.innerHTML = '<div class="search-empty" style="padding:12px 16px">' +
+      (q ? "Ничего не найдено" : "Обращений пока нет") + "</div>";
+    return;
+  }
+
+  for (const conv of items) {
+    const item = document.createElement("div");
+    const waiting = isSupportConversationWaiting(conv);
+    item.className = "chat-item support-row" + (waiting ? " waiting" : "") +
+      (conv.id === activeChatId ? " selected" : "");
+    const letter = (conv.supportUserName || "?")[0].toUpperCase();
+    item.innerHTML =
+      '<div class="chat-avatar">' + esc(letter) + "</div>" +
+      '<div class="chat-item-info">' +
+        '<div class="chat-item-top">' +
+          '<span class="chat-item-name">' + esc(conv.supportUserName || "Пользователь") + "</span>" +
+          '<span class="chat-item-time">' + esc(formatTime(conv.lastMessageTimestamp)) + "</span>" +
+        "</div>" +
+        '<div class="support-email">' + esc(conv.supportUserEmail || "—") + "</div>" +
+        '<div class="chat-item-bottom">' +
+          '<span class="chat-item-preview">' + esc(conv.lastMessage || "") + "</span>" +
+          (waiting ? '<span class="chat-badge">!</span>' : "") +
+        "</div>" +
+      "</div>";
+    item.addEventListener("click", () => openChat(conv.id));
+    box.appendChild(item);
+  }
+
+  // Подсказка, если сработал лимит подписки.
+  if (supportConversationsCache.size >= SUPPORT_INBOX_CAP) {
+    const hint = document.createElement("div");
+    hint.className = "support-cap-hint";
+    hint.textContent = "Показаны последние " + SUPPORT_INBOX_CAP + " обращений. Уточните запрос поиском.";
+    box.appendChild(hint);
   }
 }
 
@@ -1059,6 +1151,8 @@ function buildChatListItem(chat) {
 }
 
 function renderChatList() {
+  // НОВОЕ: пока открыт инбокс поддержки, обычный список чатов его не затирает.
+  if (viewingSupportInbox) { renderSupportInbox(); return; }
   const listEl = $("chat-list");
   const chats = Array.from(chatsCache.values())
     .filter((c) => c.id !== OFFICIAL_CHANNEL_ID && c.type !== "SUPPORT")
@@ -1079,11 +1173,57 @@ function renderChatList() {
   for (const chat of chats) {
     listEl.appendChild(buildChatListItem(chat));
   }
+
+  // НОВОЕ (Telegram-дизайн): применяем активный фильтр поиска после перерисовки.
+  applyChatSearchFilter();
+}
+
+/* НОВОЕ (Telegram-дизайн): фильтрация списка чатов по строке поиска.
+   Актуальные чаты поднимаются наверх, неактуальные — затемняются под ними. */
+function applyChatSearchFilter() {
+  const searchEl = document.getElementById("chat-search");
+  const listEl = $("chat-list");
+  if (!searchEl || !listEl) return;
+  const q = searchEl.value.trim().toLowerCase();
+  const matched = [];
+  const dimmed = [];
+  listEl.querySelectorAll(".chat-item").forEach((el) => {
+    const nameEl = el.querySelector(".chat-item-name");
+    const match = !q || (nameEl && nameEl.textContent.toLowerCase().includes(q));
+    el.classList.toggle("dimmed", !match);
+    (match ? matched : dimmed).push(el);
+  });
+  if (q) {
+    // Актуальные сверху, затемнённые ниже.
+    matched.concat(dimmed).forEach((el) => listEl.appendChild(el));
+    listEl.scrollTop = 0;
+  }
 }
 
 /* ------------------------------------------------------------------ */
 /* Открытие чата / сообщения                                           */
 /* ------------------------------------------------------------------ */
+
+// НОВОЕ (Telegram-дизайн): живой поиск по списку чатов + крестик очистки.
+const chatSearchInput = document.getElementById("chat-search");
+if (chatSearchInput) {
+  const searchClear = document.getElementById("chat-search-clear");
+  const updateClearBtn = () => {
+    if (searchClear) searchClear.classList.toggle("hidden", chatSearchInput.value.length === 0);
+  };
+  chatSearchInput.addEventListener("input", () => {
+    updateClearBtn();
+    applyChatSearchFilter();
+  });
+  if (searchClear) {
+    searchClear.addEventListener("click", () => {
+      chatSearchInput.value = "";
+      updateClearBtn();
+      applyChatSearchFilter();
+      chatSearchInput.focus();
+    });
+  }
+}
 
 function findChatData(chatId) {
   if (chatId === OFFICIAL_CHANNEL_ID) return officialChannelData;
@@ -1176,6 +1316,11 @@ function openChat(chatId) {
   updateChatHeader();
   $("chat-empty").classList.add("hidden");
   $("chat-active").classList.remove("hidden");
+  // НОВОЕ: перезапуск анимации открытия (даже если чат уже был открыт).
+  const chatActiveEl = $("chat-active");
+  chatActiveEl.classList.remove("chat-entering");
+  void chatActiveEl.offsetWidth; // принудительный reflow — сброс анимации
+  chatActiveEl.classList.add("chat-entering");
   document.getElementById("screen-app").classList.add("chat-open");
   $("messages").innerHTML = "";
   $("btn-load-more").classList.add("hidden");
@@ -1273,7 +1418,7 @@ function listenActiveMessages() {
       const msg = change.doc.data();
       if (msg.senderId && msg.senderId !== currentUser.uid && Date.now() - (msg.timestamp || 0) < 5000) {
         const name = activeChatData ? chatDisplayName(activeChatData) : "YODO";
-        notifyNewMessage(name, msg.text || (msg.imageBase64 ? "📷 Фото" : "Новое сообщение"), chatId);
+        notifyNewMessage(name, messagePreviewText(msg) || "Новое сообщение", chatId);
       }
     });
   });
@@ -1362,15 +1507,80 @@ function buildImageElement(imageBase64) {
   return img;
 }
 
-function buildReplyPreview(replyToSenderName, replyToText) {
+/* НОВОЕ: карточка совместной доски в сообщении — «Открыть доску» работает
+   и у получателя, поэтому доска редактируется вдвоём в реальном времени. */
+function buildBoardCard(msg) {
+  const card = document.createElement("div");
+  card.className = "msg-board-card";
+  const title = document.createElement("div");
+  title.className = "msg-board-title";
+  title.textContent = "🎨 " + (msg.boardTitle || "Совместная доска");
+  const hint = document.createElement("div");
+  hint.className = "msg-board-hint";
+  hint.textContent = "Совместное рисование — изменения видны всем сразу";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "msg-board-open";
+  btn.textContent = "Открыть доску";
+  btn.addEventListener("click", async () => {
+    try {
+      const snap = await getDoc(doc(db, "boards", msg.boardId));
+      if (!snap.exists()) { alert("Доска была удалена"); return; }
+      openBoardEditor(msg.boardId, snap.data());
+    } catch (err) {
+      console.error("Открытие доски:", err);
+      alert("Не удалось открыть доску");
+    }
+  });
+  card.appendChild(title);
+  card.appendChild(hint);
+  card.appendChild(btn);
+  return card;
+}
+
+/* НОВОЕ: единый текст-превью сообщения (список чатов, уведомления). */
+function messagePreviewText(msg) {
+  return msg.text ||
+    (msg.imageBase64 ? "📷 Фото" : "") ||
+    (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
+    (msg.boardId ? "🎨 Доска: " + (msg.boardTitle || "") : "") ||
+    "";
+}
+
+function buildReplyPreview(replyToSenderName, replyToText, replyToId) {
   const div = document.createElement("div");
   div.style.borderLeft = "3px solid var(--accent)";
   div.style.padding = "2px 8px";
   div.style.margin = "2px 0 6px";
   div.style.color = "var(--text-dim)";
   div.style.fontSize = "13px";
+  div.style.cursor = "pointer";
   div.textContent = (replyToSenderName || "") + ": " + replyToText;
+  // НОВОЕ: клик по цитате прокручивает ленту к оригиналу и подсвечивает его.
+  div.title = "Перейти к сообщению";
+  div.addEventListener("click", () => {
+    if (replyToId) jumpToMessage(replyToId);
+  });
   return div;
+}
+
+/* НОВОЕ (переход к сообщению): ищем элемент по data-msg-id; если сообщение
+   ещё не загружено (старые страницы) — подгружаем историю и пробуем снова. */
+function jumpToMessage(msgId, allowLoadMore = true) {
+  const el = document.querySelector('#messages [data-msg-id="' + CSS.escape(msgId) + '"]');
+  if (!el) {
+    const loadMoreBtn = $("btn-load-more");
+    if (allowLoadMore && !loadMoreBtn.classList.contains("hidden")) {
+      loadMoreBtn.click();
+      setTimeout(() => jumpToMessage(msgId, false), 600);
+    }
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("msg-jump");
+  void el.offsetWidth; // перезапуск анимации подсветки
+  el.classList.add("msg-jump");
+  setTimeout(() => el.classList.remove("msg-jump"), 1500);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1388,7 +1598,11 @@ function startReply(msg) {
     id: msg.id,
     senderId: msg.senderId,
     senderName: msg.senderId === currentUser.uid ? "Вы" : senderNameForReply(msg.senderId),
-    text: msg.text || (msg.imageBase64 ? "📷 Фото" : ""),
+    text: msg.text ||
+      (msg.imageBase64 ? "📷 Фото" : "") ||
+      (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
+      (msg.boardId ? "🎨 Доска: " + (msg.boardTitle || "") : "") ||
+      "",
   };
   $("reply-preview-name").textContent = pendingReply.senderName;
   $("reply-preview-text").textContent = pendingReply.text;
@@ -1489,7 +1703,11 @@ function openForwardModal(msg) {
     imageBase64: msg.imageBase64 || null,
     senderId: msg.senderId,
   };
-  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : "");
+  $("forward-preview").textContent = msg.text ||
+    (msg.imageBase64 ? "📷 Фото" : "") ||
+    (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
+    (msg.boardId ? "🎨 Доска: " + (msg.boardTitle || "") : "") ||
+    "";
   $("forward-search-input").value = "";
   renderForwardResults(forwardableChatsList());
   $("modal-forward").classList.remove("hidden");
@@ -1603,6 +1821,7 @@ function buildForwardedLabel() {
 function renderMessage(msg) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + (msg.senderId === currentUser.uid ? "out" : "in");
+  wrap.dataset.msgId = msg.id; // НОВОЕ: для перехода к сообщению по цитате
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble";
 
@@ -1619,8 +1838,15 @@ function renderMessage(msg) {
     if (msg.imageBase64) {
       bubble.appendChild(buildImageElement(msg.imageBase64));
     }
+    // НОВОЕ: вложение-файл и карточка совместной доски.
+    if (msg.fileBase64) {
+      bubble.appendChild(buildFileElement(msg));
+    }
+    if (msg.boardId) {
+      bubble.appendChild(buildBoardCard(msg));
+    }
     if (msg.replyToText) {
-      bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText));
+      bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText, msg.replyToId));
     }
     if (msg.text) {
       bubble.appendChild(document.createTextNode(msg.text));
@@ -1660,6 +1886,9 @@ function renderMessage(msg) {
     forwardBtn.className = "msg-action-btn";
     forwardBtn.title = "Переслать";
     forwardBtn.textContent = "➡️";
+    // НОВОЕ: файлы и доски не пересылаем (данные тяжёлые/требуют ссылки на доску).
+    forwardBtn.disabled = !!(msg.fileBase64 || msg.boardId);
+    if (forwardBtn.disabled) forwardBtn.style.display = "none";
     forwardBtn.addEventListener("click", () => openForwardModal(msg));
     actions.appendChild(forwardBtn);
 
@@ -1688,12 +1917,33 @@ function senderNameFor(uid) {
 /* Отправка сообщения                                                   */
 /* ------------------------------------------------------------------ */
 
+/* НОВОЕ (Telegram-меню): клик по свёрнутой кнопке «+» — быстрое действие
+   по умолчанию (создать обычный чат); наведение раскрывает остальные. */
+const btnNewToggle = document.getElementById("btn-new-toggle");
+if (btnNewToggle) {
+  btnNewToggle.addEventListener("click", () => {
+    document.getElementById("btn-new-chat")?.click();
+  });
+}
+
+/* НОВОЕ (расширение ввода): пока в поле есть символы, форма переходит
+   в режим .typing — поле расширяется и закрывает кнопку вложений. */
+(function () {
+  const msgInput = document.getElementById("message-input");
+  const formSend = document.getElementById("form-send");
+  if (!msgInput || !formSend) return;
+  const update = () => formSend.classList.toggle("typing", msgInput.value.length > 0);
+  msgInput.addEventListener("input", update);
+  update();
+})();
+
 $("form-send").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $("message-input");
   const text = input.value.trim();
   const imageBase64 = pendingImageBase64;
-  if ((!text && !imageBase64) || !activeChatId) return;
+  const file = pendingFile;
+  if ((!text && !imageBase64 && !file) || !activeChatId) return;
   if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
 
   // Rate limiting: не больше 5 отправок за 10 секунд (порт RateLimiter.kt)
@@ -1724,6 +1974,13 @@ $("form-send").addEventListener("submit", async (e) => {
     };
     if (text) msgData.text = text;
     if (imageBase64) msgData.imageBase64 = imageBase64;
+    if (file) {
+      // НОВОЕ: вложение-файл (документ, архив, аудио и т.д.)
+      msgData.fileBase64 = file.base64;
+      msgData.fileName = file.name;
+      msgData.fileSize = file.size;
+      msgData.fileMime = file.mime;
+    }
     if (replySnapshot) {
       msgData.replyToId = replySnapshot.id;
       msgData.replyToSenderName = replySnapshot.senderName;
@@ -1732,8 +1989,9 @@ $("form-send").addEventListener("submit", async (e) => {
     batch.set(msgRef, msgData);
 
     const chatRef = doc(db, "chats", activeChatId);
+    const attachmentPreview = imageBase64 ? "📷 Фото" : file ? "📄 " + (file.name || "файл") : "";
     const chatUpdate = {
-      lastMessage: text || "📷 Фото",
+      lastMessage: text || attachmentPreview || "Новое сообщение",
       lastMessageTimestamp: now,
       lastMessageSenderId: currentUser.uid,
       lastMessageStatus: "SENT",
@@ -1785,36 +2043,115 @@ $("message-input").addEventListener("input", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Вложение изображения                                                 */
+/* Вложения: изображения (с даунскейлом) и любые файлы (base64)         */
 /* ------------------------------------------------------------------ */
+
+// НОВОЕ: лимит несímage-файла. Firestore-документ ограничен ~1 МБ,
+// base64 раздувает данные на треть, поэтому сырой лимит — 700 КБ.
+const MAX_FILE_BYTES = 700 * 1024;
+let pendingFile = null; // { base64, name, size, mime }
 
 function cancelPendingImage() {
   pendingImageBase64 = null;
+  pendingFile = null;
   $("image-preview").classList.add("hidden");
   $("image-preview-img").src = "";
+  $("file-preview").classList.add("hidden");
   $("file-input").value = "";
+}
+
+function fileExtensionIcon(name) {
+  const ext = (name.split(".").pop() || "").toUpperCase().slice(0, 4);
+  return ext || "FILE";
+}
+
+function formatFileSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return bytes + " Б";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " КБ";
+  return (bytes / 1024 / 1024).toFixed(1) + " МБ";
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
 }
 
 $("btn-attach").addEventListener("click", () => $("file-input").click());
 $("btn-cancel-image").addEventListener("click", cancelPendingImage);
+$("btn-cancel-file").addEventListener("click", cancelPendingImage);
 
 $("file-input").addEventListener("change", async () => {
   const file = $("file-input").files[0];
   if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    alert("Выберите файл изображения");
-    return;
-  }
   try {
-    const base64 = await downscaleImageToBase64(file, 1280, 0.8);
-    pendingImageBase64 = base64;
-    $("image-preview-img").src = "data:image/jpeg;base64," + base64;
-    $("image-preview").classList.remove("hidden");
+    if (file.type.startsWith("image/")) {
+      // Картинки — как раньше: даунскейл + JPEG.
+      const base64 = await downscaleImageToBase64(file, 1280, 0.8);
+      pendingImageBase64 = base64;
+      pendingFile = null;
+      $("image-preview-img").src = "data:image/jpeg;base64," + base64;
+      $("image-preview").classList.remove("hidden");
+      $("file-preview").classList.add("hidden");
+    } else {
+      // НОВОЕ: любые другие файлы — документы, архивы, аудио и т.д.
+      if (file.size > MAX_FILE_BYTES) {
+        alert("Файл слишком большой: макс. 700 КБ (занимает ~1 МБ в base64)");
+        return;
+      }
+      const dataUrl = await readAsDataUrl(file);
+      const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      pendingFile = {
+        base64,
+        name: file.name,
+        size: file.size,
+        mime: file.type || "application/octet-stream",
+      };
+      pendingImageBase64 = null;
+      $("file-preview-icon").textContent = "📄";
+      $("file-preview-name").textContent = file.name;
+      $("file-preview-size").textContent = formatFileSize(file.size);
+      $("file-preview").classList.remove("hidden");
+      $("image-preview").classList.add("hidden");
+    }
   } catch (err) {
-    console.error("Ошибка обработки изображения:", err);
-    alert("Не удалось обработать изображение");
+    console.error("Ошибка обработки вложения:", err);
+    alert("Не удалось обработать файл");
   }
 });
+
+/* НОВОЕ: карточка файла в ленте — иконка, имя, размер, скачивание. */
+function buildFileElement(msg) {
+  const row = document.createElement("div");
+  row.className = "msg-file";
+  const icon = document.createElement("div");
+  icon.className = "msg-file-icon";
+  icon.textContent = fileExtensionIcon(msg.fileName || "");
+  const info = document.createElement("div");
+  info.className = "msg-file-info";
+  const name = document.createElement("div");
+  name.className = "msg-file-name";
+  name.textContent = msg.fileName || "файл";
+  const size = document.createElement("div");
+  size.className = "msg-file-size";
+  size.textContent = formatFileSize(msg.fileSize);
+  info.appendChild(name);
+  info.appendChild(size);
+  row.appendChild(icon);
+  row.appendChild(info);
+  const a = document.createElement("a");
+  a.className = "msg-file-download";
+  a.textContent = "⬇";
+  a.title = "Скачать";
+  a.href = "data:" + (msg.fileMime || "application/octet-stream") + ";base64," + msg.fileBase64;
+  a.download = msg.fileName || "file";
+  row.appendChild(a);
+  return row;
+}
 
 function downscaleImageToBase64(file, maxDim, quality) {
   return new Promise((resolve, reject) => {
@@ -2429,18 +2766,62 @@ function resetSettingsModalFields() {
   updatePinStatusLabel();
 }
 
+/* НОВОЕ: постраничная навигация настроек — разделы открываются по одному,
+   список разделов виден только на главном экране настроек. */
+const SETTINGS_TITLES = {
+  profile: "Профиль",
+  privacy: "Приватность",
+  security: "Безопасность",
+  notifications: "Уведомления",
+  theme: "Тема",
+};
+const settingsCard = document.querySelector("#modal-settings .settings-card");
+const settingsBody = document.querySelector("#modal-settings .settings-body");
+
+function showSettingsMainView() {
+  if (settingsCard) settingsCard.classList.remove("in-panel");
+  document.querySelectorAll("#modal-settings .settings-panel").forEach((p) => p.classList.remove("active"));
+  const titleEl = document.getElementById("settings-title");
+  if (titleEl) titleEl.textContent = "Настройки";
+  btnSettingsBack?.classList.add("hidden");
+  if (settingsBody) settingsBody.scrollTop = 0;
+}
+
+function showSettingsPanel(name) {
+  if (!settingsCard) return;
+  settingsCard.classList.add("in-panel");
+  document.querySelectorAll("#modal-settings .settings-panel").forEach((p) =>
+    p.classList.toggle("active", p.dataset.panel === name)
+  );
+  const titleEl = document.getElementById("settings-title");
+  if (titleEl) titleEl.textContent = SETTINGS_TITLES[name] || "Настройки";
+  btnSettingsBack?.classList.remove("hidden");
+  if (settingsBody) settingsBody.scrollTop = 0;
+}
+
+document.querySelectorAll("#settings-nav .settings-nav-item").forEach((btn) => {
+  btn.addEventListener("click", () => showSettingsPanel(btn.dataset.panel));
+});
+const btnSettingsBack = document.getElementById("btn-settings-back");
+if (btnSettingsBack) btnSettingsBack.addEventListener("click", showSettingsMainView);
+
 $("btn-open-settings").addEventListener("click", async () => {
   resetSettingsModalFields();
   $("modal-settings").classList.remove("hidden");
+  showSettingsMainView();
   await fillSettingsProfile();
 });
 
 $("btn-close-settings-modal").addEventListener("click", () => {
   $("modal-settings").classList.add("hidden");
+  showSettingsMainView();
 });
 
 $("modal-settings").addEventListener("click", (e) => {
-  if (e.target.id === "modal-settings") $("modal-settings").classList.add("hidden");
+  if (e.target.id === "modal-settings") {
+    $("modal-settings").classList.add("hidden");
+    showSettingsMainView();
+  }
 });
 
 /* ------------------------------------------------------------------ */
@@ -2831,6 +3212,40 @@ $("settings-notifications-toggle").addEventListener("change", async (e) => {
   }
 });
 
+/* ------------------------------------------------------------------ */
+/* НОВОЕ (автосохранение настроек): правки сохраняются сами.            */
+/* Текстовые поля профиля — с задержкой (debounce 900 мс после          */
+/* последнего нажатия), переключатели — сразу. Смена пароля и PIN       */
+/* остаются ручными — их нельзя сохранить «по случайности».             */
+/* ------------------------------------------------------------------ */
+(function enableSettingsAutosave() {
+  const timers = {};
+  const debounced = (key, fn, ms) => {
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(fn, ms);
+  };
+
+  // Профиль: автосохранение после паузы в наборе.
+  ["settings-displayname", "settings-username-input", "settings-bio",
+   "settings-birthdate", "settings-location", "settings-website"].forEach((id) => {
+    const el = document.getElementById(id);
+    el?.addEventListener("input", () => debounced("profile", () => $("btn-save-profile").click(), 900));
+  });
+
+  // Приватность: мгновенно при переключении тумблера.
+  ["settings-show-online", "settings-show-read-receipts", "settings-show-aboutme",
+   "settings-show-birthdate", "settings-show-location", "settings-show-website",
+   "settings-show-phone", "settings-show-email"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => $("btn-save-privacy").click());
+  });
+
+  // Автоудаление: тумблер и слайдер дней.
+  document.getElementById("settings-autodelete-toggle")
+    ?.addEventListener("change", () => $("btn-save-autodelete").click());
+  document.getElementById("settings-autodelete-days")
+    ?.addEventListener("change", () => $("btn-save-autodelete").click());
+})();
+
 
 /* ------------------------------------------------------------------ */
 /* НОВОЕ (FAQ-бот поддержки, веб): кнопочная панель в чате поддержки —  */
@@ -3003,3 +3418,359 @@ $("settings-notifications-toggle").addEventListener("change", async (e) => {
   updateFaqState();
   setInterval(updateFaqState, 300);
 })();
+
+/* ------------------------------------------------------------------ */
+/* НОВОЕ: Доски (рисование в веб-версии).                              */
+/* Хранение: Firestore-коллекция boards/{id} —                         */
+/*   { ownerUid, title, strokes, createdAt, updatedAt }.                */
+/* strokes: [{ color, size, erase, points: [[x,y], ...] }], координаты  */
+/* нормализованы в 0..1, поэтому доска масштабируется под любое окно.   */
+/* Автосохранение с задержкой; можно открыть доску и продолжить работу. */
+/* ------------------------------------------------------------------ */
+
+const BOARD_W = 1000;
+const BOARD_H = 700;
+let currentBoardId = null;
+let currentBoardStrokes = [];
+let boardTool = { color: "#1c1c1e", size: 6, erase: false };
+let boardDrawing = null; // штрих, который рисуют прямо сейчас
+let boardSaveTimer = null;
+let boardEditorUnsub = null; // НОВОЕ: realtime-подписка на доску
+
+const boardModal = $("modal-boards");
+const boardEditorModal = $("modal-board-editor");
+const boardCanvas = $("board-canvas");
+
+/* НОВОЕ (совместные доски): подписка на Firestore-документ доски.
+   Штрихи объединяются по клиентским id (sid): удалённые — авторитетны,
+   локальные, ещё не сохранённые, добавляются к ним и сортируются по
+   времени создания (t). Так рисование у двух людей не затирает друг друга. */
+function mergeBoardStrokes(remote) {
+  const remoteSids = new Set(remote.map((s) => s.sid).filter(Boolean));
+  const pending = currentBoardStrokes.filter((s) => s.sid && !remoteSids.has(s.sid));
+  currentBoardStrokes = remote.concat(pending).sort((a, b) => (a.t || 0) - (b.t || 0));
+}
+
+function subscribeBoardLive(id) {
+  if (boardEditorUnsub) { boardEditorUnsub(); boardEditorUnsub = null; }
+  if (!id) return;
+  boardEditorUnsub = onSnapshot(doc(db, "boards", id), (snap) => {
+    if (!snap.exists() || !snap.data().strokes) return;
+    mergeBoardStrokes(snap.data().strokes);
+    redrawBoard();
+    // Своё сохранение тоже приходит по снапшоту — статус обновляем.
+    if (currentBoardId === id) $("board-save-status").textContent = "Сохранено ✓";
+  }, (err) => {
+    console.error("Realtime доски:", err);
+  });
+}
+
+function newStrokeSid() {
+  return currentUser.uid.slice(0, 6) + "-" + Math.random().toString(36).slice(2, 8);
+}
+
+function redrawBoard() {
+  const ctx = boardCanvas.getContext("2d");
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, BOARD_W, BOARD_H);
+  for (const s of currentBoardStrokes) {
+    if (!s.points || !s.points.length) continue;
+    ctx.globalCompositeOperation = s.erase ? "destination-out" : "source-over";
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(s.points[0][0] * BOARD_W, s.points[0][1] * BOARD_H);
+    if (s.points.length === 1) {
+      // Одиночный клик — рисуем точку.
+      ctx.lineTo(s.points[0][0] * BOARD_W + 0.01, s.points[0][1] * BOARD_H);
+    } else {
+      for (let i = 1; i < s.points.length; i++) {
+        ctx.lineTo(s.points[i][0] * BOARD_W, s.points[i][1] * BOARD_H);
+      }
+    }
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function boardPointFromEvent(e) {
+  const r = boardCanvas.getBoundingClientRect();
+  const clamp = (v) => Math.min(1, Math.max(0, v));
+  return [
+    clamp((e.clientX - r.left) / r.width),
+    clamp((e.clientY - r.top) / r.height),
+  ];
+}
+
+/* Автосохранение ---------------------------------------------------- */
+function scheduleBoardSave(delay = 800) {
+  if (!currentBoardId) return;
+  $("board-save-status").textContent = "Сохранение…";
+  clearTimeout(boardSaveTimer);
+  boardSaveTimer = setTimeout(saveBoardNow, delay);
+}
+
+async function saveBoardNow() {
+  if (!currentBoardId) return;
+  clearTimeout(boardSaveTimer);
+  try {
+    await setDoc(
+      doc(db, "boards", currentBoardId),
+      {
+        title: ($("board-title-input").value.trim() || "Доска").slice(0, 60),
+        strokes: currentBoardStrokes,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+    $("board-save-status").textContent = "Сохранено ✓";
+  } catch (err) {
+    console.error("Сохранение доски:", err);
+    $("board-save-status").textContent = "Ошибка сохранения";
+  }
+}
+
+/* Список досок ------------------------------------------------------- */
+async function renderBoardsList() {
+  const listEl = $("boards-list");
+  listEl.innerHTML = '<div class="boards-empty">Загрузка…</div>';
+  try {
+    // where + orderBy требуют составной индекс, поэтому сортируем на клиенте.
+    const snap = await getDocs(
+      query(collection(db, "boards"), where("ownerUid", "==", currentUser.uid), limit(50))
+    );
+    const boards = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+    listEl.innerHTML = "";
+    if (!boards.length) {
+      listEl.innerHTML = '<div class="boards-empty">Досок пока нет — создайте первую!</div>';
+      return;
+    }
+    for (const b of boards) {
+      const row = document.createElement("div");
+      row.className = "board-row";
+      const dateStr = b.updatedAt ? new Date(b.updatedAt).toLocaleString() : "";
+      row.innerHTML =
+        '<span class="board-row-icon">🎨</span>' +
+        '<span class="board-row-title">' + esc(b.title || "Доска") + "</span>" +
+        '<span class="board-row-date">' + esc(dateStr) + "</span>";
+      const del = document.createElement("button");
+      del.className = "board-row-del";
+      del.textContent = "🗑️";
+      del.title = "Удалить";
+      del.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (!confirm("Удалить доску «" + (b.title || "Доска") + "»?")) return;
+        try {
+          await deleteDoc(doc(db, "boards", b.id));
+          if (currentBoardId === b.id) closeBoardEditor(false);
+          renderBoardsList();
+        } catch (err) {
+          console.error("Удаление доски:", err);
+        }
+      });
+      row.appendChild(del);
+      row.addEventListener("click", () => openBoardEditor(b.id, b));
+      listEl.appendChild(row);
+    }
+  } catch (err) {
+    console.error("Список досок:", err);
+    listEl.innerHTML = '<div class="boards-empty">Не удалось загрузить доски</div>';
+  }
+}
+
+/* Открытие / создание / закрытие ------------------------------------- */
+function openBoardEditor(id, data) {
+  currentBoardId = id;
+  currentBoardStrokes = Array.isArray(data && data.strokes) ? data.strokes.map((s) => ({
+    color: s.color || "#1c1c1e",
+    size: s.size || 6,
+    erase: !!s.erase,
+    points: Array.isArray(s.points) ? s.points : [],
+    sid: s.sid || null, // НОВОЕ: клиентский id штриха для синхронизации
+    t: s.t || 0,
+  })) : [];
+  $("board-title-input").value = (data && data.title) || "Новая доска";
+  $("board-save-status").textContent = "";
+  redrawBoard();
+  boardModal.classList.add("hidden");
+  boardEditorModal.classList.remove("hidden");
+  subscribeBoardLive(id); // НОВОЕ: realtime-синхронизация
+}
+
+async function createBoard() {
+  try {
+    const ref = await addDoc(collection(db, "boards"), {
+      ownerUid: currentUser.uid,
+      title: "Новая доска",
+      strokes: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    openBoardEditor(ref.id, null);
+  } catch (err) {
+    console.error("Создание доски:", err);
+    alert("Не удалось создать доску: " + (err.message || ""));
+  }
+}
+
+function closeBoardEditor(reopenList = true) {
+  if (boardEditorUnsub) { boardEditorUnsub(); boardEditorUnsub = null; }
+  saveBoardNow();
+  currentBoardId = null;
+  boardEditorModal.classList.add("hidden");
+  if (reopenList) {
+    boardModal.classList.remove("hidden");
+    renderBoardsList();
+  }
+}
+
+/* Инструменты --------------------------------------------------------- */
+$("board-swatches").addEventListener("click", (e) => {
+  const btn = e.target.closest(".board-swatch");
+  if (!btn) return;
+  boardTool.color = btn.dataset.color;
+  boardTool.erase = false;
+  $("btn-board-eraser").classList.remove("active");
+  document.querySelectorAll("#board-swatches .board-swatch")
+    .forEach((b) => b.classList.toggle("selected", b === btn));
+});
+
+$("board-sizes").addEventListener("click", (e) => {
+  const btn = e.target.closest(".board-size-btn");
+  if (!btn) return;
+  boardTool.size = parseInt(btn.dataset.size, 10) || 6;
+  document.querySelectorAll("#board-sizes .board-size-btn")
+    .forEach((b) => b.classList.toggle("selected", b === btn));
+});
+
+$("btn-board-eraser").addEventListener("click", () => {
+  boardTool.erase = !boardTool.erase;
+  $("btn-board-eraser").classList.toggle("active", boardTool.erase);
+});
+
+$("btn-board-undo").addEventListener("click", () => {
+  if (!currentBoardStrokes.length) return;
+  currentBoardStrokes.pop();
+  redrawBoard();
+  scheduleBoardSave();
+});
+
+$("btn-board-clear").addEventListener("click", () => {
+  if (!currentBoardStrokes.length) return;
+  if (!confirm("Очистить всю доску?")) return;
+  currentBoardStrokes = [];
+  redrawBoard();
+  scheduleBoardSave();
+});
+
+$("board-title-input").addEventListener("input", () => scheduleBoardSave(1200));
+
+/* Рисование ------------------------------------------------------------ */
+boardCanvas.addEventListener("pointerdown", (e) => {
+  if (!currentBoardId) return;
+  e.preventDefault();
+  boardCanvas.setPointerCapture(e.pointerId);
+  boardDrawing = {
+    color: boardTool.color,
+    size: boardTool.size,
+    erase: boardTool.erase,
+    points: [boardPointFromEvent(e)],
+  };
+});
+
+boardCanvas.addEventListener("pointermove", (e) => {
+  if (!boardDrawing) return;
+  const p = boardPointFromEvent(e);
+  const last = boardDrawing.points[boardDrawing.points.length - 1];
+  if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 0.004) return;
+  boardDrawing.points.push(p);
+  redrawBoard();
+});
+
+function finishBoardStroke() {
+  if (!boardDrawing) return;
+  // НОВОЕ: sid — клиентский id штриха (для объединения в реальном времени),
+  // t — время создания (для сортировки при слиянии).
+  boardDrawing.sid = newStrokeSid();
+  boardDrawing.t = Date.now();
+  currentBoardStrokes.push(boardDrawing);
+  boardDrawing = null;
+  redrawBoard();
+  scheduleBoardSave();
+}
+boardCanvas.addEventListener("pointerup", finishBoardStroke);
+boardCanvas.addEventListener("pointercancel", finishBoardStroke);
+
+/* НОВОЕ (совместные доски): отправка ссылки на доску в открытый чат.
+   Получатель открывает её по карточке и рисует вместе с автором —
+   realtime через Firestore-подписку (subscribeBoardLive). */
+$("btn-board-send").addEventListener("click", async () => {
+  if (!currentBoardId) return;
+  if (!activeChatId) { alert("Сначала откройте чат, куда отправить доску"); return; }
+  if (!canSendInActiveChat()) { alert("В этом чате нельзя отправлять сообщения"); return; }
+  const boardId = currentBoardId;
+  const boardTitle = ($("board-title-input").value.trim() || "Доска").slice(0, 60);
+  try {
+    await saveBoardNow();
+    const now = Date.now();
+    const chat = activeChatData || findChatData(activeChatId);
+    const batch = writeBatch(db);
+    const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
+    batch.set(msgRef, {
+      senderId: currentUser.uid,
+      timestamp: now,
+      status: "SENT",
+      notified: false,
+      boardId,
+      boardTitle,
+    });
+    const chatRef = doc(db, "chats", activeChatId);
+    const chatUpdate = {
+      lastMessage: "🎨 Доска: " + boardTitle,
+      lastMessageTimestamp: now,
+      lastMessageSenderId: currentUser.uid,
+      lastMessageStatus: "SENT",
+    };
+    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
+    if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
+    recipients.delete(currentUser.uid);
+    for (const uid of recipients) {
+      chatUpdate["unreadCounts." + uid] = increment(1);
+    }
+    batch.update(chatRef, chatUpdate);
+    await batch.commit();
+    $("board-save-status").textContent = "Отправлено в чат ✓";
+  } catch (err) {
+    console.error("Отправка доски в чат:", err);
+    alert("Не удалось отправить доску в чат");
+  }
+});
+
+/* Кнопки и модалки ------------------------------------------------------ */
+$("btn-new-board").addEventListener("click", () => {
+  boardModal.classList.remove("hidden");
+  renderBoardsList();
+});
+
+$("btn-create-board").addEventListener("click", createBoard);
+
+$("btn-close-boards-modal").addEventListener("click", () => {
+  boardModal.classList.add("hidden");
+});
+
+boardModal.addEventListener("click", (e) => {
+  if (e.target === boardModal) boardModal.classList.add("hidden");
+});
+
+$("btn-board-back").addEventListener("click", () => closeBoardEditor(true));
+$("btn-close-board-editor").addEventListener("click", () => closeBoardEditor(false));
+
+boardEditorModal.addEventListener("click", (e) => {
+  if (e.target === boardEditorModal) closeBoardEditor(false);
+});
