@@ -196,7 +196,7 @@ function observeChatNotification(chatId, chat) {
     const m = snap.data();
     if (m.isDeleted || (m.expiresAt && m.expiresAt <= Date.now())) return;
     notifications.notify({...event, silent: m.silent === true, protectedText: event.protectedText || m.encrypted === true,
-      body: m.text || (m.imageBase64 ? "Фото" : m.voiceBase64 ? "Голосовое сообщение" : event.body) });
+      body: m.text || (m.imageBase64 ? "Фото" : m.voiceBase64 ? "Голосовое сообщение" : m.fileBase64 ? "Файл: " + (m.fileName || "") : event.body) });
   }).catch(() => { /* No plaintext fallback and no stale banner when message access fails. */ });
 }
 
@@ -965,9 +965,10 @@ function listenSupportChat() {
 }
 
 // Для админов: список всех бесед поддержки (собираем через chats where type == SUPPORT).
+// НОВОЕ (перенос из main): лимит 100 бесед — инбокс остаётся быстрым при большом потоке обращений.
 function listenSupportConversations() {
   if (supportConversationsUnsub) supportConversationsUnsub();
-  const q = query(collection(db, "chats"), where("type", "==", "SUPPORT"));
+  const q = query(collection(db, "chats"), where("type", "==", "SUPPORT"), limit(100));
   supportConversationsUnsub = onSnapshot(q, (snap) => {
     supportConversationsCache.clear();
     snap.forEach((d) => {
@@ -993,53 +994,143 @@ $("btn-support-inbox").addEventListener("click", () => {
   renderSupportInbox();
 });
 
+// НОВОЕ (перенос из main): состояние фильтров инбокса.
+let supportInboxFilter = "all"; // all | waiting | done
+let supportInboxSearch = "";
+const SUPPORT_INBOX_CAP = 100;
+
+function isSupportConversationWaiting(conv) {
+  return conv.lastMessageSenderId === conv.supportUserId &&
+    (conv.lastMessage || "").trim() !== "";
+}
+
 function renderSupportInbox() {
   const listEl = $("chat-list");
+
+  // Сохраняем фокус/курсор поиска, если снапшот перерисовал вид во время набора.
+  const oldSearch = document.getElementById("support-inbox-search");
+  const hadFocus = oldSearch && document.activeElement === oldSearch;
+  const caretPos = oldSearch ? oldSearch.selectionStart : 0;
+
+  const all = Array.from(supportConversationsCache.values());
+  const waitingCount = all.filter(isSupportConversationWaiting).length;
+
   listEl.innerHTML = "";
 
-  const header = document.createElement("div");
-  header.className = "search-empty";
-  header.style.padding = "10px 16px";
-  header.textContent = "Обращения в поддержку (" + supportConversationsCache.size + ")";
-  listEl.appendChild(header);
+  // Статистика: всего / ожидают ответа / отвечено.
+  const stats = document.createElement("div");
+  stats.className = "support-stats";
+  stats.innerHTML =
+    '<div class="support-stat"><div class="support-stat-num">' + all.length + '</div><div class="support-stat-label">Всего</div></div>' +
+    '<div class="support-stat support-stat-waiting"><div class="support-stat-num">' + waitingCount + '</div><div class="support-stat-label">Ожидают</div></div>' +
+    '<div class="support-stat"><div class="support-stat-num">' + (all.length - waitingCount) + '</div><div class="support-stat-label">Отвечено</div></div>';
+  listEl.appendChild(stats);
 
-  const conversations = Array.from(supportConversationsCache.values())
-    .sort((a, b) => {
-      // Ожидающие ответа (последнее сообщение от пользователя) — выше.
-      const aWaiting = a.lastMessageSenderId === a.supportUserId ? 1 : 0;
-      const bWaiting = b.lastMessageSenderId === b.supportUserId ? 1 : 0;
-      if (aWaiting !== bWaiting) return bWaiting - aWaiting;
-      return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
-    });
-
-  for (const conv of conversations) {
-    const item = document.createElement("div");
-    const awaitingReply = conv.lastMessageSenderId === conv.supportUserId &&
-      (conv.lastMessage || "").trim() !== "";
-    item.className = "chat-item" + (conv.id === activeChatId ? " selected" : "");
-    const letter = (conv.supportUserName || "?")[0].toUpperCase();
-    item.innerHTML = `
-      <div class="chat-avatar">${esc(letter)}</div>
-      <div class="chat-item-info">
-        <div class="chat-item-top">
-          <span class="chat-item-name">${esc(conv.supportUserName || "Пользователь")}</span>
-          <span class="chat-item-time">${esc(formatTime(conv.lastMessageTimestamp))}</span>
-        </div>
-        <div class="chat-item-bottom">
-          <span class="chat-item-preview">${esc(conv.lastMessage || "")}</span>
-          ${awaitingReply ? '<span class="chat-badge">!</span>' : ""}
-        </div>
-      </div>`;
-    item.addEventListener("click", () => openChat(conv.id));
-    listEl.appendChild(item);
+  // Поиск по имени / email / тексту последнего сообщения.
+  const searchRow = document.createElement("div");
+  searchRow.className = "support-search-row";
+  searchRow.innerHTML = '<input type="text" id="support-inbox-search" class="support-search" placeholder="Имя, email или текст…" autocomplete="off">';
+  listEl.appendChild(searchRow);
+  const searchEl = searchRow.querySelector("#support-inbox-search");
+  searchEl.value = supportInboxSearch;
+  let searchTimer = null;
+  searchEl.addEventListener("input", () => {
+    supportInboxSearch = searchEl.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderSupportInboxList, 180);
+  });
+  if (hadFocus) {
+    searchEl.focus();
+    try { searchEl.setSelectionRange(caretPos, caretPos); } catch (e) { /* не критично */ }
   }
 
-  if (conversations.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "search-empty";
-    empty.style.padding = "10px 16px";
-    empty.textContent = "Обращений пока нет";
-    listEl.appendChild(empty);
+  // Вкладки-фильтры: все / ожидают ответа / отвеченные.
+  const tabs = document.createElement("div");
+  tabs.className = "support-filters";
+  [["all", "Все"], ["waiting", "Ожидают ответа"], ["done", "Отвеченные"]].forEach(([key, label]) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "support-filter-tab" + (supportInboxFilter === key ? " active" : "");
+    tab.textContent = label;
+    tab.addEventListener("click", () => {
+      supportInboxFilter = key;
+      renderSupportInboxList();
+      tabs.querySelectorAll(".support-filter-tab").forEach((b) => b.classList.remove("active"));
+      tab.classList.add("active");
+    });
+    tabs.appendChild(tab);
+  });
+  listEl.appendChild(tabs);
+
+  // Контейнер результатов + рендер.
+  const results = document.createElement("div");
+  results.id = "support-inbox-results";
+  listEl.appendChild(results);
+  renderSupportInboxList();
+}
+
+function renderSupportInboxList() {
+  const box = document.getElementById("support-inbox-results");
+  if (!box) return;
+
+  const q = supportInboxSearch.trim().toLowerCase();
+  let items = Array.from(supportConversationsCache.values());
+
+  if (supportInboxFilter === "waiting") items = items.filter(isSupportConversationWaiting);
+  else if (supportInboxFilter === "done") items = items.filter((c) => !isSupportConversationWaiting(c));
+
+  if (q) {
+    items = items.filter((c) =>
+      (c.supportUserName || "").toLowerCase().includes(q) ||
+      (c.supportUserEmail || "").toLowerCase().includes(q) ||
+      (c.lastMessage || "").toLowerCase().includes(q)
+    );
+  }
+
+  items.sort((a, b) => {
+    const aWaiting = isSupportConversationWaiting(a) ? 1 : 0;
+    const bWaiting = isSupportConversationWaiting(b) ? 1 : 0;
+    if (aWaiting !== bWaiting) return bWaiting - aWaiting;
+    return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+  });
+
+  box.innerHTML = "";
+
+  if (!items.length) {
+    box.innerHTML = '<div class="search-empty" style="padding:12px 16px">' +
+      (q ? "Ничего не найдено" : "Обращений пока нет") + "</div>";
+    return;
+  }
+
+  for (const conv of items) {
+    const item = document.createElement("div");
+    const waiting = isSupportConversationWaiting(conv);
+    item.className = "chat-item support-row" + (waiting ? " waiting" : "") +
+      (conv.id === activeChatId ? " selected" : "");
+    const letter = (conv.supportUserName || "?")[0].toUpperCase();
+    item.innerHTML =
+      '<div class="chat-avatar">' + esc(letter) + "</div>" +
+      '<div class="chat-item-info">' +
+        '<div class="chat-item-top">' +
+          '<span class="chat-item-name">' + esc(conv.supportUserName || "Пользователь") + "</span>" +
+          '<span class="chat-item-time">' + esc(formatTime(conv.lastMessageTimestamp)) + "</span>" +
+        "</div>" +
+        '<div class="support-email">' + esc(conv.supportUserEmail || "—") + "</div>" +
+        '<div class="chat-item-bottom">' +
+          '<span class="chat-item-preview">' + esc(conv.lastMessage || "") + "</span>" +
+          (waiting ? '<span class="chat-badge">!</span>' : "") +
+        "</div>" +
+      "</div>";
+    item.addEventListener("click", () => openChat(conv.id));
+    box.appendChild(item);
+  }
+
+  // Подсказка, если сработал лимит подписки.
+  if (supportConversationsCache.size >= SUPPORT_INBOX_CAP) {
+    const hint = document.createElement("div");
+    hint.className = "support-cap-hint";
+    hint.textContent = "Показаны последние " + SUPPORT_INBOX_CAP + " обращений. Уточните запрос поиском.";
+    box.appendChild(hint);
   }
 }
 
@@ -1103,6 +1194,8 @@ function buildChatListItem(chat) {
 }
 
 function renderChatList() {
+  // НОВОЕ (перенос из main): пока открыт инбокс поддержки, обычный список чатов его не затирает.
+  if (viewingSupportInbox) { renderSupportInbox(); return; }
   const listEl = $("chat-list");
   const chats = Array.from(chatsCache.values())
     .filter((c) => c.id !== OFFICIAL_CHANNEL_ID && c.type !== "SUPPORT")
@@ -1122,6 +1215,31 @@ function renderChatList() {
 
   for (const chat of chats) {
     listEl.appendChild(buildChatListItem(chat));
+  }
+
+  // НОВОЕ (перенос из main): применяем активный фильтр поиска после перерисовки.
+  applyChatSearchFilter();
+}
+
+/* НОВОЕ (перенос из main): фильтрация списка чатов по строке поиска.
+   Актуальные чаты поднимаются наверх, неактуальные — затемняются под ними. */
+function applyChatSearchFilter() {
+  const searchEl = document.getElementById("chat-search");
+  const listEl = $("chat-list");
+  if (!searchEl || !listEl) return;
+  const q = searchEl.value.trim().toLowerCase();
+  const matched = [];
+  const dimmed = [];
+  listEl.querySelectorAll(".chat-item").forEach((el) => {
+    const nameEl = el.querySelector(".chat-item-name");
+    const match = !q || (nameEl && nameEl.textContent.toLowerCase().includes(q));
+    el.classList.toggle("dimmed", !match);
+    (match ? matched : dimmed).push(el);
+  });
+  if (q) {
+    // Актуальные сверху, затемнённые ниже.
+    matched.concat(dimmed).forEach((el) => listEl.appendChild(el));
+    listEl.scrollTop = 0;
   }
 }
 
@@ -1223,6 +1341,11 @@ function openChat(chatId) {
   updateChatHeader();
   $("chat-empty").classList.add("hidden");
   $("chat-active").classList.remove("hidden");
+  // НОВОЕ (перенос из main): перезапуск анимации открытия чата.
+  const chatActiveEl = $("chat-active");
+  chatActiveEl.classList.remove("chat-entering");
+  void chatActiveEl.offsetWidth; // принудительный reflow — сброс анимации
+  chatActiveEl.classList.add("chat-entering");
   document.getElementById("screen-app").classList.add("chat-open");
   $("messages").innerHTML = "";
   $("btn-load-more").classList.add("hidden");
@@ -1406,15 +1529,50 @@ function buildImageElement(imageBase64) {
   return img;
 }
 
-function buildReplyPreview(replyToSenderName, replyToText) {
+function buildReplyPreview(replyToSenderName, replyToText, replyToId) {
   const div = document.createElement("div");
   div.style.borderLeft = "3px solid var(--accent)";
   div.style.padding = "2px 8px";
   div.style.margin = "2px 0 6px";
   div.style.color = "var(--text-dim)";
   div.style.fontSize = "13px";
+  div.style.cursor = "pointer";
   div.textContent = (replyToSenderName || "") + ": " + replyToText;
+  // НОВОЕ (перенос из main): клик по цитате прокручивает ленту к оригиналу и подсвечивает его.
+  div.title = "Перейти к сообщению";
+  div.addEventListener("click", () => {
+    if (replyToId) jumpToMessage(replyToId);
+  });
   return div;
+}
+
+/* НОВОЕ (перенос из main): переход к сообщению по цитате. Ищем элемент по
+   data-msg-id; если сообщение ещё не загружено (старые страницы) —
+   подгружаем историю и пробуем снова. */
+function jumpToMessage(msgId, allowLoadMore = true) {
+  const el = document.querySelector('#messages [data-msg-id="' + CSS.escape(msgId) + '"]');
+  if (!el) {
+    const loadMoreBtn = $("btn-load-more");
+    if (allowLoadMore && !loadMoreBtn.classList.contains("hidden")) {
+      loadMoreBtn.click();
+      setTimeout(() => jumpToMessage(msgId, false), 600);
+    }
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("msg-jump");
+  void el.offsetWidth; // перезапуск анимации подсветки
+  el.classList.add("msg-jump");
+  setTimeout(() => el.classList.remove("msg-jump"), 1500);
+}
+
+/* НОВОЕ (перенос из main): единый текст-превью сообщения (список чатов, уведомления). */
+function messagePreviewText(msg) {
+  return msg.text ||
+    (msg.imageBase64 ? "📷 Фото" : "") ||
+    (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
+    (msg.voiceBase64 ? "🎤 Голосовое" : "") ||
+    "";
 }
 
 /* ------------------------------------------------------------------ */
@@ -1434,7 +1592,7 @@ function startReply(msg) {
     id: msg.id,
     senderId: msg.senderId,
     senderName: msg.senderId === currentUser.uid ? "Вы" : senderNameForReply(msg.senderId),
-    text: msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : "")),
+    text: msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : ""))),
   };
   $("reply-preview-name").textContent = pendingReply.senderName;
   $("reply-preview-text").textContent = pendingReply.text;
@@ -1531,6 +1689,7 @@ function forwardableChatsList() {
 
 function openForwardModal(msg) {
   if (msg.encrypted === true) { alert("Для пересылки защищённого текста откройте Android-приложение."); return; }
+  if (msg.fileBase64) { alert("Пересылка файлов недоступна — сохраните файл и прикрепите заново."); return; }
   forwardingMessage = {
     text: msg.text || "",
     imageBase64: msg.imageBase64 || null,
@@ -1539,7 +1698,7 @@ function openForwardModal(msg) {
     voiceMimeType: msg.voiceMimeType || "",
     senderId: msg.senderId,
   };
-  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : ""));
+  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "")));
   $("forward-search-input").value = "";
   renderForwardResults(forwardableChatsList());
   $("modal-forward").classList.remove("hidden");
@@ -1624,6 +1783,7 @@ function buildForwardedLabel() {
 function renderMessage(msg) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + (msg.senderId === currentUser.uid ? "out" : "in");
+  wrap.dataset.msgId = msg.id; // НОВОЕ (перенос из main): для перехода к сообщению по цитате
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble";
 
@@ -1643,12 +1803,16 @@ function renderMessage(msg) {
     if (msg.voiceBase64) {
       bubble.appendChild(buildVoicePlayer(msg));
     }
+    // НОВОЕ (перенос из main): вложение-файл.
+    if (msg.fileBase64) {
+      bubble.appendChild(buildFileElement(msg));
+    }
     if (msg.replyToText) {
-      bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText));
+      bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText, msg.replyToMessageId || msg.replyToId));
     }
     if (msg.encrypted === true) {
       const own = sentTextSession.get(msg.id);
-      if (own?.replyToText) bubble.appendChild(buildReplyPreview(own.replyToSenderName, own.replyToText));
+      if (own?.replyToText) bubble.appendChild(buildReplyPreview(own.replyToSenderName, own.replyToText, own.replyToMessageId || own.replyToId));
       bubble.appendChild(document.createTextNode(own?.text || "🔒 Защищённый текст. Откройте Android-приложение."));
     } else if (msg.text) {
       bubble.appendChild(document.createTextNode(msg.text));
@@ -1688,6 +1852,9 @@ function renderMessage(msg) {
     forwardBtn.className = "msg-action-btn";
     forwardBtn.title = "Переслать";
     forwardBtn.textContent = "➡️";
+    // НОВОЕ (перенос из main): файлы не пересылаем (тяжёлые base64-данные).
+    forwardBtn.disabled = !!msg.fileBase64;
+    if (forwardBtn.disabled) forwardBtn.style.display = "none";
     forwardBtn.addEventListener("click", () => openForwardModal(msg));
     actions.appendChild(forwardBtn);
 
@@ -1720,12 +1887,19 @@ $("form-send").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (voiceRecording) { sendVoiceRecording(); return; }
   if (sendingMessage || !activeChatId || !canSendInActiveChat()) return;
-  const input = $("message-input"), text = input.value.trim(), imageBase64 = pendingImageBase64;
-  if (!text && !imageBase64) return;
+  const input = $("message-input"), text = input.value.trim(), imageBase64 = pendingImageBase64, file = pendingFile;
+  if (!text && !imageBase64 && !file) return;
   const targetId = activeChatId, uid = currentUser.uid, reply = pendingReply;
   const data = {};
   if (text) data.text = text;
   if (imageBase64) data.imageBase64 = imageBase64;
+  if (file) {
+    // НОВОЕ (перенос из main): вложение-файл (документ, архив, аудио и т.д.)
+    data.fileBase64 = file.base64;
+    data.fileName = file.name;
+    data.fileSize = file.size;
+    data.fileMime = file.mime;
+  }
   if (reply) Object.assign(data, { replyToMessageId: reply.id, replyToSenderName: reply.senderName, replyToText: reply.text });
   sendingMessage = true;
   input.disabled = true;
@@ -1767,33 +1941,112 @@ $("message-input").addEventListener("input", () => {
 /* Вложение изображения                                                 */
 /* ------------------------------------------------------------------ */
 
+// НОВОЕ (перенос из main): лимит не-image файла. Firestore-документ ограничен
+// ~1 МБ, base64 раздувает данные на треть, поэтому сырой лимит — 700 КБ.
+const MAX_FILE_BYTES = 700 * 1024;
+let pendingFile = null; // { base64, name, size, mime }
+
 function cancelPendingImage() {
   pendingImageBase64 = null;
+  pendingFile = null;
   $("image-preview").classList.add("hidden");
   $("image-preview-img").src = "";
+  $("file-preview").classList.add("hidden");
   $("file-input").value = "";
+}
+
+function fileExtensionIcon(name) {
+  const ext = (name.split(".").pop() || "").toUpperCase().slice(0, 4);
+  return ext || "FILE";
+}
+
+function formatFileSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return bytes + " Б";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " КБ";
+  return (bytes / 1024 / 1024).toFixed(1) + " МБ";
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
 }
 
 $("btn-attach").addEventListener("click", () => $("file-input").click());
 $("btn-cancel-image").addEventListener("click", cancelPendingImage);
+$("btn-cancel-file").addEventListener("click", cancelPendingImage);
 
 $("file-input").addEventListener("change", async () => {
   const file = $("file-input").files[0];
   if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    alert("Выберите файл изображения");
-    return;
-  }
   try {
-    const base64 = await downscaleImageToBase64(file, 1280, 0.8);
-    pendingImageBase64 = base64;
-    $("image-preview-img").src = "data:image/jpeg;base64," + base64;
-    $("image-preview").classList.remove("hidden");
+    if (file.type.startsWith("image/")) {
+      // Картинки — как раньше: даунскейл + JPEG.
+      const base64 = await downscaleImageToBase64(file, 1280, 0.8);
+      pendingImageBase64 = base64;
+      pendingFile = null;
+      $("image-preview-img").src = "data:image/jpeg;base64," + base64;
+      $("image-preview").classList.remove("hidden");
+      $("file-preview").classList.add("hidden");
+    } else {
+      // НОВОЕ (перенос из main): любые другие файлы — документы, архивы, аудио и т.д.
+      if (file.size > MAX_FILE_BYTES) {
+        alert("Файл слишком большой: макс. 700 КБ (занимает ~1 МБ в base64)");
+        return;
+      }
+      const dataUrl = await readAsDataUrl(file);
+      const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      pendingFile = {
+        base64,
+        name: file.name,
+        size: file.size,
+        mime: file.type || "application/octet-stream",
+      };
+      pendingImageBase64 = null;
+      $("file-preview-icon").textContent = "📄";
+      $("file-preview-name").textContent = file.name;
+      $("file-preview-size").textContent = formatFileSize(file.size);
+      $("file-preview").classList.remove("hidden");
+      $("image-preview").classList.add("hidden");
+    }
   } catch (err) {
-    console.error("Ошибка обработки изображения:", err);
-    alert("Не удалось обработать изображение");
+    console.error("Ошибка обработки вложения:", err);
+    alert("Не удалось обработать файл");
   }
 });
+
+/* НОВОЕ (перенос из main): карточка файла в ленте — иконка, имя, размер, скачивание. */
+function buildFileElement(msg) {
+  const row = document.createElement("div");
+  row.className = "msg-file";
+  const icon = document.createElement("div");
+  icon.className = "msg-file-icon";
+  icon.textContent = fileExtensionIcon(msg.fileName || "");
+  const info = document.createElement("div");
+  info.className = "msg-file-info";
+  const name = document.createElement("div");
+  name.className = "msg-file-name";
+  name.textContent = msg.fileName || "файл";
+  const size = document.createElement("div");
+  size.className = "msg-file-size";
+  size.textContent = formatFileSize(msg.fileSize);
+  info.appendChild(name);
+  info.appendChild(size);
+  row.appendChild(icon);
+  row.appendChild(info);
+  const a = document.createElement("a");
+  a.className = "msg-file-download";
+  a.textContent = "⬇";
+  a.title = "Скачать";
+  a.href = "data:" + (msg.fileMime || "application/octet-stream") + ";base64," + msg.fileBase64;
+  a.download = msg.fileName || "file";
+  row.appendChild(a);
+  return row;
+}
 
 function downscaleImageToBase64(file, maxDim, quality) {
   return new Promise((resolve, reject) => {
@@ -2656,19 +2909,91 @@ function resetSettingsModalFields() {
   updatePinStatusLabel();
 }
 
+// НОВОЕ (перенос из main): постраничная навигация настроек — разделы
+// открываются по одному, список разделов виден только на главном экране.
+const SETTINGS_TITLES = {
+  profile: "Профиль",
+  privacy: "Приватность",
+  security: "Безопасность",
+  notifications: "Уведомления",
+  theme: "Тема",
+};
+const settingsCard = document.querySelector("#modal-settings .settings-card");
+const settingsBody = document.querySelector("#modal-settings .settings-body");
+const btnSettingsBack = document.getElementById("btn-settings-back");
+
+function showSettingsMainView() {
+  if (settingsCard) settingsCard.classList.remove("in-panel");
+  document.querySelectorAll("#modal-settings .settings-panel").forEach((p) => p.classList.remove("active"));
+  const titleEl = document.getElementById("settings-title");
+  if (titleEl) titleEl.textContent = "Настройки";
+  btnSettingsBack?.classList.add("hidden");
+  if (settingsBody) settingsBody.scrollTop = 0;
+}
+
+function showSettingsPanel(name) {
+  if (!settingsCard) return;
+  settingsCard.classList.add("in-panel");
+  document.querySelectorAll("#modal-settings .settings-panel").forEach((p) =>
+    p.classList.toggle("active", p.dataset.panel === name)
+  );
+  const titleEl = document.getElementById("settings-title");
+  if (titleEl) titleEl.textContent = SETTINGS_TITLES[name] || "Настройки";
+  btnSettingsBack?.classList.remove("hidden");
+  if (settingsBody) settingsBody.scrollTop = 0;
+}
+
+document.querySelectorAll("#settings-nav .settings-nav-item").forEach((btn) => {
+  btn.addEventListener("click", () => showSettingsPanel(btn.dataset.panel));
+});
+if (btnSettingsBack) btnSettingsBack.addEventListener("click", showSettingsMainView);
+
 $("btn-open-settings").addEventListener("click", async () => {
   resetSettingsModalFields();
   $("modal-settings").classList.remove("hidden");
+  showSettingsMainView();
   await fillSettingsProfile();
 });
 
 $("btn-close-settings-modal").addEventListener("click", () => {
   $("modal-settings").classList.add("hidden");
+  showSettingsMainView();
 });
 
 $("modal-settings").addEventListener("click", (e) => {
-  if (e.target.id === "modal-settings") $("modal-settings").classList.add("hidden");
+  if (e.target.id === "modal-settings") {
+    $("modal-settings").classList.add("hidden");
+    showSettingsMainView();
+  }
 });
+
+/* НОВОЕ (перенос из main): автосохранение настроек. Текстовые поля профиля
+   — с задержкой (debounce 900 мс после последнего нажатия), переключатели —
+   сразу. Смена пароля и PIN остаются ручными. */
+(function enableSettingsAutosave() {
+  const timers = {};
+  const debounced = (key, fn, ms) => {
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(fn, ms);
+  };
+
+  ["settings-displayname", "settings-username-input", "settings-bio",
+   "settings-birthdate", "settings-location", "settings-website"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", () =>
+      debounced("profile", () => $("btn-save-profile").click(), 900));
+  });
+
+  ["settings-show-online", "settings-show-read-receipts", "settings-show-aboutme",
+   "settings-show-birthdate", "settings-show-location", "settings-show-website",
+   "settings-show-phone", "settings-show-email"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => $("btn-save-privacy").click());
+  });
+
+  document.getElementById("settings-autodelete-toggle")
+    ?.addEventListener("change", () => $("btn-save-autodelete").click());
+  document.getElementById("settings-autodelete-days")
+    ?.addEventListener("change", () => $("btn-save-autodelete").click());
+})();
 
 /* ------------------------------------------------------------------ */
 /* Загрузка аватара (сжатие в base64, как в Android ImageUtils)         */
@@ -3251,7 +3576,7 @@ async function sendWebMessage(chatId, original) {
   if (chat.disappearingTtlSeconds > 0) data.expiresAt = now + chat.disappearingTtlSeconds * 1000;
   const msgRef = doc(collection(db, "chats", chatId, "messages"));
   const preview = isPrivate(chatId, chat) ? (data.encrypted ? "🔒 Сообщение" : "Личное сообщение") :
-    (original.text || (data.imageBase64 ? "📷 Фото" : "🎤 Голосовое сообщение"));
+    (original.text || (data.imageBase64 ? "📷 Фото" : (data.voiceBase64 ? "🎤 Голосовое сообщение" : (data.fileBase64 ? "📄 " + (data.fileName || "файл") : ""))));
   const updates = { lastMessage: preview, lastMessageTimestamp: now, lastMessageSenderId: uid,
     lastMessageStatus: "SENT", lastMessageId: msgRef.id, lastMessagePlain: deleteField() };
   for (const id of recipients) updates["unreadCounts." + id] = increment(1);
@@ -3339,3 +3664,46 @@ const shortcuts = initShortcuts({
   send: () => { if(activeChatId&&canSendInActiveChat()) $("form-send").requestSubmit(); },
   mute: () => notifications.toggleMute(),
 });
+
+/* ------------------------------------------------------------------ */
+/* НОВОЕ (перенос из main): мелкие улучшения UX.                        */
+/* ------------------------------------------------------------------ */
+
+// Клик по свёрнутой кнопке «+» — быстрое действие по умолчанию (новый чат);
+// наведение раскрывает остальные пункты.
+document.getElementById("btn-new-toggle")?.addEventListener("click", () => {
+  document.getElementById("btn-new-chat")?.click();
+});
+
+// Пока в поле есть символы, форма переходит в режим .typing — поле
+// расширяется и закрывает кнопки вложений.
+(function () {
+  const msgInput = document.getElementById("message-input");
+  const formSend = document.getElementById("form-send");
+  if (!msgInput || !formSend) return;
+  const update = () => formSend.classList.toggle("typing", msgInput.value.length > 0);
+  msgInput.addEventListener("input", update);
+  update();
+})();
+
+// Живой поиск по списку чатов + крестик очистки.
+(function () {
+  const searchInput = document.getElementById("chat-search");
+  if (!searchInput) return;
+  const searchClear = document.getElementById("chat-search-clear");
+  const updateClearBtn = () => {
+    if (searchClear) searchClear.classList.toggle("hidden", searchInput.value.length === 0);
+  };
+  searchInput.addEventListener("input", () => {
+    updateClearBtn();
+    applyChatSearchFilter();
+  });
+  if (searchClear) {
+    searchClear.addEventListener("click", () => {
+      searchInput.value = "";
+      updateClearBtn();
+      applyChatSearchFilter();
+      searchInput.focus();
+    });
+  }
+})();
