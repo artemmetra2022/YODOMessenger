@@ -209,14 +209,18 @@
         <span class="app-title">YODO</span>
         <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
         <button id="btn-shortcuts" class="icon-btn" title="Горячие клавиши (F1)" aria-label="Горячие клавиши">?</button>
-        <!-- НОВОЕ (перенос из main): одна кнопка «+», при наведении раскрывается
-             по горизонтали, показывая кнопки чата, группы, канала и досок. -->
+        <!-- Стабильное всплывающее меню: занимает в шапке только место кнопки «+»,
+             поэтому при раскрытии соседние кнопки не сдвигаются и hover не мерцает. -->
         <div id="new-actions">
-          <button id="btn-new-toggle" class="icon-btn" title="Создать">＋</button>
-          <button id="btn-new-chat" class="icon-btn new-action" title="Новый чат">💬</button>
-          <button id="btn-new-group" class="icon-btn new-action" title="Новая группа">👥</button>
-          <button id="btn-new-channel" class="icon-btn new-action" title="Новый канал">📢</button>
-          <button id="btn-boards" class="icon-btn new-action" title="Мои доски" aria-label="Мои доски">🎨</button>
+          <button id="btn-new-toggle" class="icon-btn" type="button" title="Создать"
+                  aria-label="Открыть меню создания" aria-haspopup="menu"
+                  aria-expanded="false" aria-controls="new-actions-menu">＋</button>
+          <div id="new-actions-menu" role="menu" aria-label="Создать">
+            <button id="btn-new-chat" class="icon-btn new-action" type="button" role="menuitem" title="Новый чат" aria-label="Новый чат">💬</button>
+            <button id="btn-new-group" class="icon-btn new-action" type="button" role="menuitem" title="Новая группа" aria-label="Новая группа">👥</button>
+            <button id="btn-new-channel" class="icon-btn new-action" type="button" role="menuitem" title="Новый канал" aria-label="Новый канал">📢</button>
+            <button id="btn-boards" class="icon-btn new-action" type="button" role="menuitem" title="Мои доски" aria-label="Мои доски">🎨</button>
+          </div>
         </div>
         <button id="btn-open-settings" class="icon-btn" title="Настройки">⚙️</button>
         <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
@@ -260,6 +264,9 @@
              Наполняется и показывается кодом в конце app.js (класс faq-open на #chat-active). -->
         <div id="support-faq-panel"></div>
         <button type="button" id="btn-faq-reopen" class="faq-reopen-btn">Открыть список вопросов</button>
+        <!-- Для каналов без права публикации показывается понятная плашка вместо
+             визуально «пропавшего» поля ввода. -->
+        <div id="composer-readonly" class="hidden" role="status">🔒 В этом чате доступен только просмотр</div>
         <form id="form-send">
           <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить файл">📎</button>
           <input type="file" id="file-input" accept="*/*" class="hidden">
