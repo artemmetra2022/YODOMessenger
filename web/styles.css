@@ -82,17 +82,17 @@ body {
 }
 #screen-login::before, #screen-register::before, #screen-verify::before,
 #screen-blocked::before, #screen-qr-login::before {
-  width: 640px; height: 640px;
-  top: -260px; right: -200px;
-  background: radial-gradient(circle closest-side, rgba(74, 163, 255, 0.14), transparent 70%);
-  animation: auth-orb 14s ease-in-out infinite alternate, auth-hue 24s linear infinite;
+  width: 200vmax; height: 200vmax;
+  top: -100vmax; left: -100vmax;
+  background: radial-gradient(circle closest-side, rgba(74, 163, 255, 0.16), transparent 70%);
+  animation: auth-orb 10s ease-in-out infinite alternate, auth-hue 8s linear infinite;
 }
 #screen-login::after, #screen-register::after, #screen-verify::after,
 #screen-blocked::after, #screen-qr-login::after {
-  width: 520px; height: 520px;
-  bottom: -240px; left: -180px;
-  background: radial-gradient(circle closest-side, rgba(63, 191, 111, 0.10), transparent 70%);
-  animation: auth-orb 18s ease-in-out infinite alternate-reverse, auth-hue 30s linear infinite reverse;
+  width: 200vmax; height: 200vmax;
+  bottom: -100vmax; right: -100vmax;
+  background: radial-gradient(circle closest-side, rgba(63, 191, 111, 0.12), transparent 70%);
+  animation: auth-orb 12s ease-in-out infinite alternate-reverse, auth-hue 8s linear infinite reverse;
 }
 /* НОВОЕ (перелив): цвет «пятен света» плавно проходит по кругу оттенков
    (hue-rotate — GPU-операция, не перерисовывает фон, поэтому дёшево). */
@@ -102,7 +102,7 @@ body {
 }
 @keyframes auth-orb {
   from { transform: translate(0, 0) scale(1); }
-  to   { transform: translate(-60px, 50px) scale(1.15); }
+  to   { transform: translate(-80px, 60px) scale(1.2); }
 }
 
 .auth-card {
@@ -396,7 +396,7 @@ body {
 .qr-login-status.qr-login-error { color: var(--danger); }
 
 /* ===== Главное приложение ===== */
-#screen-app { flex-direction: column; }
+#screen-app { flex-direction: column; overflow: hidden; }
 
 /* НОВОЕ (баннер): полоса объявления над списком чатов; #app-main — ряд
    «сайдбар + чат», чтобы баннер занимал всю ширину сверху. */
@@ -432,78 +432,225 @@ body {
 #app-main { flex: 1; display: flex; flex-direction: row; min-height: 0; }
 
 #sidebar {
-  width: 340px;
+  width: 320px;
   background: var(--bg-panel);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #101921;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
   flex-shrink: 0;
 }
 
 #sidebar-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-  border-bottom: 1px solid #101921;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.app-title { font-weight: 800; letter-spacing: 3px; color: var(--accent); margin-right: auto; }
+.app-title { font-weight: 800; letter-spacing: 3px; color: var(--accent); margin-right: auto; padding-left: 8px; }
 
 .icon-btn {
-  background: var(--bg-input);
-  color: var(--text);
+  background: transparent;
+  color: var(--text-dim);
   border: none;
   width: 36px; height: 36px;
   border-radius: 50%;
   font-size: 17px;
   cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.icon-btn:hover { background: var(--accent); }
+.icon-btn:hover { background: var(--bg-panel-2); color: var(--text); }
 
-#chat-list { flex: 1; overflow-y: auto; }
+/* НОВОЕ (Telegram-меню): свёрнутое меню создания. По умолчанию видна
+   только кнопка «+»; при наведении/фокусе контейнер раскрывается по
+   горизонтали, и появляются иконки канала, группы и чата. */
+#new-actions {
+  display: flex;
+  align-items: center;
+  width: 40px; /* «+» (36px) стоит ровно по центру пилюли */
+  padding: 0 2px;
+  justify-content: flex-start;
+  border-radius: 18px;
+  background: var(--bg-input);
+  overflow: hidden;
+  transition: width 0.3s ease, background 0.2s;
+}
+#new-actions:hover,
+#new-actions:focus-within {
+  width: 184px;
+  background: var(--bg-panel-2);
+}
+#new-actions .icon-btn { background: transparent; }
+#new-actions .icon-btn:hover { background: var(--accent); color: #fff; }
+#new-actions .new-action {
+  opacity: 0;
+  transform: translateX(10px);
+  transition: opacity 0.2s ease 0.05s, transform 0.25s ease 0.05s, background 0.15s, color 0.15s;
+}
+#new-actions:hover .new-action,
+#new-actions:focus-within .new-action {
+  opacity: 1;
+  transform: translateX(0);
+}
 
+/* НОВОЕ (Telegram-дизайн): строка поиска под шапкой сайдбара */
+#sidebar-search { padding: 8px 12px 10px; position: relative; }
+#chat-search {
+  width: 100%;
+  background: var(--bg-input);
+  border: none;
+  border-radius: 20px;
+  padding: 9px 36px 9px 16px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+#chat-search::placeholder { color: var(--text-dim); }
+#chat-search:focus { box-shadow: 0 0 0 2px var(--accent-dark); }
+/* НОВОЕ: крестик очистки строки поиска */
+#chat-search-clear {
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px;
+  line-height: 1;
+}
+#chat-search-clear:hover { color: var(--text); }
+/* НОВОЕ: неактуальные результаты поиска затемняются под актуальными */
+.chat-item.dimmed { opacity: 0.35; filter: grayscale(0.6); }
+
+#chat-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+
+/* НОВОЕ (скроллбар): тонкий полупрозрачный «ползунок», заметный только
+   при наведении/прокрутке; трек невидим. WebKit + Firefox. */
+#chat-list, #messages, #search-results, #forward-results,
+#group-search-results, .settings-card {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s;
+}
+#chat-list:hover, #messages:hover,
+#search-results:hover, #forward-results:hover,
+#group-search-results:hover, .settings-card:hover,
+#chat-list:active, #messages:active,
+#search-results:active, #forward-results:active,
+#group-search-results:active, .settings-card:active {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+#chat-list::-webkit-scrollbar, #messages::-webkit-scrollbar,
+#search-results::-webkit-scrollbar, #forward-results::-webkit-scrollbar,
+#group-search-results::-webkit-scrollbar, .settings-card::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+#chat-list::-webkit-scrollbar-thumb, #messages::-webkit-scrollbar-thumb,
+#search-results::-webkit-scrollbar-thumb, #forward-results::-webkit-scrollbar-thumb,
+#group-search-results::-webkit-scrollbar-thumb, .settings-card::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+#chat-list:hover::-webkit-scrollbar-thumb, #messages:hover::-webkit-scrollbar-thumb,
+#search-results:hover::-webkit-scrollbar-thumb, #forward-results:hover::-webkit-scrollbar-thumb,
+#group-search-results:hover::-webkit-scrollbar-thumb, .settings-card:hover::-webkit-scrollbar-thumb,
+#chat-list:active::-webkit-scrollbar-thumb, #messages:active::-webkit-scrollbar-thumb,
+#search-results:active::-webkit-scrollbar-thumb, #forward-results:active::-webkit-scrollbar-thumb,
+#group-search-results:active::-webkit-scrollbar-thumb, .settings-card:active::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+#chat-list::-webkit-scrollbar-thumb:hover, #messages::-webkit-scrollbar-thumb:hover,
+#search-results::-webkit-scrollbar-thumb:hover, #forward-results::-webkit-scrollbar-thumb:hover,
+#group-search-results::-webkit-scrollbar-thumb:hover, .settings-card::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+/* Светлая тема: ползунок тёмный. */
+html.theme-light #chat-list:hover::-webkit-scrollbar-thumb,
+html.theme-light #messages:hover::-webkit-scrollbar-thumb,
+html.theme-light #search-results:hover::-webkit-scrollbar-thumb,
+html.theme-light #forward-results:hover::-webkit-scrollbar-thumb,
+html.theme-light #group-search-results:hover::-webkit-scrollbar-thumb,
+html.theme-light .settings-card:hover::-webkit-scrollbar-thumb,
+html.theme-light #chat-list:active::-webkit-scrollbar-thumb,
+html.theme-light #messages:active::-webkit-scrollbar-thumb,
+html.theme-light #search-results:active::-webkit-scrollbar-thumb,
+html.theme-light #forward-results:active::-webkit-scrollbar-thumb,
+html.theme-light #group-search-results:active::-webkit-scrollbar-thumb,
+html.theme-light .settings-card:active::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.28);
+}
+html.theme-light #chat-list, html.theme-light #messages,
+html.theme-light #search-results, html.theme-light #forward-results,
+html.theme-light #group-search-results, html.theme-light .settings-card {
+  scrollbar-color: transparent transparent;
+}
+html.theme-light #chat-list:hover, html.theme-light #messages:hover,
+html.theme-light #search-results:hover, html.theme-light #forward-results:hover,
+html.theme-light #group-search-results:hover, html.theme-light .settings-card:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
+}
+
+/* НОВОЕ (Telegram-дизайн): элементы списка без разделителей, со скруглением
+   и «плиточным» подсветом при наведении/выборе — как в Telegram. */
 .chat-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 9px 10px;
+  margin: 1px 0;
+  border-radius: 12px;
   cursor: pointer;
-  border-bottom: 1px solid #131c25;
+  transition: background 0.15s;
 }
 .chat-item:hover { background: var(--bg-panel-2); }
-.chat-item.selected { background: var(--accent-dark); }
+.chat-item.selected { background: var(--accent); }
+.chat-item.selected .chat-item-name,
+.chat-item.selected .chat-item-preview,
+.chat-item.selected .chat-item-time { color: #fff; }
+.chat-item.selected .chat-item-preview { opacity: 0.85; }
 
 .chat-avatar {
-  width: 46px; height: 46px;
+  width: 54px; height: 54px;
   border-radius: 50%;
-  background: var(--accent-dark);
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 18px; color: #fff;
+  font-weight: 700; font-size: 20px; color: #fff;
   flex-shrink: 0;
+  user-select: none;
 }
 
 .chat-item-info { flex: 1; min-width: 0; }
 .chat-item-top { display: flex; justify-content: space-between; gap: 8px; }
 .chat-item-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-item-time { color: var(--text-dim); font-size: 12px; flex-shrink: 0; }
-.chat-item-bottom { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; }
-.chat-item-preview { color: var(--text-dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 3px; }
+.chat-item-preview { color: var(--text-dim); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* НОВОЕ (Telegram-дизайн): круглый бейдж непрочитанных; на выбранном
+   элементе — белый, чтобы выделяться на синем фоне. */
 .chat-badge {
   background: var(--accent);
   color: #fff;
-  border-radius: 10px;
+  border-radius: 50%;
   font-size: 12px;
   font-weight: 700;
-  min-width: 20px;
-  height: 20px;
+  min-width: 22px;
+  height: 22px;
   padding: 0 6px;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
+.chat-item.selected .chat-badge { background: #fff; color: var(--accent-dark); }
 
-#chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* ИСПРАВЛЕНО: min-height: 0 — иначе flex-блок сообщений не даёт колонке
+   сжиматься, и панель ввода уезжает за нижний край окна. */
+#chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
 #chat-empty {
   flex: 1;
@@ -516,15 +663,80 @@ body {
 }
 .empty-icon { font-size: 56px; }
 
-#chat-active { flex: 1; display: flex; flex-direction: column; }
+/* ИСПРАВЛЕНО: min-height: 0 — иначе flex-блок сообщений не даёт колонке
+   сжиматься, и панель ввода уезжает за нижний край окна. */
+#chat-active { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+/* НОВОЕ: анимация открытия чата — каскад из трёх слоёв: шапка опускается
+   сверху, лента сообщений «проявляется» снизу с размытием в фокус,
+   панель ввода поднимается. Общий контейнер — мягкое свечение-затухание. */
+@keyframes chat-open-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes chat-header-in {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes chat-messages-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.98);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+@keyframes chat-input-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: none; }
+}
+#chat-active.chat-entering { animation: chat-open-in 0.2s ease-out; }
+#chat-active.chat-entering #chat-header {
+  animation: chat-header-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+#chat-active.chat-entering #messages {
+  animation: chat-messages-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.06s backwards;
+}
+#chat-active.chat-entering #form-send,
+#chat-active.chat-entering #reply-preview-bar,
+#chat-active.chat-entering #support-faq-panel,
+#chat-active.chat-entering .faq-reopen-btn {
+  animation: chat-input-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) 0.1s backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  #chat-active.chat-entering,
+  #chat-active.chat-entering #chat-header,
+  #chat-active.chat-entering #messages,
+  #chat-active.chat-entering #form-send {
+    animation: none;
+  }
+}
+
+/* НОВОЕ (Telegram-дизайн): чат-колонка центрируется по ширине окна. */
+#chat-active > #chat-header,
+#chat-active > #messages,
+#chat-active > #typing-indicator,
+#chat-active > #btn-load-more,
+#chat-active > #reply-preview-bar,
+#chat-active > #support-faq-panel,
+#chat-active > .faq-reopen-btn,
+#chat-active > #form-send,
+#chat-active > #image-preview {
+  width: min(100%, 920px);
+  align-self: center;
+}
 
 #chat-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 12px;
+  padding: 8px 16px;
   background: var(--bg-panel);
-  border-bottom: 1px solid #101921;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   font-weight: 600;
 }
 #chat-header .chat-avatar { width: 38px; height: 38px; font-size: 15px; }
@@ -599,6 +811,7 @@ body {
 
 #messages {
   flex: 1;
+  min-height: 0; /* ИСПРАВЛЕНО: без этого панель ввода уезжает за нижний край */
   overflow-y: auto;
   padding: 16px;
   display: flex;
@@ -632,14 +845,125 @@ body {
 
 .msg-sender { font-size: 12.5px; font-weight: 700; color: var(--accent); margin-bottom: 2px; }
 
+/* НОВОЕ: подсветка сообщения при переходе по цитате. */
+@keyframes msg-jump-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(74, 163, 255, 0.55); }
+  60% { box-shadow: 0 0 0 10px rgba(74, 163, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 163, 255, 0); }
+}
+.msg.msg-jump .msg-bubble {
+  animation: msg-jump-pulse 1.4s ease-out;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
 .msg-deleted { color: var(--text-dim); font-style: italic; }
+
+/* НОВОЕ: превью файла перед отправкой. */
+#file-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.file-preview-icon {
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--bg-input);
+  border-radius: 8px;
+  padding: 12px 10px;
+}
+.file-preview-info { flex: 1; min-width: 0; }
+#file-preview-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#file-preview-size { font-size: 12px; color: var(--text-dim); }
+
+/* НОВОЕ: карточка файла в ленте сообщений. */
+.msg-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 2px 0 6px;
+  min-width: 220px;
+}
+.msg-file-icon {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent);
+  background: var(--bg-input);
+  border-radius: 8px;
+  padding: 12px 8px;
+  min-width: 40px;
+  text-align: center;
+}
+.msg-file-info { flex: 1; min-width: 0; }
+.msg-file-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-file-size { font-size: 11.5px; color: var(--text-dim); }
+.msg-file-download {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 18px;
+  padding: 6px;
+}
+.msg-file-download:hover { opacity: 0.8; }
+
+/* НОВОЕ: карточка совместной доски в сообщении. */
+.msg-board-card {
+  background: linear-gradient(135deg, rgba(74, 163, 255, 0.14), rgba(74, 163, 255, 0.05));
+  border: 1px solid rgba(74, 163, 255, 0.35);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 2px 0 6px;
+  min-width: 230px;
+}
+.msg-board-title { font-weight: 700; font-size: 14px; }
+.msg-board-hint { font-size: 11.5px; color: var(--text-dim); margin: 2px 0 8px; }
+.msg-board-open {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.msg-board-open:hover { background: var(--accent-dark); }
 
 #form-send {
   display: flex;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 10px 16px;
   background: var(--bg-panel);
-  border-top: 1px solid #101921;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* НОВОЕ (расширение ввода): при наборе текста поле сообщения плавно
+   расширяется и «закрывает» собой кнопку вложений — как в Telegram.
+   Кнопка сворачивается в нулевую ширину и не ловит клики. */
+#form-send #btn-attach {
+  width: 44px;
+  opacity: 1;
+  overflow: hidden;
+  transition: width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+}
+#form-send.typing { gap: 0; }
+#form-send.typing #btn-attach {
+  width: 0;
+  margin-left: -8px; /* компенсируем часть внутреннего отступа кнопки */
+  opacity: 0;
+  pointer-events: none;
+}
+#message-input {
+  transition: padding 0.25s ease;
+}
+#form-send.typing #message-input {
+  padding-left: 20px; /* визуально забирает место кнопки, но не вплотную */
 }
 
 /* ===== Reply preview bar ===== */
@@ -773,6 +1097,157 @@ body {
 }
 .btn-send:hover { background: var(--accent-dark); }
 
+/* ===== Доски ===== */
+.boards-card { width: min(480px, 92vw); max-height: 86vh; display: flex; flex-direction: column; gap: 12px; }
+.boards-hint { font-size: 13px; color: var(--text-dim); }
+#boards-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; min-height: 60px; }
+.board-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.board-row:hover { background: var(--bg-panel-2); }
+.board-row-icon { font-size: 20px; }
+.board-row-title { flex: 1; min-width: 0; font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-row-date { color: var(--text-dim); font-size: 12px; flex-shrink: 0; }
+.board-row-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; }
+.board-row-del:hover { color: var(--danger); }
+.boards-empty { color: var(--text-dim); font-size: 13.5px; text-align: center; padding: 18px 0; }
+
+.board-editor-card { width: min(920px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 10px; }
+.board-editor-header { display: flex; align-items: center; gap: 8px; }
+#board-title-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: none;
+  border-radius: 12px;
+  padding: 9px 14px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+}
+.board-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.board-swatches { display: flex; gap: 6px; }
+.board-swatch {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.board-swatch:hover { transform: scale(1.12); }
+.board-swatch.selected { border-color: var(--accent); transform: scale(1.12); }
+.board-sizes { display: flex; gap: 4px; }
+.board-size-btn {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-input);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text);
+}
+.board-size-btn span { display: block; border-radius: 50%; background: currentColor; }
+.board-size-btn.selected { background: var(--accent); color: #fff; }
+.board-tool-btn {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  border: none;
+  background: var(--bg-input);
+  cursor: pointer;
+  font-size: 15px;
+  transition: background 0.15s;
+}
+.board-tool-btn:hover { background: var(--bg-panel-2); }
+.board-tool-btn.active { background: var(--accent); }
+.board-save-status { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+/* НОВОЕ: кнопка отправки доски в чат. */
+.board-send-btn {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 12.5px;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.board-send-btn:hover { background: var(--accent-dark); }
+.board-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--bg-input);
+}
+#board-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+
+/* ===== Инбокс поддержки (админ) ===== */
+.support-stats { display: flex; gap: 8px; padding: 10px 8px 2px; }
+.support-stat {
+  flex: 1;
+  background: var(--bg-input);
+  border-radius: 12px;
+  padding: 9px 10px;
+  text-align: center;
+}
+.support-stat-num { font-size: 17px; font-weight: 800; }
+.support-stat-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.support-stat-waiting .support-stat-num { color: var(--accent); }
+
+.support-search-row { padding: 8px 8px 4px; }
+.support-search {
+  width: 100%;
+  background: var(--bg-input);
+  border: none;
+  border-radius: 18px;
+  padding: 8px 14px;
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+}
+.support-search::placeholder { color: var(--text-dim); }
+.support-search:focus { box-shadow: 0 0 0 2px var(--accent-dark); }
+
+.support-filters { display: flex; gap: 6px; padding: 6px 8px; }
+.support-filter-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.support-filter-tab:hover { background: var(--bg-panel-2); }
+.support-filter-tab.active { background: var(--accent); color: #fff; }
+
+.support-row .support-email {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.support-row.waiting .chat-item-name { color: var(--accent); }
+.support-cap-hint {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
 /* ===== Модалка нового чата ===== */
 .modal {
   position: fixed;
@@ -832,8 +1307,39 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
-.settings-header h3 { font-size: 18px; }
+.settings-header h3 { font-size: 18px; flex: 1; text-align: center; }
+
+/* НОВОЕ: главное меню настроек — список разделов. В режиме раздела
+   (.in-panel) список скрыт, видна одна панель и кнопка «назад». */
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 2px;
+  overflow-y: auto;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.settings-nav-item:hover { background: var(--bg-panel-2); }
+.settings-nav-icon { font-size: 18px; width: 26px; text-align: center; }
+.settings-nav-arrow { margin-left: auto; color: var(--text-dim); font-size: 18px; }
+
+.settings-card.in-panel .settings-nav { display: none; }
 
 .settings-body {
   display: flex;
@@ -843,8 +1349,10 @@ body {
   min-height: 0;
 }
 
-.settings-panel { display: flex; flex-direction: column; gap: 12px; }
-.settings-panel + .settings-panel { border-top: 1px solid var(--bg-input); padding-top: 14px; }
+/* НОВОЕ: панели разделов — по одной за раз (как отдельные экраны). */
+.settings-body .settings-panel { display: none; }
+.settings-body .settings-panel.active { display: flex; }
+.settings-panel { flex-direction: column; gap: 12px; }
 .settings-section-title { font-size: 15px; font-weight: 700; }
 
 .settings-label { font-size: 12.5px; color: var(--text-dim); margin-bottom: -6px; }
