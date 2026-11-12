@@ -3680,32 +3680,71 @@ const shortcuts = initShortcuts({
 /* НОВОЕ (перенос из main): мелкие улучшения UX.                        */
 /* ------------------------------------------------------------------ */
 
-// Стабильное меню «+»: hover работает на десктопе, клик — на сенсорных
-// устройствах. Меню не меняет ширину шапки и закрывается снаружи/Escape.
+// Компактные меню шапки списка чатов. Открываются по клику (без hover-
+// мерцания), взаимно исключают друг друга и поддерживают клавиатуру.
 (function () {
-  const actions = document.getElementById("new-actions");
-  const toggle = document.getElementById("btn-new-toggle");
-  const menu = document.getElementById("new-actions-menu");
-  if (!actions || !toggle || !menu) return;
+  const configs = [
+    ["new-actions", "btn-new-toggle", "new-actions-menu"],
+    ["sidebar-actions", "btn-sidebar-menu", "sidebar-more-menu"],
+  ].map(([rootId, toggleId, menuId]) => ({
+    root: document.getElementById(rootId),
+    toggle: document.getElementById(toggleId),
+    menu: document.getElementById(menuId),
+  })).filter((x) => x.root && x.toggle && x.menu);
+  if (!configs.length) return;
 
-  const setOpen = (open) => {
-    actions.classList.toggle("open", open);
-    toggle.setAttribute("aria-expanded", String(open));
+  const setOpen = (config, open) => {
+    config.root.classList.toggle("open", open);
+    config.toggle.setAttribute("aria-expanded", String(open));
+  };
+  const closeAll = (except = null) => {
+    configs.forEach((config) => {
+      if (config !== except) setOpen(config, false);
+    });
   };
 
-  toggle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setOpen(!actions.classList.contains("open"));
+  configs.forEach((config) => {
+    const menuItems = () => Array.from(config.menu.querySelectorAll('[role="menuitem"]'));
+
+    config.toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = !config.root.classList.contains("open");
+      closeAll(config);
+      setOpen(config, willOpen);
+    });
+    config.toggle.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown") return;
+      e.preventDefault();
+      closeAll(config);
+      setOpen(config, true);
+      menuItems()[0]?.focus();
+    });
+    config.menu.addEventListener("click", (e) => {
+      if (e.target.closest('[role="menuitem"]')) setOpen(config, false);
+    });
+    config.menu.addEventListener("keydown", (e) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+      const items = menuItems();
+      if (!items.length) return;
+      e.preventDefault();
+      const current = Math.max(0, items.indexOf(document.activeElement));
+      const next = e.key === "Home" ? 0
+        : e.key === "End" ? items.length - 1
+        : e.key === "ArrowDown" ? (current + 1) % items.length
+        : (current - 1 + items.length) % items.length;
+      items[next].focus();
+    });
   });
-  menu.addEventListener("click", () => setOpen(false));
+
   document.addEventListener("click", (e) => {
-    if (!actions.contains(e.target)) setOpen(false);
+    if (!configs.some((config) => config.root.contains(e.target))) closeAll();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && actions.classList.contains("open")) {
-      setOpen(false);
-      toggle.focus();
-    }
+    if (e.key !== "Escape") return;
+    const opened = configs.find((config) => config.root.classList.contains("open"));
+    if (!opened) return;
+    setOpen(opened, false);
+    opened.toggle.focus();
   });
 })();
 
