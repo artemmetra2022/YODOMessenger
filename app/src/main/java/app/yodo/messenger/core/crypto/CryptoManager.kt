@@ -2,20 +2,18 @@ package app.yodo.messenger.core.crypto
 
 import android.content.Context
 import android.util.Base64
-import android.util.Log
-import com.google.crypto.tink.CleartextKeysetHandle
-import com.google.crypto.tink.HybridDecrypt
-import com.google.crypto.tink.HybridEncrypt
-import com.google.crypto.tink.JsonKeysetReader
-import com.google.crypto.tink.JsonKeysetWriter
-import com.google.crypto.tink.KeyTemplates
-import com.google.crypto.tink.KeysetHandle
+import com.google.crypto.tink.*
 import com.google.crypto.tink.hybrid.HybridConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Source
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -25,24 +23,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * НОВОЕ (сквозное шифрование, E2EE).
- *
- * Единая точка работы с криптографией на устройстве. Использует Google Tink и
- * гибридное шифрование HPKE (DHKEM X25519 + HKDF-SHA256 + AES-256-GCM):
- *  - у каждого пользователя есть пара ключей (приватный/публичный);
- *  - приватный keyset хранится ЛОКАЛЬНО и зашифрован мастер-ключом из Android Keystore
- *    (AndroidKeysetManager) — он никогда не покидает устройство и недоступен серверу;
- *  - публичный ключ выкладывается в документ пользователя в Firestore и вшивается в QR-код,
- *    чтобы собеседник мог зашифровать сообщение именно для нас.
- *
- * Для личного (1-на-1) чата отправитель шифрует текст ОТДЕЛЬНО под публичный ключ каждого
- * из двух участников (и получателя, и себя — чтобы видеть свои же отправленные сообщения
- * при перезагрузке / с другого устройства). На сервере хранится только шифртекст.
- *
- * Ограничения текущей версии (осознанный MVP, задел на будущее):
- *  - шифруется только текстовое тело сообщения в личных чатах;
- *  - групповые чаты, каналы, медиа, а также цитаты/пересланные сниппеты пока не шифруются;
- *  - нет forward secrecy (нет ратчета, как в Signal) — статический ECDH под публичный ключ.
+ * HPKE text encryption with account-scoped local keys and local TOFU pinning.
+ * Fresh server keys are checked before every online send. No plaintext fallback.
+ * This is NOT a ratchet: no forward secrecy, no group/media E2EE or multi-device protocol.
  */
 @Singleton
 class CryptoManager @Inject constructor(
@@ -50,145 +33,217 @@ class CryptoManager @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val firebaseAuth: FirebaseAuth
 ) {
-
     private val initMutex = Mutex()
-    @Volatile private var localKeysReady = false
-    private var privateHandle: KeysetHandle? = null
+    private val binding = context.getSharedPreferences("yodo_e2e_binding", Context.MODE_PRIVATE)
+    private var activeUid: String? = null
     private var hybridDecrypt: HybridDecrypt? = null
     private var myPublicKeyCache: String? = null
-
-    // Кэш публичных ключей других пользователей (uid -> base64 публичного keyset).
-    private val publicKeyCache = ConcurrentHashMap<String, String>()
+    // QR hints remain separate; an offline scan can never replace a trusted online key.
+    private val qrKeyHints = ConcurrentHashMap<String, String>()
 
     companion object {
-        private const val TAG = "CryptoManager"
-        // Associated data — привязываем шифртекст к нашему протоколу/версии.
         private val CONTEXT_INFO = "yodo-e2e-v1".toByteArray(Charsets.UTF_8)
-        private const val KEYSET_TEMPLATE =
-            "DHKEM_X25519_HKDF_SHA256_HKDF_SHA256_AES_256_GCM"
-        private const val SHARED_PREF_FILE = "yodo_e2e_prefs"
+        private const val KEYSET_TEMPLATE = "DHKEM_X25519_HKDF_SHA256_HKDF_SHA256_AES_256_GCM"
+        private const val LEGACY_PREF = "yodo_e2e_prefs"
         private const val KEYSET_NAME = "yodo_e2e_keyset"
-        private const val MASTER_KEY_URI = "android-keystore://yodo_e2e_master_key"
+        private const val LEGACY_MASTER = "android-keystore://yodo_e2e_master_key"
     }
 
-    /**
-     * Лениво создаёт (при первом запуске) и загружает локальную пару ключей.
-     * Может бросить исключение при проблемах с Keystore — вызывающая сторона обрабатывает.
-     */
-    @Synchronized
-    private fun ensureLocalKeys() {
-        if (localKeysReady && privateHandle != null) return
-        HybridConfig.register()
-        val handle = AndroidKeysetManager.Builder()
-            .withSharedPref(context, KEYSET_NAME, SHARED_PREF_FILE)
-            .withKeyTemplate(KeyTemplates.get(KEYSET_TEMPLATE))
-            .withMasterKeyUri(MASTER_KEY_URI)
-            .build()
-            .keysetHandle
-        privateHandle = handle
-        hybridDecrypt = handle.getPrimitive(HybridDecrypt::class.java)
-
-        val publicHandle = handle.publicKeysetHandle
-        val bos = ByteArrayOutputStream()
-        CleartextKeysetHandle.write(publicHandle, JsonKeysetWriter.withOutputStream(bos))
-        myPublicKeyCache = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
-        localKeysReady = true
+    private fun uid(): String = firebaseAuth.currentUser?.uid
+        ?: throw SecureMessagingException("Войдите в аккаунт для защищённой переписки")
+    private fun accountId(uid: String) = keyFingerprint(uid.toByteArray()).lowercase()
+    private fun keyManager(pref: String, master: String) = AndroidKeysetManager.Builder()
+        .withSharedPref(context, KEYSET_NAME, pref).withKeyTemplate(KeyTemplates.get(KEYSET_TEMPLATE))
+        .withMasterKeyUri(master).build().keysetHandle
+    private fun publicKey(handle: KeysetHandle): String {
+        val output = ByteArrayOutputStream()
+        CleartextKeysetHandle.write(handle.publicKeysetHandle, JsonKeysetWriter.withOutputStream(output))
+        return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
     }
+    private fun publicHandle(encoded: String): KeysetHandle = PublicKeyIdentity.handle(encoded)
+    private fun fingerprint(encoded: String): String = PublicKeyIdentity.fingerprint(encoded)
 
-    /** Публичный ключ текущего устройства (base64) или null, если инициализация не удалась. */
-    fun myPublicKey(): String? = try {
-        ensureLocalKeys()
-        myPublicKeyCache
-    } catch (e: Exception) {
-        Log.w(TAG, "myPublicKey failed", e)
-        null
-    }
-
-    /**
-     * Гарантирует наличие локальных ключей и публикует публичный ключ в документ пользователя
-     * в Firestore (идемпотентно — обновляет только если ключ изменился/отсутствует).
-     * Безопасно вызывать при каждом старте приложения после авторизации.
-     */
-    suspend fun ensureInitialized() {
-        val uid = firebaseAuth.currentUser?.uid ?: return
-        initMutex.withLock {
-            try {
-                ensureLocalKeys()
-                val pk = myPublicKeyCache ?: return
-                val existing = runCatching {
-                    firestore.collection("users").document(uid).get().await().getString("publicKey")
-                }.getOrNull()
-                if (existing != pk) {
-                    firestore.collection("users").document(uid)
-                        .set(mapOf("publicKey" to pk), SetOptions.merge()).await()
+    /** Preserve legacy history only for the account whose published key matches the legacy key. */
+    private fun resolveLegacyBinding(currentUid: String, publishedKey: String?) {
+        if (binding.getString("legacyOwner", null) == null &&
+            context.getSharedPreferences(LEGACY_PREF, Context.MODE_PRIVATE).contains(KEYSET_NAME)) {
+            val legacy = publicKey(keyManager(LEGACY_PREF, LEGACY_MASTER))
+            if (!publishedKey.isNullOrBlank() && fingerprint(legacy) == fingerprint(publishedKey)) {
+                check(binding.edit().putString("legacyOwner", currentUid).commit())
+                synchronized(this) {
+                    if (activeUid == currentUid) { activeUid = null; hybridDecrypt = null; myPublicKeyCache = null }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "ensureInitialized failed", e)
             }
         }
+        check(binding.edit().putBoolean("resolved_" + accountId(currentUid), true).commit())
     }
 
-    /** Кладём известный публичный ключ в кэш (например, полученный из QR-кода офлайн). */
-    fun cachePublicKey(uid: String, publicKey: String) {
-        if (publicKey.isNotBlank()) publicKeyCache[uid] = publicKey
-    }
-
-    /** Достаёт публичный ключ пользователя из кэша или из Firestore. */
-    suspend fun getPublicKey(uid: String): String? {
-        publicKeyCache[uid]?.let { return it }
-        return try {
-            val pk = firestore.collection("users").document(uid).get().await().getString("publicKey")
-            if (!pk.isNullOrBlank()) publicKeyCache[uid] = pk
-            pk
-        } catch (e: Exception) {
-            Log.w(TAG, "getPublicKey failed for $uid", e)
-            null
+    @Synchronized private fun ensureLocalKeys() {
+        val currentUid = uid()
+        if (activeUid == currentUid && hybridDecrypt != null) return
+        val legacyOwner = binding.getString("legacyOwner", null)
+        val id = accountId(currentUid)
+        if (legacyOwner == null && context.getSharedPreferences(LEGACY_PREF, Context.MODE_PRIVATE).contains(KEYSET_NAME) &&
+            !binding.getBoolean("resolved_$id", false)) {
+            throw SecureMessagingException("Подключитесь к сети для безопасного переноса ключа этого аккаунта")
         }
+        HybridConfig.register()
+        val handle = if (legacyOwner == currentUid) keyManager(LEGACY_PREF, LEGACY_MASTER)
+            else keyManager("yodo_e2e_keys_$id", "android-keystore://yodo_e2e_master_$id")
+        hybridDecrypt = handle.getPrimitive(HybridDecrypt::class.java)
+        myPublicKeyCache = publicKey(handle)
+        activeUid = currentUid
     }
 
-    /**
-     * Шифрует [plaintext] под публичные ключи ВСЕХ участников.
-     * Возвращает карту uid -> base64(шифртекст) или null, если хотя бы у одного участника
-     * нет опубликованного ключа (тогда вызывающая сторона отправит обычный текст).
-     */
-    suspend fun encryptForParticipants(
-        participantIds: List<String>,
-        plaintext: String
-    ): Map<String, String>? {
-        return try {
-            ensureLocalKeys()
-            val result = HashMap<String, String>()
-            for (uid in participantIds.distinct()) {
-                val pk = getPublicKey(uid) ?: return null
-                val ct = encryptWith(pk, plaintext) ?: return null
-                result[uid] = ct
-            }
-            result.ifEmpty { null }
-        } catch (e: Exception) {
-            Log.w(TAG, "encryptForParticipants failed", e)
-            null
-        }
-    }
+    @Synchronized fun myPublicKey(): String? = runCatching { ensureLocalKeys(); myPublicKeyCache }.getOrNull()
 
-    private fun encryptWith(publicKeyB64: String, plaintext: String): String? = try {
-        val bytes = Base64.decode(publicKeyB64, Base64.NO_WRAP)
-        val handle = CleartextKeysetHandle.read(JsonKeysetReader.withBytes(bytes))
-        val enc = handle.getPrimitive(HybridEncrypt::class.java)
-        val ct = enc.encrypt(plaintext.toByteArray(Charsets.UTF_8), CONTEXT_INFO)
-        Base64.encodeToString(ct, Base64.NO_WRAP)
-    } catch (e: Exception) {
-        Log.w(TAG, "encryptWith failed", e)
-        null
-    }
-
-    /** Расшифровывает base64-шифртекст нашим приватным ключом. null при ошибке. */
-    fun decrypt(ciphertextB64: String): String? = try {
+    @Synchronized private fun localPublicKey(owner: String): String {
         ensureLocalKeys()
-        val dec = hybridDecrypt ?: return null
-        val ct = Base64.decode(ciphertextB64, Base64.NO_WRAP)
-        String(dec.decrypt(ct, CONTEXT_INFO), Charsets.UTF_8)
-    } catch (e: Exception) {
-        Log.w(TAG, "decrypt failed", e)
-        null
+        requireSameAccount(owner)
+        if (activeUid != owner) throw SecureMessagingException("Ключ относится к другому аккаунту")
+        return myPublicKeyCache ?: throw SecureMessagingException("Локальный ключ недоступен")
     }
+
+    suspend fun ensureInitialized() = initMutex.withLock {
+        val owner = uid()
+        HybridConfig.register()
+        val ref = firestore.collection("users").document(owner)
+        val published = ref.get(Source.SERVER).await().getString("publicKey")
+        resolveLegacyBinding(owner, published)
+        ensureLocalKeys()
+        val local = localPublicKey(owner)
+        if (!published.isNullOrBlank() && fingerprint(published) != fingerprint(local)) {
+            throw SecureMessagingException("Ключ аккаунта принадлежит другому устройству. Откройте «Проверка ключей»; замена требует подтверждения")
+        }
+        if (published.isNullOrBlank()) {
+            firestore.runTransaction { txn ->
+                val existing = txn.get(ref).getString("publicKey")
+                if (!existing.isNullOrBlank() && fingerprint(existing) != fingerprint(local)) {
+                    throw SecureMessagingException("Ключ аккаунта изменился. Проверьте ключи перед отправкой")
+                }
+                requireSameAccount(owner)
+                txn.set(ref, mapOf("publicKey" to local), SetOptions.merge())
+            }.await()
+        }
+        requireSameAccount(owner)
+    }
+
+    fun cachePublicKey(uid: String, publicKey: String) {
+        if (publicKey.isNotBlank()) qrKeyHints[uid] = publicKey
+    }
+    suspend fun getPublicKey(uid: String): String? = firestore.collection("users").document(uid)
+        .get(Source.SERVER).await().getString("publicKey")
+
+    fun observeKeyChanges(peerUid: String): Flow<Unit> = callbackFlow {
+        val owner = uid()
+        var peerSeen = false
+        var ownSeen = false
+        var lastPeer: String? = null
+        var lastOwn: String? = null
+        val peerListener = firestore.collection("users").document(peerUid).addSnapshotListener { doc, error ->
+            if (error != null) { trySend(Unit) }
+            else {
+                val key = doc?.get("publicKey") as? String
+                if (!peerSeen || key != lastPeer) { peerSeen = true; lastPeer = key; trySend(Unit) }
+            }
+        }
+        val ownListener = firestore.collection("users").document(owner).addSnapshotListener { doc, error ->
+            if (error != null) { trySend(Unit) }
+            else {
+                val key = doc?.get("publicKey") as? String
+                if (!ownSeen || key != lastOwn) { ownSeen = true; lastOwn = key; trySend(Unit) }
+            }
+        }
+        awaitClose { peerListener.remove(); ownListener.remove() }
+    }
+
+    private fun trustPrefs(owner: String) = context.getSharedPreferences("yodo_key_trust_" + accountId(owner), Context.MODE_PRIVATE)
+    @Synchronized private fun firstUsePin(owner: String, peerUid: String, current: String): String {
+        val prefs = trustPrefs(owner)
+        val id = accountId(peerUid)
+        val pinned = prefs.getString("pin_$id", null)
+        if (pinned != null) return pinned
+        check(prefs.edit().putString("pin_$id", current).putBoolean("verified_$id", false).commit())
+        return current
+    }
+    private fun requireSameAccount(owner: String) {
+        if (uid() != owner) throw SecureMessagingException("Аккаунт изменился. Повторите действие в нужном аккаунте")
+    }
+
+    suspend fun inspectConversation(peerUid: String): ConversationSecurity = initMutex.withLock {
+        val owner = uid()
+        require(peerUid != owner)
+        HybridConfig.register()
+        val publishedOwn = getPublicKey(owner)
+        resolveLegacyBinding(owner, publishedOwn)
+        ensureLocalKeys()
+        val local = fingerprint(localPublicKey(owner))
+        val peerKey = getPublicKey(peerUid)?.takeIf { it.isNotBlank() }
+            ?: throw SecureMessagingException("У собеседника ещё нет ключа. Попросите его открыть обновлённое приложение")
+        val current = fingerprint(peerKey)
+        requireSameAccount(owner)
+        val pinned = firstUsePin(owner, peerUid, current)
+        val publishedFingerprint = publishedOwn?.takeIf { it.isNotBlank() }?.let { fingerprint(it) }
+        ConversationSecurity(local, current, pinned,
+            trustPrefs(owner).getBoolean("verified_" + accountId(peerUid), false) && pinned == current,
+            publishedFingerprint == local, publishedFingerprint)
+    }
+
+    /** Explicit out-of-band verification; refuses a key that changed while the dialog was open. */
+    suspend fun verifyPeerKey(peerUid: String, expectedFingerprint: String) = initMutex.withLock {
+        val owner = uid()
+        val key = getPublicKey(peerUid) ?: throw SecureMessagingException("Ключ собеседника недоступен")
+        if (fingerprint(key) != expectedFingerprint) throw SecureMessagingException("Ключ снова изменился. Обновите окно проверки и сравните его заново")
+        requireSameAccount(owner)
+        val id = accountId(peerUid)
+        check(trustPrefs(owner).edit().putString("pin_$id", expectedFingerprint).putBoolean("verified_$id", true).commit())
+    }
+
+    /** Never called automatically. This intentionally invalidates this account's old published key. */
+    suspend fun activateThisDevice(expectedPublishedFingerprint: String?) = initMutex.withLock {
+        val owner = uid()
+        ensureLocalKeys()
+        val local = localPublicKey(owner)
+        val ref = firestore.collection("users").document(owner)
+        firestore.runTransaction { txn ->
+            val current = txn.get(ref).getString("publicKey")?.takeIf { it.isNotBlank() }?.let { fingerprint(it) }
+            if (current != expectedPublishedFingerprint) throw SecureMessagingException("Ключ аккаунта снова изменился. Обновите окно проверки")
+            requireSameAccount(owner)
+            txn.set(ref, mapOf("publicKey" to local), SetOptions.merge())
+        }.await()
+        requireSameAccount(owner)
+    }
+
+    suspend fun encryptForParticipants(participantIds: List<String>, plaintext: String): Map<String, String> {
+        val owner = uid()
+        try {
+            ensureInitialized()
+            val ownPublic = localPublicKey(owner)
+            val ids = participantIds.distinct()
+            if (ids.size != 2 || owner !in ids) throw SecureMessagingException("Не удалось подтвердить участников личного чата")
+            val result = mutableMapOf<String, String>()
+            for (recipient in ids) {
+                val encoded = if (recipient == owner) ownPublic else getPublicKey(recipient)
+                val key = encoded?.takeIf { it.isNotBlank() }
+                    ?: throw SecureMessagingException("У собеседника нет ключа. Сообщение не отправлено")
+                if (recipient != owner) {
+                    val current = fingerprint(key)
+                    if (keyTrustDecision(firstUsePin(owner, recipient, current), current) == KeyTrustDecision.CHANGED) {
+                        throw SecureMessagingException("Ключ собеседника изменился. Отправка остановлена — откройте «Проверка ключей» и сверьте отпечаток")
+                    }
+                }
+                val encryptor = publicHandle(key).getPrimitive(HybridEncrypt::class.java)
+                result[recipient] = Base64.encodeToString(encryptor.encrypt(plaintext.toByteArray(Charsets.UTF_8), CONTEXT_INFO), Base64.NO_WRAP)
+            }
+            requireSameAccount(owner)
+            return result
+        } catch (e: CancellationException) { throw e }
+        catch (e: SecureMessagingException) { throw e }
+        catch (_: Exception) { throw SecureMessagingException("Не удалось подтвердить ключи или зашифровать сообщение. Проверьте сеть; открытый текст не отправлен") }
+    }
+
+    @Synchronized fun decrypt(ciphertextB64: String): String? = runCatching {
+        ensureLocalKeys()
+        String(hybridDecrypt!!.decrypt(Base64.decode(ciphertextB64, Base64.NO_WRAP), CONTEXT_INFO), Charsets.UTF_8)
+    }.getOrNull()
 }

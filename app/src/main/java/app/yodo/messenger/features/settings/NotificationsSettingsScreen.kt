@@ -1,5 +1,8 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
+import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -21,7 +24,6 @@ import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -68,6 +70,8 @@ fun NotificationsSettingsScreen(
     val hideNotificationPreview by viewModel.hideNotificationPreview.collectAsState()
     val notificationsSnoozedUntil by viewModel.notificationsSnoozedUntil.collectAsState()
 
+    var confirmRestoreSounds by remember { mutableStateOf(false) }
+    val context=androidx.compose.ui.platform.LocalContext.current
     val colorTheme = LocalColorTheme.current
     val listState = rememberLazyListState()
     val anchorPositions = remember { mutableMapOf<String, Float>() }
@@ -88,7 +92,14 @@ fun NotificationsSettingsScreen(
         }
     }
 
-    Scaffold(
+    if(confirmRestoreSounds) androidx.compose.material3.AlertDialog(
+        onDismissRequest={confirmRestoreSounds=false},title={Text("Вернуть звук чатам?")},
+        text={Text("Отменить отключение звука из уведомлений для всех чатов текущего аккаунта на этом устройстве? Общие настройки звука, тихие часы и отключённые уведомления не изменятся.")},
+        confirmButton={androidx.compose.material3.TextButton(onClick={viewModel.restoreNotificationChatSounds();confirmRestoreSounds=false}) {Text("Вернуть звук")}},
+        dismissButton={androidx.compose.material3.TextButton(onClick={confirmRestoreSounds=false}) {Text("Отмена")}})
+
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text("Уведомления", style = MaterialTheme.typography.titleLarge) },
@@ -104,7 +115,8 @@ fun NotificationsSettingsScreen(
     ) { padding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = glassContentPadding()
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
             item {
@@ -150,6 +162,20 @@ fun NotificationsSettingsScreen(
                             )
                         }
                     }
+                }
+            }
+
+            item {
+                SettingsCard {
+                    SettingsNavigateRow(icon=Icons.Filled.VolumeUp,
+                        title="Уведомления об упоминаниях",
+                        subtitle="Отдельный звук и вибрация в настройках Android",
+                        colorTheme=colorTheme,onClick={app.yodo.messenger.notifications.NotificationHelper.openMentionSettings(context,notificationSound,notificationVibration)})
+                    HorizontalDivider(modifier=Modifier.padding(start=52.dp))
+                    SettingsNavigateRow(icon=Icons.Filled.VolumeUp,
+                        title="Вернуть звук чатам",
+                        subtitle="Отменить отключение звука из уведомлений на этом устройстве",
+                        colorTheme=colorTheme,onClick={confirmRestoreSounds=true})
                 }
             }
 

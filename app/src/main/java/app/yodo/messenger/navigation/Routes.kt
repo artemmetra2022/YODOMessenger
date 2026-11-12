@@ -20,6 +20,19 @@ sealed class Routes(val route: String) {
         fun createRoute(email: String) = "verify_email/${java.net.URLEncoder.encode(email, "UTF-8")}"
         const val ARG_EMAIL = "email"
     }
+    data object Canvas : Routes("canvas/{chatId}?topicId={topicId}&boardId={boardId}&sourceMessageId={sourceMessageId}&imageIndex={imageIndex}") {
+        fun createRoute(chatId: String, topicId: String? = null, boardId: String? = null, sourceMessageId: String? = null, imageIndex: Int = 0): String {
+            val args=mutableListOf("imageIndex=$imageIndex")
+            topicId?.let { args.add("topicId=${android.net.Uri.encode(it)}") }
+            boardId?.let { args.add("boardId=${android.net.Uri.encode(it)}") }
+            sourceMessageId?.let { args.add("sourceMessageId=${android.net.Uri.encode(it)}") }
+            return "canvas/${android.net.Uri.encode(chatId)}?${args.joinToString("&") }"
+        }
+    }
+    // Общая доска чата (этап 6): живая карточка в чате, редактор по нажатию.
+    data object SharedBoard : Routes("shared_board/{chatId}") {
+        fun createRoute(chatId: String) = "shared_board/${android.net.Uri.encode(chatId)}"
+    }
     data object ChatList : Routes("chat_list")
     data object Weather : Routes("weather")
     // НОВОЕ (каталог/рекомендации каналов): витрина каналов без поискового запроса.
@@ -49,6 +62,13 @@ sealed class Routes(val route: String) {
     data object SettingsChats : Routes("settings_chats?anchor={anchor}") {
         fun createRoute(anchor: String? = null) =
             if (anchor.isNullOrBlank()) "settings_chats" else "settings_chats?anchor=$anchor"
+        const val ARG_ANCHOR = "anchor"
+    }
+    // Раздел настроек «Интерактивная доска».
+    data object SavedBoards : Routes("saved_boards")
+    data object SettingsBoard : Routes("settings_board?anchor={anchor}") {
+        fun createRoute(anchor: String? = null) =
+            if (anchor.isNullOrBlank()) "settings_board" else "settings_board?anchor=$anchor"
         const val ARG_ANCHOR = "anchor"
     }
     data object SettingsPrivacy : Routes("settings_privacy?anchor={anchor}") {
@@ -111,17 +131,7 @@ sealed class Routes(val route: String) {
 
     data object SecurityCenter : Routes("security_center")
     // НОВОЕ (вход по QR-коду): сканер QR из веб-версии в «Центре безопасности».
-    // НОВОЕ (обычные считыватели): deep link yodo://qrlogin/{sessionId}?pk=... открывает
-    // этот же экран с уже «отсканированной» сессией — sessionId и ключ приходят
-    // необязательными аргументами (без них — обычное сканирование камерой).
-    data object QrLogin : Routes("qr_login?sessionId={sessionId}&pk={pk}") {
-        const val ARG_SESSION_ID = "sessionId"
-        const val ARG_PK = "pk"
-        fun createRoute(sessionId: String = "", pk: String = ""): String =
-            if (sessionId.isBlank() || pk.isBlank()) "qr_login"
-            else "qr_login?sessionId=" + java.net.URLEncoder.encode(sessionId, "UTF-8") +
-                "&pk=" + java.net.URLEncoder.encode(pk, "UTF-8")
-    }
+    data object QrLogin : Routes("qr_login")
     // НОВОЕ (Y): смена аккаунта и добавление нового аккаунта.
     data object SwitchAccount : Routes("switch_account")
     data object AddAccount : Routes("add_account")
@@ -186,12 +196,16 @@ sealed class Routes(val route: String) {
     // Если чат открыт из раздела форума, здесь передаётся id и название темы;
     // при обычном открытии чата (из списка чатов) параметры отсутствуют — старое
     // поведение полностью сохраняется.
-    data object Chat : Routes("chat/{chatId}?topicId={topicId}&topicTitle={topicTitle}") {
-        fun createRoute(chatId: String, topicId: String? = null, topicTitle: String? = null): String {
-            val base = "chat/$chatId"
-            if (topicId.isNullOrBlank()) return base
-            val encodedTitle = java.net.URLEncoder.encode(topicTitle.orEmpty(), "UTF-8")
-            return "$base?topicId=$topicId&topicTitle=$encodedTitle"
+    data object Chat : Routes("chat/{chatId}?topicId={topicId}&topicTitle={topicTitle}&messageId={messageId}") {
+        fun createRoute(chatId: String, topicId: String? = null, topicTitle: String? = null, messageId: String? = null): String {
+            val args = mutableListOf<String>()
+            if (!topicId.isNullOrBlank()) {
+                args += "topicId=${android.net.Uri.encode(topicId)}"
+                args += "topicTitle=${android.net.Uri.encode(topicTitle.orEmpty())}"
+            }
+            if (!messageId.isNullOrBlank()) args += "messageId=${android.net.Uri.encode(messageId)}"
+            val base = "chat/${android.net.Uri.encode(chatId)}"
+            return if (args.isEmpty()) base else "$base?${args.joinToString("&")}"
         }
         const val ARG_CHAT_ID = "chatId"
         const val ARG_TOPIC_ID = "topicId"
@@ -200,6 +214,15 @@ sealed class Routes(val route: String) {
     data object Call : Routes("call/{userId}") {
         fun createRoute(userId: String) = "call/$userId"
         const val ARG_USER_ID = "userId"
+    }
+    // НОВОЕ (раздел «Медиа, файлы, ссылки»): все вложения одного чата/темы форума.
+    data object ChatMedia : Routes("chat_media/{chatId}?topicId={topicId}") {
+        fun createRoute(chatId: String, topicId: String? = null): String {
+            val base = "chat_media/${android.net.Uri.encode(chatId)}"
+            return if (topicId.isNullOrBlank()) base else "$base?topicId=${android.net.Uri.encode(topicId)}"
+        }
+        const val ARG_CHAT_ID = "chatId"
+        const val ARG_TOPIC_ID = "topicId"
     }
     data object UserProfile : Routes("user_profile/{userId}") {
         fun createRoute(userId: String) = "user_profile/$userId"

@@ -21,9 +21,17 @@ data class Post(
     val views: Int = 0,
     // НОВОЕ (AK): сколько комментариев под постом — чтобы показывать число на кнопке
     // без загрузки всей подколлекции комментариев.
-    val commentCount: Int = 0
+    val commentCount: Int = 0,
+    // НОВОЕ: прикреплённая личная доска (Canvas) — публикуется только как статичная
+    // превью-картинка (bitmap). Сама доска остаётся приватной и зашифрованной на
+    // устройстве автора: открыть/редактировать её из поста нельзя, ни у кого другого
+    // нет доступа к исходному содержимому.
+    val attachedBoardTitle: String? = null,
+    val attachedBoardPreviewBase64: String? = null,
+    val attachedBoardObjectCount: Int? = null
 ) {
     val likeCount: Int get() = likedBy.size
+    val hasAttachedBoard: Boolean get() = attachedBoardPreviewBase64 != null
 }
 
 /**

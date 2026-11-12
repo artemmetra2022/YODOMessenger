@@ -1,10 +1,15 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.RadioButton
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,13 +43,10 @@ import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -194,7 +196,8 @@ fun ChatsSettingsScreen(
         )
     }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         topBar = {
             TopAppBar(
                 title = { Text("Чаты", style = MaterialTheme.typography.titleLarge) },
@@ -210,7 +213,8 @@ fun ChatsSettingsScreen(
     ) { padding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = glassContentPadding()
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
             item {
@@ -309,7 +313,7 @@ fun ChatsSettingsScreen(
                     SettingsToggleRow(
                         icon = Icons.Filled.Cloud,
                         title = "Погода на главном экране",
-                        subtitle = "OpenWeatherMap · $weatherCity",
+                        subtitle = "met.no · $weatherCity",
                         checked = weatherCardEnabled,
                         onCheckedChange = { viewModel.setWeatherCardEnabled(it) },
                         colorTheme = colorTheme

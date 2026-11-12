@@ -1,5 +1,10 @@
 package app.yodo.messenger.features.security
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.IconButton
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,17 +31,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -77,10 +78,6 @@ import java.util.concurrent.Executors
 @Composable
 fun QrLoginScreen(
     onBackClick: () -> Unit,
-    // НОВОЕ (обычные считыватели): сессия, пришедшая deep link'ом
-    // yodo://qrlogin/{sessionId}?pk=... — считаем её отсканированной сразу.
-    deepLinkSessionId: String = "",
-    deepLinkPk: String = "",
     viewModel: QrLoginViewModel = hiltViewModel()
 ) {
     val colorTheme = LocalColorTheme.current
@@ -102,14 +99,6 @@ fun QrLoginScreen(
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    // НОВОЕ (обычные считыватели): если сессия пришла по deep link — обрабатываем
-    // её как отсканированный QR, без наведения камеры на код.
-    LaunchedEffect(deepLinkSessionId, deepLinkPk) {
-        if (deepLinkSessionId.isNotBlank() && deepLinkPk.isNotBlank()) {
-            viewModel.consumeExternalSession(deepLinkSessionId, deepLinkPk)
-        }
-    }
-
     // Автоматически закрываем экран через небольшую паузу после успешного входа.
     LaunchedEffect(state) {
         if (state is QrLoginState.Success) {
@@ -118,7 +107,7 @@ fun QrLoginScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Вход по QR-коду") },

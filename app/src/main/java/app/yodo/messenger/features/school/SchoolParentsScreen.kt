@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
@@ -42,7 +43,7 @@ fun SchoolParentsScreen(onBackClick: () -> Unit) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = { SchoolTopBar("Родителям", onBackClick) },
         containerColor = Color.Transparent
     ) { padding ->

@@ -5,14 +5,28 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.yodo.messenger.domain.model.Post
 import app.yodo.messenger.domain.model.PostComment
+import app.yodo.messenger.domain.repository.AttachedBoardPreview
 import app.yodo.messenger.domain.repository.PostRepository
 import app.yodo.messenger.domain.repository.PostResult
+import app.yodo.messenger.features.canvas.CanvasRenderer
+import app.yodo.messenger.features.canvas.CanvasStore
+import app.yodo.messenger.util.ImageUtils
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+// НОВОЕ: лёгкая ссылка на доску из личной библиотеки (CanvasLibraryViewModel.state.boards),
+// которую выбрал автор в редакторе поста — достаточно для последующей ленивой загрузки
+// и рендера превью непосредственно перед публикацией.
+data class CanvasLibraryBoardRef(
+    val boardId: String,
+    val chatId: String?,
+    val title: String,
+    val objectCount: Int?
+)
 
 /**
  * Общая ViewModel для ленты постов на стене профиля — используется и в "своём"
@@ -22,7 +36,8 @@ import javax.inject.Inject
 @HiltViewModel
 class PostsViewModel @Inject constructor(
     private val postRepository: PostRepository,
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    private val canvasStore: CanvasStore
 ) : ViewModel() {
 
     private val _posts = MutableStateFlow<List<Post>>(emptyList())
@@ -46,14 +61,53 @@ class PostsViewModel @Inject constructor(
         }
     }
 
+    // НОВОЕ: доска, выбранная в редакторе поста из библиотеки личных досок (ещё без превью —
+    // оно рендерится лениво непосредственно перед публикацией, чтобы не грузить CPU на каждый выбор).
+    private val _selectedBoard = MutableStateFlow<CanvasLibraryBoardRef?>(null)
+    val selectedBoard: StateFlow<CanvasLibraryBoardRef?> = _selectedBoard
+
+    private val _isLoadingBoardPreview = MutableStateFlow(false)
+    val isLoadingBoardPreview: StateFlow<Boolean> = _isLoadingBoardPreview
+
+    fun selectBoard(board: CanvasLibraryBoardRef?) {
+        _selectedBoard.value = board
+    }
+
     fun createPost(text: String, imageUris: List<Uri>) {
         viewModelScope.launch {
             _isPosting.value = true
-            when (val result = postRepository.createPost(text, imageUris)) {
-                is PostResult.Success -> { /* лента обновится через observePosts */ }
+            val boardRef = _selectedBoard.value
+            val attachedBoard = boardRef?.let { ref -> renderBoardPreview(ref) }
+            if (boardRef != null && attachedBoard == null) {
+                _errorMessage.value = "Не удалось подготовить превью доски"
+                _isPosting.value = false
+                return@launch
+            }
+            when (val result = postRepository.createPost(text, imageUris, attachedBoard)) {
+                is PostResult.Success -> {
+                    _selectedBoard.value = null // лента обновится через observePosts
+                }
                 is PostResult.Error -> _errorMessage.value = result.message
             }
             _isPosting.value = false
+        }
+    }
+
+    // НОВОЕ: рендерит выбранную личную доску в статичный bitmap и сжимает в base64.
+    // Исходный CanvasDocument дальше нигде не используется — он остаётся только на устройстве.
+    private suspend fun renderBoardPreview(ref: CanvasLibraryBoardRef): AttachedBoardPreview? {
+        val uid = currentUserId ?: return null
+        val chatId = ref.chatId ?: return null
+        _isLoadingBoardPreview.value = true
+        return try {
+            val doc = canvasStore.load(uid, chatId, ref.boardId) ?: return null
+            val bitmap = CanvasRenderer.bitmap(doc, background = null)
+            val base64 = ImageUtils.compressBoardPreviewToBase64(bitmap) ?: return null
+            AttachedBoardPreview(title = doc.title, bitmapBase64 = base64, objectCount = doc.objects.size)
+        } catch (e: Exception) {
+            null
+        } finally {
+            _isLoadingBoardPreview.value = false
         }
     }
 

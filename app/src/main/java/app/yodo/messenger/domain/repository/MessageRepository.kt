@@ -18,7 +18,27 @@ data class ReplyContext(
 
 interface MessageRepository {
 
-    fun observeMessages(chatId: String, topicId: String? = null): Flow<List<Message>>
+    suspend fun clearLegacyPrivatePreview(chatId: String)
+
+    /**
+     * НОВОЕ (пагинация истории): limit != null — подписка только на последние `limit`
+     * сообщений (по возрастанию timestamp), вместо всей истории чата. null — прежнее
+     * поведение без ограничения (используется там, где нужна полная история, например
+     * в статистике канала).
+     */
+    fun observeMessages(chatId: String, topicId: String? = null, limit: Int? = null): Flow<List<Message>>
+
+    /**
+     * НОВОЕ (пагинация истории): одна страница истории «вверх» — сообщения старше
+     * beforeTimestamp (null = самая свежая страница), по возрастанию timestamp.
+     * Нужна для кнопки/скролла «загрузить ещё» и для раздела «Медиа, файлы, ссылки».
+     */
+    suspend fun getMessagesPage(
+        chatId: String,
+        topicId: String? = null,
+        beforeTimestamp: Long? = null,
+        limit: Int = 50
+    ): List<Message>
     // НОВОЕ (переработка каналов): одно сообщение (для превью поста в экране комментариев).
     fun observeMessage(chatId: String, messageId: String): Flow<Message?>
     // НОВОЕ (per-message исчезающие сообщения, как в Telegram): hasTtlOverride = true означает,
@@ -31,8 +51,10 @@ interface MessageRepository {
         hasTtlOverride: Boolean = false, ttlOverrideSeconds: Long? = null,
         // НОВОЕ (секретная фича «тихие публикации»): не триггерит push-уведомление.
         silent: Boolean = false,
-        topicId: String? = null
+        topicId: String? = null,
+        clientMessageId: String? = null
     ): SendMessageResult
+    suspend fun sendCanvasSnapshot(chatId: String, imageBase64: String, title: String, localId: String, topicId: String? = null): SendMessageResult
     suspend fun sendImageMessage(
         chatId: String, imageBase64: String, caption: String = "", isViewOnce: Boolean = false,
         topicId: String? = null
@@ -53,6 +75,9 @@ interface MessageRepository {
     suspend fun sendLocationMessage(chatId: String, lat: Double, lng: Double, topicId: String? = null): SendMessageResult
     // НОВОЕ (расширенные опросы): создание сообщения-опроса. closesAtMillis — необязательная
     // метка времени автозакрытия (для "расширенных" опросов); null означает бессрочный опрос.
+    suspend fun sendChecklistMessage(chatId: String, title: String, items: List<String>, topicId: String? = null): SendMessageResult
+    suspend fun setChecklistItemChecked(chatId: String, messageId: String, itemIndex: Int, checked: Boolean): SendMessageResult
+
     suspend fun sendPollMessage(
         chatId: String,
         question: String,
@@ -96,7 +121,10 @@ interface MessageRepository {
     // НОВОЕ (баг 10): «тихое удаление» — документ сообщения удаляется из Firestore целиком,
     // поэтому у всех участников сообщение исчезает бесследно (без заглушки «удалено»).
     suspend fun hardDeleteMessage(chatId: String, messageId: String): SendMessageResult
-    suspend fun markChatAsRead(chatId: String)
+    fun observeUnreadBadge(chatId: String, topicId: String? = null): Flow<app.yodo.messenger.domain.model.UnreadBadgeSnapshot>
+    suspend fun clearUnreadForVisibleMessages(chatId: String, visibleIds: List<String>, topicId: String? = null): Boolean
+    suspend fun markChatAsRead(chatId: String, expectedAccount: String? = null)
+    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>, topicId: String? = null)
     suspend fun toggleReaction(chatId: String, messageId: String, emoji: String)
     // НОВОЕ (F3): регистрируем просмотр поста канала (уникально по uid).
     suspend fun registerPostView(chatId: String, messageId: String)

@@ -1,5 +1,10 @@
 package app.yodo.messenger.features.settings
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.glassContentPadding
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,13 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -65,7 +67,8 @@ fun TwoFactorScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
+        contentUnderBars = true,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -74,18 +77,25 @@ fun TwoFactorScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back_cd))
                     }
-                }
+                },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = if (app.yodo.messenger.ui.theme.LocalInterfaceStyle.current == app.yodo.messenger.data.local.InterfaceStyle.EXPERIMENTAL) {
+                        androidx.compose.ui.graphics.Color.Transparent
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                )
             )
         }
     ) { padding ->
         if (uiState.isLoading) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding).padding(glassContentPadding()),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = colorTheme.primary)
             }
-            return@Scaffold
+            return@GlassScaffold
         }
 
         Column(
@@ -93,6 +103,7 @@ fun TwoFactorScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                .padding(glassContentPadding())
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {

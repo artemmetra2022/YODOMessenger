@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 
 /**
  * НОВОЕ (раздел «Школа»): «Выбор Предмета» из Telegram-бота — два уровня:
@@ -51,7 +52,7 @@ fun SchoolTeachersScreen(
     var selectedSubject by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             SchoolTopBar(
                 title = selectedSubject ?: "Учителя",

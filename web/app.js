@@ -27,8 +27,9 @@ import {
   getFirestore,
   doc,
   getDoc,
+  getDocFromServer,
+  runTransaction,
   getDocs,
-  addDoc,
   setDoc,
   collection,
   query,
@@ -48,6 +49,11 @@ import {
   arrayRemove,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { initQrLogin } from "./qr-login.js";
+import { initBoards } from "./boards.mjs";
+import { initNotifications } from "./notifications.mjs";
+import { initShortcuts } from "./shortcuts.mjs";
+import { sharedBoardApi } from "./board-firebase.mjs";
+import { protectPrivateData, isPrivate, keyFingerprint } from "./private-send.mjs";
 
 /* ------------------------------------------------------------------ */
 /* Firebase init                                                       */
@@ -174,30 +180,32 @@ const sendRateLimiter = new RateLimiter(5, 10_000);
 /* Уведомления браузера                                                 */
 /* ------------------------------------------------------------------ */
 
-let notificationsEnabled = false;
-
-async function ensureNotificationPermission() {
-  if (!("Notification" in window)) return false;
-  if (Notification.permission === "granted") { notificationsEnabled = true; return true; }
-  if (Notification.permission === "denied") return false;
-  const perm = await Notification.requestPermission();
-  notificationsEnabled = perm === "granted";
-  return notificationsEnabled;
-}
-
-function notifyNewMessage(title, body, chatId) {
-  if (!notificationsEnabled) return;
-  if (document.visibilityState === "visible" && activeChatId === chatId) return;
-  try {
-    const n = new Notification(title, { body, tag: "yodo-" + chatId, icon: undefined });
-    n.onclick = () => { window.focus(); n.close(); };
-  } catch (e) { /* игнорируем */ }
+const chatNotificationHeads = new Map();
+function observeChatNotification(chatId, chat) {
+  if (!currentUser || !chat) return;
+  const head = chat.lastMessageId || [chat.lastMessageTimestamp, chat.lastMessageSenderId].join(":");
+  const previous = chatNotificationHeads.get(chatId);
+  chatNotificationHeads.set(chatId, head);
+  if (previous == null || previous === head || !chat.lastMessageSenderId || chat.lastMessageSenderId === currentUser.uid || Date.now() - (chat.lastMessageTimestamp || 0) > 120000) return;
+  const owner = currentUser.uid;
+  const event = { chatId, messageId: head, senderId: chat.lastMessageSenderId,
+    title: chatDisplayName(chat), body: chat.lastMessage || "Новое сообщение", protectedText: isPrivate(chatId, chat) };
+  if (!chat.lastMessageId) { notifications.notify(event); return; }
+  getDocFromServer(doc(db, "chats", chatId, "messages", chat.lastMessageId)).then(snap => {
+    if (currentUser?.uid !== owner || !snap.exists()) return;
+    const m = snap.data();
+    if (m.isDeleted || (m.expiresAt && m.expiresAt <= Date.now())) return;
+    notifications.notify({...event, silent: m.silent === true, protectedText: event.protectedText || m.encrypted === true,
+      body: m.text || (m.imageBase64 ? "Фото" : m.voiceBase64 ? "Голосовое сообщение" : m.fileBase64 ? "Файл: " + (m.fileName || "") : event.body) });
+  }).catch(() => { /* No plaintext fallback and no stale banner when message access fails. */ });
 }
 
 /* ------------------------------------------------------------------ */
 /* Состояние приложения                                                */
 /* ------------------------------------------------------------------ */
 
+const sentTextSession = new Map();
+let sendingMessage = false;
 let currentUser = null; // { uid, email, displayName, username }
 let chatsUnsub = null; // отписка слушателя списка чатов
 let messagesUnsub = null; // отписка слушателя сообщений
@@ -223,6 +231,21 @@ let allMessagesLoaded = false;
 
 // Вложение (фото) для следующей отправки
 let pendingImageBase64 = null;
+
+// Голосовое сообщение: состояние записи (MediaRecorder).
+// Модель данных — как в Android (MessageRepositoryImpl.sendVoiceMessage):
+// voiceBase64 + voiceDurationMs в документе сообщения, text = "".
+const VOICE_MAX_BASE64_LENGTH = 900_000;      // как AudioUtils.kt (лимит документа Firestore — 1 МБ)
+const VOICE_MAX_RECORDING_MS = 3 * 60 * 1000; // как AudioUtils.kt (≈ 240 КБ/мин base64)
+let voiceRecorder = null;
+let voiceStream = null;
+let voiceChunks = [];
+let voiceMimeType = "";
+let voiceRecording = false;
+let voiceStartedAt = 0;
+let voiceAction = null; // "send" | "discard" — что сделать, когда recorder остановится
+let voiceTimerInterval = null;
+let voiceMaxTimer = null;
 
 // Сообщение, на которое отвечаем (reply/цитирование)
 let pendingReply = null; // { id, senderId, senderName, text }
@@ -607,15 +630,25 @@ $("btn-resend-verification").addEventListener("click", async () => {
   }
 });
 
-$("btn-logout-from-verify").addEventListener("click", () => signOut(auth));
-$("btn-logout-from-blocked").addEventListener("click", () => signOut(auth));
-$("btn-logout").addEventListener("click", () => signOut(auth));
+function signOutWithCleanup() {
+  discardVoiceRecording(); // не оставляем запись после выхода
+  return signOut(auth);
+}
+
+$("btn-logout-from-verify").addEventListener("click", () => signOutWithCleanup());
+$("btn-logout-from-blocked").addEventListener("click", () => signOutWithCleanup());
+$("btn-logout").addEventListener("click", () => signOutWithCleanup());
 
 /* ------------------------------------------------------------------ */
 /* Auth state / навигация                                              */
 /* ------------------------------------------------------------------ */
 
 function resetSessionState() {
+  sentTextSession.clear();
+  notifications.setOwner(null);
+  shortcuts.reset();
+  chatNotificationHeads.clear();
+  boards.setContext(null, null, null);
   if (chatsUnsub) { chatsUnsub(); chatsUnsub = null; }
   if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
   if (blockedUnsub) { blockedUnsub(); blockedUnsub = null; }
@@ -632,6 +665,8 @@ function resetSessionState() {
   isAdmin = false;
   activeChatId = null;
   activeChatData = null;
+  notifications.setChat(null);
+  boards.setContext(currentUser?.uid, null, null);
   isBlocked = false;
   chatsCache.clear();
   oldestLoadedMessageDoc = null;
@@ -672,6 +707,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = { uid: user.uid, email: user.email };
+  notifications.setOwner(user.uid);
 
   // Глобальная блокировка: слушатель на свой документ (как Android-оверлей)
   blockedUnsub = onSnapshot(
@@ -767,6 +803,7 @@ function loadAppBanner() {
 
 async function enterApp() {
   if (!currentUser) return;
+  boards.setContext(currentUser.uid, null, null);
   // Подтягиваем профиль
   try {
     const snap = await getDoc(doc(db, "users", currentUser.uid));
@@ -783,7 +820,7 @@ async function enterApp() {
   listenChats();
   listenOfficialChannel();
   startPresenceHeartbeat();
-  ensureNotificationPermission();
+
 
   if (isAdmin) {
     // Админ: гарантируем существование официального канала, показываем кнопку "Поддержка".
@@ -834,6 +871,7 @@ function listenOfficialChannel() {
         const data = snap.data();
         data.id = snap.id;
         officialChannelData = data;
+        observeChatNotification(snap.id, data);
       } else {
         officialChannelData = null;
       }
@@ -912,6 +950,7 @@ function listenSupportChat() {
         const data = snap.data();
         data.id = snap.id;
         supportChatData = data;
+        observeChatNotification(snap.id, data);
       } else {
         supportChatData = null;
       }
@@ -926,7 +965,7 @@ function listenSupportChat() {
 }
 
 // Для админов: список всех бесед поддержки (собираем через chats where type == SUPPORT).
-// НОВОЕ: лимит 100 бесед — инбокс остаётся быстрым при большом потоке обращений.
+// НОВОЕ (перенос из main): лимит 100 бесед — инбокс остаётся быстрым при большом потоке обращений.
 function listenSupportConversations() {
   if (supportConversationsUnsub) supportConversationsUnsub();
   const q = query(collection(db, "chats"), where("type", "==", "SUPPORT"), limit(100));
@@ -947,13 +986,15 @@ $("btn-support-inbox").addEventListener("click", () => {
   viewingSupportInbox = true;
   activeChatId = null;
   activeChatData = null;
+  notifications.setChat(null);
+  boards.setContext(currentUser?.uid, null, null);
   $("chat-active").classList.add("hidden");
   $("chat-empty").classList.remove("hidden");
   document.getElementById("screen-app").classList.remove("chat-open");
   renderSupportInbox();
 });
 
-// НОВОЕ (инбокс поддержки): состояние фильтров вида.
+// НОВОЕ (перенос из main): состояние фильтров инбокса.
 let supportInboxFilter = "all"; // all | waiting | done
 let supportInboxSearch = "";
 const SUPPORT_INBOX_CAP = 100;
@@ -1110,6 +1151,8 @@ function listenChats() {
     snap.docChanges().forEach((change) => {
       const data = change.doc.data();
       data.id = change.doc.id;
+      if(change.type === "removed") { chatsCache.delete(change.doc.id); chatNotificationHeads.delete(change.doc.id); return; }
+      observeChatNotification(change.doc.id, data);
       chatsCache.set(change.doc.id, data);
     });
     // Удалённые чаты убираем
@@ -1151,7 +1194,7 @@ function buildChatListItem(chat) {
 }
 
 function renderChatList() {
-  // НОВОЕ: пока открыт инбокс поддержки, обычный список чатов его не затирает.
+  // НОВОЕ (перенос из main): пока открыт инбокс поддержки, обычный список чатов его не затирает.
   if (viewingSupportInbox) { renderSupportInbox(); return; }
   const listEl = $("chat-list");
   const chats = Array.from(chatsCache.values())
@@ -1174,11 +1217,11 @@ function renderChatList() {
     listEl.appendChild(buildChatListItem(chat));
   }
 
-  // НОВОЕ (Telegram-дизайн): применяем активный фильтр поиска после перерисовки.
+  // НОВОЕ (перенос из main): применяем активный фильтр поиска после перерисовки.
   applyChatSearchFilter();
 }
 
-/* НОВОЕ (Telegram-дизайн): фильтрация списка чатов по строке поиска.
+/* НОВОЕ (перенос из main): фильтрация списка чатов по строке поиска.
    Актуальные чаты поднимаются наверх, неактуальные — затемняются под ними. */
 function applyChatSearchFilter() {
   const searchEl = document.getElementById("chat-search");
@@ -1203,27 +1246,6 @@ function applyChatSearchFilter() {
 /* ------------------------------------------------------------------ */
 /* Открытие чата / сообщения                                           */
 /* ------------------------------------------------------------------ */
-
-// НОВОЕ (Telegram-дизайн): живой поиск по списку чатов + крестик очистки.
-const chatSearchInput = document.getElementById("chat-search");
-if (chatSearchInput) {
-  const searchClear = document.getElementById("chat-search-clear");
-  const updateClearBtn = () => {
-    if (searchClear) searchClear.classList.toggle("hidden", chatSearchInput.value.length === 0);
-  };
-  chatSearchInput.addEventListener("input", () => {
-    updateClearBtn();
-    applyChatSearchFilter();
-  });
-  if (searchClear) {
-    searchClear.addEventListener("click", () => {
-      chatSearchInput.value = "";
-      updateClearBtn();
-      applyChatSearchFilter();
-      chatSearchInput.focus();
-    });
-  }
-}
 
 function findChatData(chatId) {
   if (chatId === OFFICIAL_CHANNEL_ID) return officialChannelData;
@@ -1310,13 +1332,16 @@ function updateChannelSubscribeButton() {
 function openChat(chatId) {
   activeChatId = chatId;
   activeChatData = findChatData(chatId);
+  notifications.setChat(chatId, activeChatData ? chatDisplayName(activeChatData) : "YODO");
+  boards.setContext(currentUser?.uid, chatId, activeChatData);
+  $("private-web-notice").classList.toggle("hidden", !isPrivate(chatId, activeChatData));
   viewingSupportInbox = false;
   $("chat-subtitle").textContent = "";
   $("chat-subtitle").classList.remove("online");
   updateChatHeader();
   $("chat-empty").classList.add("hidden");
   $("chat-active").classList.remove("hidden");
-  // НОВОЕ: перезапуск анимации открытия (даже если чат уже был открыт).
+  // НОВОЕ (перенос из main): перезапуск анимации открытия чата.
   const chatActiveEl = $("chat-active");
   chatActiveEl.classList.remove("chat-entering");
   void chatActiveEl.offsetWidth; // принудительный reflow — сброс анимации
@@ -1327,6 +1352,7 @@ function openChat(chatId) {
   $("typing-indicator").classList.add("hidden");
   cancelPendingImage();
   cancelReply();
+  discardVoiceRecording();
   oldestLoadedMessageDoc = null;
   allMessagesLoaded = false;
   renderChatList();
@@ -1405,22 +1431,15 @@ function listenActiveMessages() {
       // (обновлять status может только сам получатель личного/группового чата).
       const readableHere = chatId !== OFFICIAL_CHANNEL_ID &&
         !(isAdmin && chatId.startsWith(SUPPORT_CHAT_PREFIX) && chatId !== supportChatIdFor(currentUser.uid));
-      if (readableHere && msg.senderId !== currentUser.uid && msg.status && msg.status !== "READ") {
-        updateDoc(doc(db, "chats", chatId, "messages", d.id), { status: "READ" }).catch(() => {});
+      if (readableHere && msg.senderId !== currentUser.uid && msg.status !== "READ" && !msg.encrypted && !document.hidden) {
+        acknowledgeRead(chatId, d.id).catch(() => {});
       }
     });
 
     if (wasNearBottom) container.scrollTop = container.scrollHeight;
 
-    // Уведомление о новом входящем сообщении
-    snap.docChanges().forEach((change) => {
-      if (change.type !== "added") return;
-      const msg = change.doc.data();
-      if (msg.senderId && msg.senderId !== currentUser.uid && Date.now() - (msg.timestamp || 0) < 5000) {
-        const name = activeChatData ? chatDisplayName(activeChatData) : "YODO";
-        notifyNewMessage(name, messagePreviewText(msg) || "Новое сообщение", chatId);
-      }
-    });
+    // Notifications are handled by chat-head subscriptions, including inactive chats.
+
   });
 }
 
@@ -1456,11 +1475,14 @@ $("btn-back").addEventListener("click", () => {
   clearTypingState();
   activeChatId = null;
   activeChatData = null;
+  notifications.setChat(null);
+  boards.setContext(currentUser?.uid, null, null);
   if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
   if (presenceUnsub) { presenceUnsub(); presenceUnsub = null; }
   if (typingUnsub) { typingUnsub(); typingUnsub = null; }
   cancelPendingImage();
   cancelReply();
+  discardVoiceRecording();
   $("btn-load-more").classList.add("hidden");
   $("chat-active").classList.add("hidden");
   $("chat-empty").classList.remove("hidden");
@@ -1507,46 +1529,6 @@ function buildImageElement(imageBase64) {
   return img;
 }
 
-/* НОВОЕ: карточка совместной доски в сообщении — «Открыть доску» работает
-   и у получателя, поэтому доска редактируется вдвоём в реальном времени. */
-function buildBoardCard(msg) {
-  const card = document.createElement("div");
-  card.className = "msg-board-card";
-  const title = document.createElement("div");
-  title.className = "msg-board-title";
-  title.textContent = "🎨 " + (msg.boardTitle || "Совместная доска");
-  const hint = document.createElement("div");
-  hint.className = "msg-board-hint";
-  hint.textContent = "Совместное рисование — изменения видны всем сразу";
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "msg-board-open";
-  btn.textContent = "Открыть доску";
-  btn.addEventListener("click", async () => {
-    try {
-      const snap = await getDoc(doc(db, "boards", msg.boardId));
-      if (!snap.exists()) { alert("Доска была удалена"); return; }
-      openBoardEditor(msg.boardId, snap.data());
-    } catch (err) {
-      console.error("Открытие доски:", err);
-      alert("Не удалось открыть доску");
-    }
-  });
-  card.appendChild(title);
-  card.appendChild(hint);
-  card.appendChild(btn);
-  return card;
-}
-
-/* НОВОЕ: единый текст-превью сообщения (список чатов, уведомления). */
-function messagePreviewText(msg) {
-  return msg.text ||
-    (msg.imageBase64 ? "📷 Фото" : "") ||
-    (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
-    (msg.boardId ? "🎨 Доска: " + (msg.boardTitle || "") : "") ||
-    "";
-}
-
 function buildReplyPreview(replyToSenderName, replyToText, replyToId) {
   const div = document.createElement("div");
   div.style.borderLeft = "3px solid var(--accent)";
@@ -1556,7 +1538,7 @@ function buildReplyPreview(replyToSenderName, replyToText, replyToId) {
   div.style.fontSize = "13px";
   div.style.cursor = "pointer";
   div.textContent = (replyToSenderName || "") + ": " + replyToText;
-  // НОВОЕ: клик по цитате прокручивает ленту к оригиналу и подсвечивает его.
+  // НОВОЕ (перенос из main): клик по цитате прокручивает ленту к оригиналу и подсвечивает его.
   div.title = "Перейти к сообщению";
   div.addEventListener("click", () => {
     if (replyToId) jumpToMessage(replyToId);
@@ -1564,8 +1546,9 @@ function buildReplyPreview(replyToSenderName, replyToText, replyToId) {
   return div;
 }
 
-/* НОВОЕ (переход к сообщению): ищем элемент по data-msg-id; если сообщение
-   ещё не загружено (старые страницы) — подгружаем историю и пробуем снова. */
+/* НОВОЕ (перенос из main): переход к сообщению по цитате. Ищем элемент по
+   data-msg-id; если сообщение ещё не загружено (старые страницы) —
+   подгружаем историю и пробуем снова. */
 function jumpToMessage(msgId, allowLoadMore = true) {
   const el = document.querySelector('#messages [data-msg-id="' + CSS.escape(msgId) + '"]');
   if (!el) {
@@ -1583,6 +1566,15 @@ function jumpToMessage(msgId, allowLoadMore = true) {
   setTimeout(() => el.classList.remove("msg-jump"), 1500);
 }
 
+/* НОВОЕ (перенос из main): единый текст-превью сообщения (список чатов, уведомления). */
+function messagePreviewText(msg) {
+  return msg.text ||
+    (msg.imageBase64 ? "📷 Фото" : "") ||
+    (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
+    (msg.voiceBase64 ? "🎤 Голосовое" : "") ||
+    "";
+}
+
 /* ------------------------------------------------------------------ */
 /* Reply / цитирование                                                  */
 /* ------------------------------------------------------------------ */
@@ -1594,15 +1586,13 @@ function cancelReply() {
 
 function startReply(msg) {
   if (!msg || msg.isDeleted) return;
+  if (msg.encrypted && !sentTextSession.has(msg.id)) { alert("Этот текст недоступен браузеру. Для ответа с цитатой откройте Android-приложение."); return; }
+  if (msg.encrypted) msg = { ...msg, ...sentTextSession.get(msg.id) };
   pendingReply = {
     id: msg.id,
     senderId: msg.senderId,
     senderName: msg.senderId === currentUser.uid ? "Вы" : senderNameForReply(msg.senderId),
-    text: msg.text ||
-      (msg.imageBase64 ? "📷 Фото" : "") ||
-      (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
-      (msg.boardId ? "🎨 Доска: " + (msg.boardTitle || "") : "") ||
-      "",
+    text: msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : ""))),
   };
   $("reply-preview-name").textContent = pendingReply.senderName;
   $("reply-preview-text").textContent = pendingReply.text;
@@ -1698,16 +1688,17 @@ function forwardableChatsList() {
 }
 
 function openForwardModal(msg) {
+  if (msg.encrypted === true) { alert("Для пересылки защищённого текста откройте Android-приложение."); return; }
+  if (msg.fileBase64) { alert("Пересылка файлов недоступна — сохраните файл и прикрепите заново."); return; }
   forwardingMessage = {
     text: msg.text || "",
     imageBase64: msg.imageBase64 || null,
+    voiceBase64: msg.voiceBase64 || null,
+    voiceDurationMs: msg.voiceDurationMs || 0,
+    voiceMimeType: msg.voiceMimeType || "",
     senderId: msg.senderId,
   };
-  $("forward-preview").textContent = msg.text ||
-    (msg.imageBase64 ? "📷 Фото" : "") ||
-    (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "") ||
-    (msg.boardId ? "🎨 Доска: " + (msg.boardTitle || "") : "") ||
-    "";
+  $("forward-preview").textContent = msg.text || (msg.imageBase64 ? "📷 Фото" : (msg.voiceBase64 ? "🎤 Голосовое сообщение" : (msg.fileBase64 ? "📄 " + (msg.fileName || "файл") : "")));
   $("forward-search-input").value = "";
   renderForwardResults(forwardableChatsList());
   $("modal-forward").classList.remove("hidden");
@@ -1752,44 +1743,15 @@ $("modal-forward").addEventListener("click", (e) => {
 async function sendForward(targetChatId) {
   if (!forwardingMessage) return;
   const fwd = forwardingMessage;
-  $("modal-forward").classList.add("hidden");
-  forwardingMessage = null;
-
+  const data = { forwardedFromSenderId: fwd.senderId, forwardedFromSenderName: senderNameForReply(fwd.senderId) };
+  if (fwd.text) data.text = fwd.text;
+  if (fwd.imageBase64) data.imageBase64 = fwd.imageBase64;
+  if (fwd.voiceBase64) Object.assign(data, { voiceBase64: fwd.voiceBase64, voiceDurationMs: fwd.voiceDurationMs || 0, voiceMimeType: fwd.voiceMimeType || "" });
   try {
-    const now = Date.now();
-    const chat = findChatData(targetChatId) || chatsCache.get(targetChatId);
-
-    const batch = writeBatch(db);
-    const msgRef = doc(collection(db, "chats", targetChatId, "messages"));
-    const msgData = {
-      senderId: currentUser.uid,
-      timestamp: now,
-      status: "SENT",
-      notified: false,
-      forwardedFromId: fwd.senderId,
-    };
-    if (fwd.text) msgData.text = fwd.text;
-    if (fwd.imageBase64) msgData.imageBase64 = fwd.imageBase64;
-    batch.set(msgRef, msgData);
-
-    const chatRef = doc(db, "chats", targetChatId);
-    const chatUpdate = {
-      lastMessage: (fwd.text || "📷 Фото"),
-      lastMessageTimestamp: now,
-      lastMessageSenderId: currentUser.uid,
-      lastMessageStatus: "SENT",
-    };
-    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
-    recipients.delete(currentUser.uid);
-    for (const uid of recipients) {
-      chatUpdate["unreadCounts." + uid] = increment(1);
-    }
-    batch.update(chatRef, chatUpdate);
-    await batch.commit();
-  } catch (err) {
-    console.error("Ошибка пересылки:", err);
-    alert("Не удалось переслать сообщение");
-  }
+    await sendWebMessage(targetChatId, data);
+    $("modal-forward").classList.add("hidden");
+    forwardingMessage = null;
+  } catch (err) { alert(err.message || "Не удалось переслать сообщение"); }
 }
 
 function buildMessageMeta(msg) {
@@ -1821,7 +1783,7 @@ function buildForwardedLabel() {
 function renderMessage(msg) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + (msg.senderId === currentUser.uid ? "out" : "in");
-  wrap.dataset.msgId = msg.id; // НОВОЕ: для перехода к сообщению по цитате
+  wrap.dataset.msgId = msg.id; // НОВОЕ (перенос из main): для перехода к сообщению по цитате
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble";
 
@@ -1830,7 +1792,7 @@ function renderMessage(msg) {
   } else {
     const isGroupLike = activeChatData && (activeChatData.type === "GROUP" || activeChatData.type === "CHANNEL");
     const isSupportLike = activeChatData && activeChatData.type === "SUPPORT";
-    if (msg.forwardedFromId) {
+    if (msg.forwardedFromId || msg.forwardedFromSenderId) {
       bubble.appendChild(buildForwardedLabel());
     } else if (msg.senderId !== currentUser.uid && (isGroupLike || isSupportLike)) {
       bubble.appendChild(buildSenderLabel(msg.senderId));
@@ -1838,17 +1800,21 @@ function renderMessage(msg) {
     if (msg.imageBase64) {
       bubble.appendChild(buildImageElement(msg.imageBase64));
     }
-    // НОВОЕ: вложение-файл и карточка совместной доски.
+    if (msg.voiceBase64) {
+      bubble.appendChild(buildVoicePlayer(msg));
+    }
+    // НОВОЕ (перенос из main): вложение-файл.
     if (msg.fileBase64) {
       bubble.appendChild(buildFileElement(msg));
     }
-    if (msg.boardId) {
-      bubble.appendChild(buildBoardCard(msg));
-    }
     if (msg.replyToText) {
-      bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText, msg.replyToId));
+      bubble.appendChild(buildReplyPreview(msg.replyToSenderName, msg.replyToText, msg.replyToMessageId || msg.replyToId));
     }
-    if (msg.text) {
+    if (msg.encrypted === true) {
+      const own = sentTextSession.get(msg.id);
+      if (own?.replyToText) bubble.appendChild(buildReplyPreview(own.replyToSenderName, own.replyToText, own.replyToMessageId || own.replyToId));
+      bubble.appendChild(document.createTextNode(own?.text || "🔒 Защищённый текст. Откройте Android-приложение."));
+    } else if (msg.text) {
       bubble.appendChild(document.createTextNode(msg.text));
     }
     const reactionsBar = buildReactionsBar(activeChatId, msg);
@@ -1886,8 +1852,8 @@ function renderMessage(msg) {
     forwardBtn.className = "msg-action-btn";
     forwardBtn.title = "Переслать";
     forwardBtn.textContent = "➡️";
-    // НОВОЕ: файлы и доски не пересылаем (данные тяжёлые/требуют ссылки на доску).
-    forwardBtn.disabled = !!(msg.fileBase64 || msg.boardId);
+    // НОВОЕ (перенос из main): файлы не пересылаем (тяжёлые base64-данные).
+    forwardBtn.disabled = !!msg.fileBase64;
     if (forwardBtn.disabled) forwardBtn.style.display = "none";
     forwardBtn.addEventListener("click", () => openForwardModal(msg));
     actions.appendChild(forwardBtn);
@@ -1917,104 +1883,33 @@ function senderNameFor(uid) {
 /* Отправка сообщения                                                   */
 /* ------------------------------------------------------------------ */
 
-/* НОВОЕ (Telegram-меню): клик по свёрнутой кнопке «+» — быстрое действие
-   по умолчанию (создать обычный чат); наведение раскрывает остальные. */
-const btnNewToggle = document.getElementById("btn-new-toggle");
-if (btnNewToggle) {
-  btnNewToggle.addEventListener("click", () => {
-    document.getElementById("btn-new-chat")?.click();
-  });
-}
-
-/* НОВОЕ (расширение ввода): пока в поле есть символы, форма переходит
-   в режим .typing — поле расширяется и закрывает кнопку вложений. */
-(function () {
-  const msgInput = document.getElementById("message-input");
-  const formSend = document.getElementById("form-send");
-  if (!msgInput || !formSend) return;
-  const update = () => formSend.classList.toggle("typing", msgInput.value.length > 0);
-  msgInput.addEventListener("input", update);
-  update();
-})();
-
 $("form-send").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const input = $("message-input");
-  const text = input.value.trim();
-  const imageBase64 = pendingImageBase64;
-  const file = pendingFile;
-  if ((!text && !imageBase64 && !file) || !activeChatId) return;
-  if (!canSendInActiveChat()) return; // read-only официальный канал для не-админов
-
-  // Rate limiting: не больше 5 отправок за 10 секунд (порт RateLimiter.kt)
-  if (!sendRateLimiter.tryAcquire()) {
-    const waitSec = Math.ceil(sendRateLimiter.retryAfterMillis() / 1000);
-    alert("Слишком много сообщений подряд. Подождите " + waitSec + " сек.");
-    return;
+  if (voiceRecording) { sendVoiceRecording(); return; }
+  if (sendingMessage || !activeChatId || !canSendInActiveChat()) return;
+  const input = $("message-input"), text = input.value.trim(), imageBase64 = pendingImageBase64, file = pendingFile;
+  if (!text && !imageBase64 && !file) return;
+  const targetId = activeChatId, uid = currentUser.uid, reply = pendingReply;
+  const data = {};
+  if (text) data.text = text;
+  if (imageBase64) data.imageBase64 = imageBase64;
+  if (file) {
+    // НОВОЕ (перенос из main): вложение-файл (документ, архив, аудио и т.д.)
+    data.fileBase64 = file.base64;
+    data.fileName = file.name;
+    data.fileSize = file.size;
+    data.fileMime = file.mime;
   }
-
-  const replySnapshot = pendingReply;
-  input.value = "";
-  cancelPendingImage();
-  cancelReply();
-  clearTypingState();
-
+  if (reply) Object.assign(data, { replyToMessageId: reply.id, replyToSenderName: reply.senderName, replyToText: reply.text });
+  sendingMessage = true;
+  input.disabled = true;
   try {
-    const now = Date.now();
-    const chat = activeChatData || findChatData(activeChatId);
-
-    // WriteBatch: сообщение + обновление чата (как sendRawMessage в Android)
-    const batch = writeBatch(db);
-    const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
-    const msgData = {
-      senderId: currentUser.uid,
-      timestamp: now,
-      status: "SENT",
-      notified: false,
-    };
-    if (text) msgData.text = text;
-    if (imageBase64) msgData.imageBase64 = imageBase64;
-    if (file) {
-      // НОВОЕ: вложение-файл (документ, архив, аудио и т.д.)
-      msgData.fileBase64 = file.base64;
-      msgData.fileName = file.name;
-      msgData.fileSize = file.size;
-      msgData.fileMime = file.mime;
+    await sendWebMessage(targetId, data);
+    if (currentUser?.uid === uid && activeChatId === targetId) {
+      input.value = ""; cancelPendingImage(); cancelReply(); clearTypingState();
     }
-    if (replySnapshot) {
-      msgData.replyToId = replySnapshot.id;
-      msgData.replyToSenderName = replySnapshot.senderName;
-      msgData.replyToText = replySnapshot.text;
-    }
-    batch.set(msgRef, msgData);
-
-    const chatRef = doc(db, "chats", activeChatId);
-    const attachmentPreview = imageBase64 ? "📷 Фото" : file ? "📄 " + (file.name || "файл") : "";
-    const chatUpdate = {
-      lastMessage: text || attachmentPreview || "Новое сообщение",
-      lastMessageTimestamp: now,
-      lastMessageSenderId: currentUser.uid,
-      lastMessageStatus: "SENT",
-    };
-
-    // Получатели непрочитанных: обычно все participantIds, кроме себя. Для беседы
-    // поддержки, когда отвечает админ, реальный получатель — владелец беседы
-    // (supportUserId), который в participantIds чата поддержки уже присутствует —
-    // но на случай расхождения схемы подстрахуемся им явно.
-    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
-    if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
-    recipients.delete(currentUser.uid);
-    for (const uid of recipients) {
-      chatUpdate["unreadCounts." + uid] = increment(1);
-    }
-
-    batch.update(chatRef, chatUpdate);
-    await batch.commit();
-  } catch (err) {
-    console.error("Ошибка отправки:", err);
-    input.value = text; // возвращаем текст в поле, чтобы не потерять
-    if (replySnapshot) startReply({ id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text, isDeleted: false });
-  }
+  } catch (err) { alert(err.message || "Не удалось отправить сообщение. Текст и вложение сохранены."); }
+  finally { sendingMessage = false; input.disabled = false; }
 });
 
 /* ------------------------------------------------------------------ */
@@ -2043,11 +1938,11 @@ $("message-input").addEventListener("input", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Вложения: изображения (с даунскейлом) и любые файлы (base64)         */
+/* Вложение изображения                                                 */
 /* ------------------------------------------------------------------ */
 
-// НОВОЕ: лимит несímage-файла. Firestore-документ ограничен ~1 МБ,
-// base64 раздувает данные на треть, поэтому сырой лимит — 700 КБ.
+// НОВОЕ (перенос из main): лимит не-image файла. Firestore-документ ограничен
+// ~1 МБ, base64 раздувает данные на треть, поэтому сырой лимит — 700 КБ.
 const MAX_FILE_BYTES = 700 * 1024;
 let pendingFile = null; // { base64, name, size, mime }
 
@@ -2098,7 +1993,7 @@ $("file-input").addEventListener("change", async () => {
       $("image-preview").classList.remove("hidden");
       $("file-preview").classList.add("hidden");
     } else {
-      // НОВОЕ: любые другие файлы — документы, архивы, аудио и т.д.
+      // НОВОЕ (перенос из main): любые другие файлы — документы, архивы, аудио и т.д.
       if (file.size > MAX_FILE_BYTES) {
         alert("Файл слишком большой: макс. 700 КБ (занимает ~1 МБ в base64)");
         return;
@@ -2124,7 +2019,7 @@ $("file-input").addEventListener("change", async () => {
   }
 });
 
-/* НОВОЕ: карточка файла в ленте — иконка, имя, размер, скачивание. */
+/* НОВОЕ (перенос из main): карточка файла в ленте — иконка, имя, размер, скачивание. */
 function buildFileElement(msg) {
   const row = document.createElement("div");
   row.className = "msg-file";
@@ -2180,6 +2075,261 @@ function downscaleImageToBase64(file, maxDim, quality) {
     reader.readAsDataURL(file);
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Голосовые сообщения (запись через MediaRecorder)                     */
+/* ------------------------------------------------------------------ */
+
+// Preferenc-порядок форматов: AAC в M4A — тот же формат записи, что в Android
+// (AudioUtils.kt). Если браузер не умеет AAC (Firefox) — opus в webm/ogg.
+function pickVoiceMimeType() {
+  if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+  const candidates = [
+    "audio/mp4;codecs=mp4a.40.2",
+    "audio/mp4",
+    "audio/webm;codecs=opus",
+    "audio/ogg;codecs=opus",
+  ];
+  for (const mime of candidates) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return "";
+}
+
+function formatVoiceDuration(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+}
+
+function showVoiceRecordingUi() {
+  $("voice-recording").classList.remove("hidden");
+  $("voice-recording-timer").textContent = "0:00";
+  $("btn-attach").disabled = true;
+  $("btn-record-voice").title = "Остановить и отправить";
+  $("message-input").placeholder = "Можно писать текст — отправится следом";
+}
+
+function hideVoiceRecordingUi() {
+  $("voice-recording").classList.add("hidden");
+  $("btn-attach").disabled = false;
+  $("btn-record-voice").title = "Голосовое сообщение";
+  $("message-input").placeholder = "Сообщение...";
+}
+
+async function startVoiceRecording() {
+  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("Запись голосовых сообщений не поддерживается этим браузером");
+    return;
+  }
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false,
+    });
+  } catch (err) {
+    alert("Не удалось получить доступ к микрофону: " + (err.name || "ошибка"));
+    return;
+  }
+  voiceMimeType = pickVoiceMimeType();
+  try {
+    const options = { audioBitsPerSecond: 32_000 }; // 32 kbps моно — как в AudioUtils.kt
+    if (voiceMimeType) options.mimeType = voiceMimeType;
+    voiceRecorder = new MediaRecorder(voiceStream, options);
+  } catch (err) {
+    console.error("MediaRecorder init:", err);
+    cleanupVoiceCapture();
+    alert("Не удалось запустить запись: " + (err.message || "ошибка"));
+    return;
+  }
+  voiceChunks = [];
+  voiceAction = null;
+  voiceRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) voiceChunks.push(e.data);
+  };
+  voiceRecorder.onerror = () => discardVoiceRecording();
+  voiceRecorder.onstop = () => finishVoiceRecording();
+  voiceRecorder.start(250);
+  voiceRecording = true;
+  voiceStartedAt = Date.now();
+  showVoiceRecordingUi();
+  voiceTimerInterval = setInterval(() => {
+    $("voice-recording-timer").textContent = formatVoiceDuration(Date.now() - voiceStartedAt);
+  }, 250);
+  // Автостоп на 3 минутах — как MAX_RECORDING_MS в Android
+  voiceMaxTimer = setTimeout(() => {
+    if (voiceRecording) sendVoiceRecording();
+  }, VOICE_MAX_RECORDING_MS);
+}
+
+// Остановить запись и отправить (кнопка отправки, повторный 🎤 или лимит 3 мин)
+function sendVoiceRecording() {
+  if (!voiceRecorder || !voiceRecording) return;
+  voiceAction = "send";
+  try { voiceRecorder.stop(); } catch (e) { finishVoiceRecording(); }
+}
+
+// Остановить запись и выбросить результат (крестик)
+function discardVoiceRecording() {
+  voiceAction = "discard";
+  if (voiceRecorder && voiceRecording) {
+    try { voiceRecorder.stop(); } catch (e) { /**/ }
+  }
+  finishVoiceRecording(); // если recorder.stop() уже отработал — просто подчистим
+}
+
+function cleanupVoiceCapture() {
+  if (voiceTimerInterval) { clearInterval(voiceTimerInterval); voiceTimerInterval = null; }
+  if (voiceMaxTimer) { clearTimeout(voiceMaxTimer); voiceMaxTimer = null; }
+  if (voiceStream) {
+    voiceStream.getTracks().forEach((t) => t.stop());
+    voiceStream = null;
+  }
+  voiceRecorder = null;
+  voiceRecording = false;
+  voiceMimeType = "";
+}
+
+async function finishVoiceRecording() {
+  const elapsedMs = voiceRecording && voiceStartedAt ? Date.now() - voiceStartedAt : 0;
+  const chunks = voiceChunks;
+  const mimeType = voiceMimeType;
+  cleanupVoiceCapture();
+  voiceChunks = [];
+  hideVoiceRecordingUi();
+  if (voiceAction !== "send") { voiceAction = null; return; }
+  voiceAction = null;
+
+  try {
+    if (!activeChatId) return;
+    const blob = new Blob(chunks, mimeType ? { type: mimeType } : {});
+    if (blob.size === 0) { alert("Записать не удалось — сообщение не отправлено."); return; }
+    const base64 = await blobToBase64(blob);
+    if (base64.length > VOICE_MAX_BASE64_LENGTH) {
+      alert("Голосовое сообщение слишком длинное. Максимум — примерно 3 минуты.");
+      return;
+    }
+    await sendVoiceMessage(base64, elapsedMs, mimeType);
+  } catch (err) {
+    console.error("Ошибка обработки голосового:", err);
+    alert("Не удалось обработать голосовое сообщение");
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const result = reader.result || "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : "");
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Отправка: writeBatch «сообщение + lastMessage чата», как sendRawMessage в Android.
+// voiceMimeType — доп. поле, полезное только веб-клиенту для воспроизведения;
+// Android такие неизвестные поля просто игнорирует при разборе.
+async function sendVoiceMessage(voiceBase64, durationMs, mimeType) {
+  if (!canSendInActiveChat()) return;
+  const data = { text: "", voiceBase64, voiceDurationMs: durationMs };
+  if (mimeType) data.voiceMimeType = mimeType;
+  await sendWebMessage(activeChatId, data);
+}
+
+/* Проигрывание голосового сообщения.
+   Mime-тип в документе не хранится (Android не пишет его), поэтому: если есть
+   поле voiceMimeType (наши веб-записи) — берём его; иначе «прощупываем» контейнер
+   по сигнатурам байт — ftyp/M4A (Android), EBML/WebM (Firefox) или OggS/OGG. */
+function voiceBase64ToBlob(voiceBase64, mimeHint) {
+  const bin = atob(voiceBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  let mime = mimeHint || "";
+  if (!mime && bytes.length > 12) {
+    if (String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) === "ftyp") mime = "audio/mp4";
+  }
+  if (!mime && bytes.length > 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) mime = "audio/webm";
+  if (!mime && bytes.length > 4 && bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) mime = "audio/ogg";
+  return new Blob([bytes], mime ? { type: mime } : {});
+}
+
+function buildVoicePlayer(msg) {
+  const wrap = document.createElement("div");
+  wrap.className = "voice-msg";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "voice-play";
+  btn.textContent = "▶";
+  btn.title = "Прослушать голосовое сообщение";
+
+  const duration = document.createElement("span");
+  duration.className = "voice-duration";
+  duration.textContent = msg.voiceDurationMs ? formatVoiceDuration(msg.voiceDurationMs) : "🎤";
+
+  wrap.appendChild(btn);
+  wrap.appendChild(duration);
+
+  let audio = null;
+  let objectUrl = null;
+
+  btn.addEventListener("click", () => {
+    if (audio && !audio.paused) {
+      audio.pause();
+      btn.textContent = "▶";
+      return;
+    }
+    if (audio) {
+      btn.textContent = "⏸";
+      audio.play().catch(() => { btn.textContent = "▶"; });
+      return;
+    }
+    try {
+      const blob = voiceBase64ToBlob(msg.voiceBase64, msg.voiceMimeType);
+      if (!blob.size) throw new Error("пустое аудио");
+      objectUrl = URL.createObjectURL(blob);
+      audio = new Audio(objectUrl);
+      audio.addEventListener("ended", () => {
+        btn.textContent = "▶";
+        if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+        audio = null; // следующее прослушивание — с чистого листа
+      });
+      audio.addEventListener("error", () => {
+        btn.textContent = "▶";
+        releaseVoiceAudio();
+      });
+      btn.textContent = "⏸";
+      audio.play().catch(() => { btn.textContent = "▶"; });
+    } catch (err) {
+      console.error("Ошибка воспроизведения:", err);
+      releaseVoiceAudio();
+      alert("Не удалось воспроизвести голосовое сообщение");
+    }
+  });
+
+  function releaseVoiceAudio() {
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    audio = null;
+    btn.textContent = "▶";
+  }
+
+  return wrap;
+}
+
+/* Обработчики кнопок */
+$("btn-record-voice").addEventListener("click", () => {
+  if (voiceRecording) sendVoiceRecording();
+  else startVoiceRecording();
+});
+$("btn-cancel-voice").addEventListener("click", () => {
+  if (voiceRecording) discardVoiceRecording();
+  else { hideVoiceRecordingUi(); cleanupVoiceCapture(); }
+});
+window.addEventListener("beforeunload", () => {
+  if (voiceRecording) discardVoiceRecording();
+});
 
 /* ------------------------------------------------------------------ */
 /* Новый чат: поиск пользователей                                       */
@@ -2754,20 +2904,13 @@ function resetSettingsModalFields() {
   $("settings-new-password-confirm").value = "";
   $("settings-pin-new").value = "";
   $("settings-pin-confirm").value = "";
-  $("settings-notifications-hint").textContent =
-    ("Notification" in window)
-      ? (Notification.permission === "denied"
-          ? "Уведомления заблокированы в настройках браузера."
-          : "")
-      : "Ваш браузер не поддерживает уведомления.";
-  $("settings-notifications-toggle").checked = notificationsEnabled;
-  $("settings-notifications-toggle").disabled = ("Notification" in window) ? Notification.permission === "denied" : true;
+  notifications.refresh();
 
   updatePinStatusLabel();
 }
 
-/* НОВОЕ: постраничная навигация настроек — разделы открываются по одному,
-   список разделов виден только на главном экране настроек. */
+// НОВОЕ (перенос из main): постраничная навигация настроек — разделы
+// открываются по одному, список разделов виден только на главном экране.
 const SETTINGS_TITLES = {
   profile: "Профиль",
   privacy: "Приватность",
@@ -2777,6 +2920,7 @@ const SETTINGS_TITLES = {
 };
 const settingsCard = document.querySelector("#modal-settings .settings-card");
 const settingsBody = document.querySelector("#modal-settings .settings-body");
+const btnSettingsBack = document.getElementById("btn-settings-back");
 
 function showSettingsMainView() {
   if (settingsCard) settingsCard.classList.remove("in-panel");
@@ -2802,7 +2946,6 @@ function showSettingsPanel(name) {
 document.querySelectorAll("#settings-nav .settings-nav-item").forEach((btn) => {
   btn.addEventListener("click", () => showSettingsPanel(btn.dataset.panel));
 });
-const btnSettingsBack = document.getElementById("btn-settings-back");
 if (btnSettingsBack) btnSettingsBack.addEventListener("click", showSettingsMainView);
 
 $("btn-open-settings").addEventListener("click", async () => {
@@ -2823,6 +2966,34 @@ $("modal-settings").addEventListener("click", (e) => {
     showSettingsMainView();
   }
 });
+
+/* НОВОЕ (перенос из main): автосохранение настроек. Текстовые поля профиля
+   — с задержкой (debounce 900 мс после последнего нажатия), переключатели —
+   сразу. Смена пароля и PIN остаются ручными. */
+(function enableSettingsAutosave() {
+  const timers = {};
+  const debounced = (key, fn, ms) => {
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(fn, ms);
+  };
+
+  ["settings-displayname", "settings-username-input", "settings-bio",
+   "settings-birthdate", "settings-location", "settings-website"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", () =>
+      debounced("profile", () => $("btn-save-profile").click(), 900));
+  });
+
+  ["settings-show-online", "settings-show-read-receipts", "settings-show-aboutme",
+   "settings-show-birthdate", "settings-show-location", "settings-show-website",
+   "settings-show-phone", "settings-show-email"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => $("btn-save-privacy").click());
+  });
+
+  document.getElementById("settings-autodelete-toggle")
+    ?.addEventListener("change", () => $("btn-save-autodelete").click());
+  document.getElementById("settings-autodelete-days")
+    ?.addEventListener("change", () => $("btn-save-autodelete").click());
+})();
 
 /* ------------------------------------------------------------------ */
 /* Загрузка аватара (сжатие в base64, как в Android ImageUtils)         */
@@ -3200,51 +3371,8 @@ $("btn-save-autodelete").addEventListener("click", async () => {
 /* Уведомления                                                          */
 /* ------------------------------------------------------------------ */
 
-$("settings-notifications-toggle").addEventListener("change", async (e) => {
-  if (e.target.checked) {
-    const granted = await ensureNotificationPermission();
-    e.target.checked = granted;
-    if (!granted) {
-      $("settings-notifications-hint").textContent = "Разрешение на уведомления не выдано.";
-    }
-  } else {
-    notificationsEnabled = false;
-  }
-});
+// Notification preference handlers live in notifications.mjs.
 
-/* ------------------------------------------------------------------ */
-/* НОВОЕ (автосохранение настроек): правки сохраняются сами.            */
-/* Текстовые поля профиля — с задержкой (debounce 900 мс после          */
-/* последнего нажатия), переключатели — сразу. Смена пароля и PIN       */
-/* остаются ручными — их нельзя сохранить «по случайности».             */
-/* ------------------------------------------------------------------ */
-(function enableSettingsAutosave() {
-  const timers = {};
-  const debounced = (key, fn, ms) => {
-    clearTimeout(timers[key]);
-    timers[key] = setTimeout(fn, ms);
-  };
-
-  // Профиль: автосохранение после паузы в наборе.
-  ["settings-displayname", "settings-username-input", "settings-bio",
-   "settings-birthdate", "settings-location", "settings-website"].forEach((id) => {
-    const el = document.getElementById(id);
-    el?.addEventListener("input", () => debounced("profile", () => $("btn-save-profile").click(), 900));
-  });
-
-  // Приватность: мгновенно при переключении тумблера.
-  ["settings-show-online", "settings-show-read-receipts", "settings-show-aboutme",
-   "settings-show-birthdate", "settings-show-location", "settings-show-website",
-   "settings-show-phone", "settings-show-email"].forEach((id) => {
-    document.getElementById(id)?.addEventListener("change", () => $("btn-save-privacy").click());
-  });
-
-  // Автоудаление: тумблер и слайдер дней.
-  document.getElementById("settings-autodelete-toggle")
-    ?.addEventListener("change", () => $("btn-save-autodelete").click());
-  document.getElementById("settings-autodelete-days")
-    ?.addEventListener("change", () => $("btn-save-autodelete").click());
-})();
 
 
 /* ------------------------------------------------------------------ */
@@ -3419,358 +3547,163 @@ $("settings-notifications-toggle").addEventListener("change", async (e) => {
   setInterval(updateFaqState, 300);
 })();
 
-/* ------------------------------------------------------------------ */
-/* НОВОЕ: Доски (рисование в веб-версии).                              */
-/* Хранение: Firestore-коллекция boards/{id} —                         */
-/*   { ownerUid, title, strokes, createdAt, updatedAt }.                */
-/* strokes: [{ color, size, erase, points: [[x,y], ...] }], координаты  */
-/* нормализованы в 0..1, поэтому доска масштабируется под любое окно.   */
-/* Автосохранение с задержкой; можно открыть доску и продолжить работу. */
-/* ------------------------------------------------------------------ */
-
-const BOARD_W = 1000;
-const BOARD_H = 700;
-let currentBoardId = null;
-let currentBoardStrokes = [];
-let boardTool = { color: "#1c1c1e", size: 6, erase: false };
-let boardDrawing = null; // штрих, который рисуют прямо сейчас
-let boardSaveTimer = null;
-let boardEditorUnsub = null; // НОВОЕ: realtime-подписка на доску
-
-const boardModal = $("modal-boards");
-const boardEditorModal = $("modal-board-editor");
-const boardCanvas = $("board-canvas");
-
-/* НОВОЕ (совместные доски): подписка на Firestore-документ доски.
-   Штрихи объединяются по клиентским id (sid): удалённые — авторитетны,
-   локальные, ещё не сохранённые, добавляются к ним и сортируются по
-   времени создания (t). Так рисование у двух людей не затирает друг друга. */
-function mergeBoardStrokes(remote) {
-  const remoteSids = new Set(remote.map((s) => s.sid).filter(Boolean));
-  const pending = currentBoardStrokes.filter((s) => s.sid && !remoteSids.has(s.sid));
-  currentBoardStrokes = remote.concat(pending).sort((a, b) => (a.t || 0) - (b.t || 0));
+/* Web/Android compatibility: one protected send path for text, media and forwards. */
+async function browserTrust(owner, uid, encoded) {
+  const fingerprint = await keyFingerprint(encoded);
+  const storageKey = "yodo-web-key-trust:" + owner + ":" + uid;
+  const old = localStorage.getItem(storageKey);
+  if (old && old !== fingerprint) {
+    const label = uid === owner ? "вашего аккаунта" : "собеседника";
+    throw new Error("Ключ " + label + " изменился. Отправка остановлена. Откройте «Ключи» в уведомлении над полем ввода и сверьте отпечатки.");
+  }
+  if (!old) localStorage.setItem(storageKey, fingerprint);
 }
-
-function subscribeBoardLive(id) {
-  if (boardEditorUnsub) { boardEditorUnsub(); boardEditorUnsub = null; }
-  if (!id) return;
-  boardEditorUnsub = onSnapshot(doc(db, "boards", id), (snap) => {
-    if (!snap.exists() || !snap.data().strokes) return;
-    mergeBoardStrokes(snap.data().strokes);
-    redrawBoard();
-    // Своё сохранение тоже приходит по снапшоту — статус обновляем.
-    if (currentBoardId === id) $("board-save-status").textContent = "Сохранено ✓";
-  }, (err) => {
-    console.error("Realtime доски:", err);
+async function sendWebMessage(chatId, original) {
+  const uid = currentUser?.uid;
+  if (!uid) throw new Error("Войдите в аккаунт");
+  if (!sendRateLimiter.tryAcquire()) throw new Error("Слишком много сообщений. Подождите несколько секунд.");
+  const chatRef = doc(db, "chats", chatId);
+  const snapshot = await getDocFromServer(chatRef);
+  if (!snapshot.exists()) throw new Error("Чат недоступен");
+  const chat = snapshot.data();
+  const data = await protectPrivateData(chatId, chat, uid, original,
+    async recipient => (await getDocFromServer(doc(db, "users", recipient))).data()?.publicKey,
+    (recipient, key) => browserTrust(uid, recipient, key));
+  if (currentUser?.uid !== uid) throw new Error("Аккаунт изменился. Сообщение не отправлено.");
+  const now = Date.now(), recipients = [...new Set(chat.participantIds || [])].filter(id => id !== uid);
+  Object.assign(data, { senderId: uid, timestamp: now, status: "SENT", notified: false,
+    sentAt: serverTimestamp(), recipientIds: recipients, deliveredTo: [], readBy: [] });
+  if (chat.disappearingTtlSeconds > 0) data.expiresAt = now + chat.disappearingTtlSeconds * 1000;
+  const msgRef = doc(collection(db, "chats", chatId, "messages"));
+  const preview = isPrivate(chatId, chat) ? (data.encrypted ? "🔒 Сообщение" : "Личное сообщение") :
+    (original.text || (data.imageBase64 ? "📷 Фото" : (data.voiceBase64 ? "🎤 Голосовое сообщение" : (data.fileBase64 ? "📄 " + (data.fileName || "файл") : ""))));
+  const updates = { lastMessage: preview, lastMessageTimestamp: now, lastMessageSenderId: uid,
+    lastMessageStatus: "SENT", lastMessageId: msgRef.id, lastMessagePlain: deleteField() };
+  for (const id of recipients) updates["unreadCounts." + id] = increment(1);
+  // Cache only in this authenticated tab, never in Firestore or browser persistent storage.
+  if (data.encrypted) sentTextSession.set(msgRef.id, { ...original });
+  try {
+    if (chatId === "support_" + uid) {
+      await runTransaction(db, async tx => {
+        const fresh = await tx.get(chatRef);
+        if (currentUser?.uid !== uid) throw new Error("Аккаунт изменился");
+        if (fresh.data()?.lastMessageSenderId === uid && fresh.data()?.lastMessage) throw new Error("Дождитесь ответа поддержки.");
+        tx.set(msgRef, data); tx.update(chatRef, updates);
+      });
+    } else {
+      const batch = writeBatch(db); batch.set(msgRef, data); batch.update(chatRef, updates); await batch.commit();
+    }
+  } catch (e) { sentTextSession.delete(msgRef.id); throw e; }
+  return msgRef.id;
+}
+async function acknowledgeRead(chatId, messageId) {
+  const uid = currentUser?.uid;
+  const ref = doc(db, "chats", chatId, "messages", messageId);
+  await runTransaction(db, async tx => {
+    const s = await tx.get(ref); if (!s.exists() || currentUser?.uid !== uid) return;
+    const m = s.data(); if (m.senderId === uid || m.encrypted) return;
+    if (!Array.isArray(m.recipientIds)) { tx.update(ref, { status: "READ" }); return; }
+    if (!m.recipientIds.includes(uid) || (m.readBy || []).includes(uid)) return;
+    const readBy = [...new Set([...(m.readBy || []), uid])], deliveredTo = [...new Set([...(m.deliveredTo || []), uid])];
+    const status = m.recipientIds.every(id => readBy.includes(id)) ? "READ" : m.recipientIds.every(id => deliveredTo.includes(id)) ? "DELIVERED" : "SENT";
+    tx.update(ref, { readBy, deliveredTo, status });
   });
 }
-
-function newStrokeSid() {
-  return currentUser.uid.slice(0, 6) + "-" + Math.random().toString(36).slice(2, 8);
-}
-
-function redrawBoard() {
-  const ctx = boardCanvas.getContext("2d");
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, BOARD_W, BOARD_H);
-  for (const s of currentBoardStrokes) {
-    if (!s.points || !s.points.length) continue;
-    ctx.globalCompositeOperation = s.erase ? "destination-out" : "source-over";
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = s.size;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(s.points[0][0] * BOARD_W, s.points[0][1] * BOARD_H);
-    if (s.points.length === 1) {
-      // Одиночный клик — рисуем точку.
-      ctx.lineTo(s.points[0][0] * BOARD_W + 0.01, s.points[0][1] * BOARD_H);
-    } else {
-      for (let i = 1; i < s.points.length; i++) {
-        ctx.lineTo(s.points[i][0] * BOARD_W, s.points[i][1] * BOARD_H);
+$("btn-web-keys").onclick = async () => {
+  const uid = currentUser?.uid, chat = activeChatData;
+  if (!uid || !isPrivate(activeChatId || "", chat)) return;
+  try {
+    for (const id of [...new Set(chat.participantIds || [])]) {
+      const encoded = (await getDocFromServer(doc(db, "users", id))).data()?.publicKey;
+      const fp = await keyFingerprint(encoded), key = "yodo-web-key-trust:" + uid + ":" + id;
+      const old = localStorage.getItem(key);
+      const readable = fp.match(/.{1,4}/g).join(" ");
+      if (confirm((id === uid ? "Ключ вашего телефона" : "Ключ собеседника") + "\nSHA-256: " + readable +
+        (old && old !== fp ? "\nВНИМАНИЕ: ключ изменился!" : "") +
+        "\nСверьте отпечаток в Android → Проверка ключей по независимому каналу. Подтверждаете совпадение?")) {
+        const again = (await getDocFromServer(doc(db, "users", id))).data()?.publicKey;
+        if (currentUser?.uid !== uid || await keyFingerprint(again) !== fp) throw new Error("Ключ или аккаунт изменился. Повторите проверку.");
+        localStorage.setItem(key, fp);
       }
     }
-    ctx.stroke();
-  }
-  ctx.globalCompositeOperation = "source-over";
-}
-
-function boardPointFromEvent(e) {
-  const r = boardCanvas.getBoundingClientRect();
-  const clamp = (v) => Math.min(1, Math.max(0, v));
-  return [
-    clamp((e.clientX - r.left) / r.width),
-    clamp((e.clientY - r.top) / r.height),
-  ];
-}
-
-/* Автосохранение ---------------------------------------------------- */
-function scheduleBoardSave(delay = 800) {
-  if (!currentBoardId) return;
-  $("board-save-status").textContent = "Сохранение…";
-  clearTimeout(boardSaveTimer);
-  boardSaveTimer = setTimeout(saveBoardNow, delay);
-}
-
-async function saveBoardNow() {
-  if (!currentBoardId) return;
-  clearTimeout(boardSaveTimer);
-  try {
-    await setDoc(
-      doc(db, "boards", currentBoardId),
-      {
-        title: ($("board-title-input").value.trim() || "Доска").slice(0, 60),
-        strokes: currentBoardStrokes,
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    );
-    $("board-save-status").textContent = "Сохранено ✓";
-  } catch (err) {
-    console.error("Сохранение доски:", err);
-    $("board-save-status").textContent = "Ошибка сохранения";
-  }
-}
-
-/* Список досок ------------------------------------------------------- */
-async function renderBoardsList() {
-  const listEl = $("boards-list");
-  listEl.innerHTML = '<div class="boards-empty">Загрузка…</div>';
-  try {
-    // where + orderBy требуют составной индекс, поэтому сортируем на клиенте.
-    const snap = await getDocs(
-      query(collection(db, "boards"), where("ownerUid", "==", currentUser.uid), limit(50))
-    );
-    const boards = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-    listEl.innerHTML = "";
-    if (!boards.length) {
-      listEl.innerHTML = '<div class="boards-empty">Досок пока нет — создайте первую!</div>';
-      return;
-    }
-    for (const b of boards) {
-      const row = document.createElement("div");
-      row.className = "board-row";
-      const dateStr = b.updatedAt ? new Date(b.updatedAt).toLocaleString() : "";
-      row.innerHTML =
-        '<span class="board-row-icon">🎨</span>' +
-        '<span class="board-row-title">' + esc(b.title || "Доска") + "</span>" +
-        '<span class="board-row-date">' + esc(dateStr) + "</span>";
-      const del = document.createElement("button");
-      del.className = "board-row-del";
-      del.textContent = "🗑️";
-      del.title = "Удалить";
-      del.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        if (!confirm("Удалить доску «" + (b.title || "Доска") + "»?")) return;
-        try {
-          await deleteDoc(doc(db, "boards", b.id));
-          if (currentBoardId === b.id) closeBoardEditor(false);
-          renderBoardsList();
-        } catch (err) {
-          console.error("Удаление доски:", err);
-        }
-      });
-      row.appendChild(del);
-      row.addEventListener("click", () => openBoardEditor(b.id, b));
-      listEl.appendChild(row);
-    }
-  } catch (err) {
-    console.error("Список досок:", err);
-    listEl.innerHTML = '<div class="boards-empty">Не удалось загрузить доски</div>';
-  }
-}
-
-/* Открытие / создание / закрытие ------------------------------------- */
-function openBoardEditor(id, data) {
-  currentBoardId = id;
-  currentBoardStrokes = Array.isArray(data && data.strokes) ? data.strokes.map((s) => ({
-    color: s.color || "#1c1c1e",
-    size: s.size || 6,
-    erase: !!s.erase,
-    points: Array.isArray(s.points) ? s.points : [],
-    sid: s.sid || null, // НОВОЕ: клиентский id штриха для синхронизации
-    t: s.t || 0,
-  })) : [];
-  $("board-title-input").value = (data && data.title) || "Новая доска";
-  $("board-save-status").textContent = "";
-  redrawBoard();
-  boardModal.classList.add("hidden");
-  boardEditorModal.classList.remove("hidden");
-  subscribeBoardLive(id); // НОВОЕ: realtime-синхронизация
-}
-
-async function createBoard() {
-  try {
-    const ref = await addDoc(collection(db, "boards"), {
-      ownerUid: currentUser.uid,
-      title: "Новая доска",
-      strokes: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    openBoardEditor(ref.id, null);
-  } catch (err) {
-    console.error("Создание доски:", err);
-    alert("Не удалось создать доску: " + (err.message || ""));
-  }
-}
-
-function closeBoardEditor(reopenList = true) {
-  if (boardEditorUnsub) { boardEditorUnsub(); boardEditorUnsub = null; }
-  saveBoardNow();
-  currentBoardId = null;
-  boardEditorModal.classList.add("hidden");
-  if (reopenList) {
-    boardModal.classList.remove("hidden");
-    renderBoardsList();
-  }
-}
-
-/* Инструменты --------------------------------------------------------- */
-$("board-swatches").addEventListener("click", (e) => {
-  const btn = e.target.closest(".board-swatch");
-  if (!btn) return;
-  boardTool.color = btn.dataset.color;
-  boardTool.erase = false;
-  $("btn-board-eraser").classList.remove("active");
-  document.querySelectorAll("#board-swatches .board-swatch")
-    .forEach((b) => b.classList.toggle("selected", b === btn));
+  } catch(e) { alert(e.message); }
+};
+const boards = initBoards({
+  showShortcuts: () => shortcuts.showHelp(),
+  ...sharedBoardApi(db, auth, { doc, collection, onSnapshot, runTransaction, serverTimestamp }),
+  canSend: () => canSendInActiveChat(),
+  async sendImage(canvas) {
+    const chatId = activeChatId;
+    if (!chatId || !canSendInActiveChat()) throw new Error("Выберите чат для отправки рисунка");
+    // Match Android image messages; JPEG bounds the Firestore document size.
+    const scaled = document.createElement("canvas");
+    const factor = Math.min(1, 1600 / Math.max(canvas.width, canvas.height));
+    scaled.width = Math.round(canvas.width * factor); scaled.height = Math.round(canvas.height * factor);
+    scaled.getContext("2d").drawImage(canvas, 0, 0, scaled.width, scaled.height);
+    let quality = .88, imageBase64;
+    do { imageBase64 = scaled.toDataURL("image/jpeg", quality).split(",")[1]; quality -= .1; } while (imageBase64.length > 900000 && quality > .25);
+    if (imageBase64.length > 900000) throw new Error("Рисунок слишком большой для отправки. Скачайте PNG.");
+    await sendWebMessage(chatId, { imageBase64, text: "" });
+  },
 });
 
-$("board-sizes").addEventListener("click", (e) => {
-  const btn = e.target.closest(".board-size-btn");
-  if (!btn) return;
-  boardTool.size = parseInt(btn.dataset.size, 10) || 6;
-  document.querySelectorAll("#board-sizes .board-size-btn")
-    .forEach((b) => b.classList.toggle("selected", b === btn));
+const notifications = initNotifications({ activeChatId: () => activeChatId, openChat });
+const shortcuts = initShortcuts({
+  signedIn: () => !!currentUser && !isBlocked && $("screen-app").classList.contains("active"),
+  activeChatId: () => activeChatId,
+  chats: () => {
+    const all = new Map(chatsCache);
+    if (officialChannelData) all.set(officialChannelData.id, officialChannelData);
+    if (supportChatData) all.set(supportChatData.id, supportChatData);
+    return [...all.values()].sort((a,b) => (b.lastMessageTimestamp||0)-(a.lastMessageTimestamp||0)).map(c=>({id:c.id,name:chatDisplayName(c)}));
+  },
+  openChat,
+  settings: () => $("btn-open-settings").click(),
+  boards: () => $("btn-boards").click(),
+  shared: () => { if(activeChatId&&!$("btn-shared-board").classList.contains("hidden")) $("btn-shared-board").click(); },
+  send: () => { if(activeChatId&&canSendInActiveChat()) $("form-send").requestSubmit(); },
+  mute: () => notifications.toggleMute(),
 });
 
-$("btn-board-eraser").addEventListener("click", () => {
-  boardTool.erase = !boardTool.erase;
-  $("btn-board-eraser").classList.toggle("active", boardTool.erase);
+/* ------------------------------------------------------------------ */
+/* НОВОЕ (перенос из main): мелкие улучшения UX.                        */
+/* ------------------------------------------------------------------ */
+
+// Клик по свёрнутой кнопке «+» — быстрое действие по умолчанию (новый чат);
+// наведение раскрывает остальные пункты.
+document.getElementById("btn-new-toggle")?.addEventListener("click", () => {
+  document.getElementById("btn-new-chat")?.click();
 });
 
-$("btn-board-undo").addEventListener("click", () => {
-  if (!currentBoardStrokes.length) return;
-  currentBoardStrokes.pop();
-  redrawBoard();
-  scheduleBoardSave();
-});
+// Пока в поле есть символы, форма переходит в режим .typing — поле
+// расширяется и закрывает кнопки вложений.
+(function () {
+  const msgInput = document.getElementById("message-input");
+  const formSend = document.getElementById("form-send");
+  if (!msgInput || !formSend) return;
+  const update = () => formSend.classList.toggle("typing", msgInput.value.length > 0);
+  msgInput.addEventListener("input", update);
+  update();
+})();
 
-$("btn-board-clear").addEventListener("click", () => {
-  if (!currentBoardStrokes.length) return;
-  if (!confirm("Очистить всю доску?")) return;
-  currentBoardStrokes = [];
-  redrawBoard();
-  scheduleBoardSave();
-});
-
-$("board-title-input").addEventListener("input", () => scheduleBoardSave(1200));
-
-/* Рисование ------------------------------------------------------------ */
-boardCanvas.addEventListener("pointerdown", (e) => {
-  if (!currentBoardId) return;
-  e.preventDefault();
-  boardCanvas.setPointerCapture(e.pointerId);
-  boardDrawing = {
-    color: boardTool.color,
-    size: boardTool.size,
-    erase: boardTool.erase,
-    points: [boardPointFromEvent(e)],
+// Живой поиск по списку чатов + крестик очистки.
+(function () {
+  const searchInput = document.getElementById("chat-search");
+  if (!searchInput) return;
+  const searchClear = document.getElementById("chat-search-clear");
+  const updateClearBtn = () => {
+    if (searchClear) searchClear.classList.toggle("hidden", searchInput.value.length === 0);
   };
-});
-
-boardCanvas.addEventListener("pointermove", (e) => {
-  if (!boardDrawing) return;
-  const p = boardPointFromEvent(e);
-  const last = boardDrawing.points[boardDrawing.points.length - 1];
-  if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 0.004) return;
-  boardDrawing.points.push(p);
-  redrawBoard();
-});
-
-function finishBoardStroke() {
-  if (!boardDrawing) return;
-  // НОВОЕ: sid — клиентский id штриха (для объединения в реальном времени),
-  // t — время создания (для сортировки при слиянии).
-  boardDrawing.sid = newStrokeSid();
-  boardDrawing.t = Date.now();
-  currentBoardStrokes.push(boardDrawing);
-  boardDrawing = null;
-  redrawBoard();
-  scheduleBoardSave();
-}
-boardCanvas.addEventListener("pointerup", finishBoardStroke);
-boardCanvas.addEventListener("pointercancel", finishBoardStroke);
-
-/* НОВОЕ (совместные доски): отправка ссылки на доску в открытый чат.
-   Получатель открывает её по карточке и рисует вместе с автором —
-   realtime через Firestore-подписку (subscribeBoardLive). */
-$("btn-board-send").addEventListener("click", async () => {
-  if (!currentBoardId) return;
-  if (!activeChatId) { alert("Сначала откройте чат, куда отправить доску"); return; }
-  if (!canSendInActiveChat()) { alert("В этом чате нельзя отправлять сообщения"); return; }
-  const boardId = currentBoardId;
-  const boardTitle = ($("board-title-input").value.trim() || "Доска").slice(0, 60);
-  try {
-    await saveBoardNow();
-    const now = Date.now();
-    const chat = activeChatData || findChatData(activeChatId);
-    const batch = writeBatch(db);
-    const msgRef = doc(collection(db, "chats", activeChatId, "messages"));
-    batch.set(msgRef, {
-      senderId: currentUser.uid,
-      timestamp: now,
-      status: "SENT",
-      notified: false,
-      boardId,
-      boardTitle,
+  searchInput.addEventListener("input", () => {
+    updateClearBtn();
+    applyChatSearchFilter();
+  });
+  if (searchClear) {
+    searchClear.addEventListener("click", () => {
+      searchInput.value = "";
+      updateClearBtn();
+      applyChatSearchFilter();
+      searchInput.focus();
     });
-    const chatRef = doc(db, "chats", activeChatId);
-    const chatUpdate = {
-      lastMessage: "🎨 Доска: " + boardTitle,
-      lastMessageTimestamp: now,
-      lastMessageSenderId: currentUser.uid,
-      lastMessageStatus: "SENT",
-    };
-    const recipients = new Set(chat && chat.participantIds ? chat.participantIds : []);
-    if (chat && chat.supportUserId) recipients.add(chat.supportUserId);
-    recipients.delete(currentUser.uid);
-    for (const uid of recipients) {
-      chatUpdate["unreadCounts." + uid] = increment(1);
-    }
-    batch.update(chatRef, chatUpdate);
-    await batch.commit();
-    $("board-save-status").textContent = "Отправлено в чат ✓";
-  } catch (err) {
-    console.error("Отправка доски в чат:", err);
-    alert("Не удалось отправить доску в чат");
   }
-});
-
-/* Кнопки и модалки ------------------------------------------------------ */
-$("btn-new-board").addEventListener("click", () => {
-  boardModal.classList.remove("hidden");
-  renderBoardsList();
-});
-
-$("btn-create-board").addEventListener("click", createBoard);
-
-$("btn-close-boards-modal").addEventListener("click", () => {
-  boardModal.classList.add("hidden");
-});
-
-boardModal.addEventListener("click", (e) => {
-  if (e.target === boardModal) boardModal.classList.add("hidden");
-});
-
-$("btn-board-back").addEventListener("click", () => closeBoardEditor(true));
-$("btn-close-board-editor").addEventListener("click", () => closeBoardEditor(false));
-
-boardEditorModal.addEventListener("click", (e) => {
-  if (e.target === boardEditorModal) closeBoardEditor(false);
-});
+})();

@@ -4,6 +4,7 @@ import android.net.Uri
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.domain.model.Post
 import app.yodo.messenger.domain.model.PostComment
+import app.yodo.messenger.domain.repository.AttachedBoardPreview
 import app.yodo.messenger.domain.repository.PostRepository
 import app.yodo.messenger.domain.repository.PostResult
 import app.yodo.messenger.util.ImageUtils
@@ -45,11 +46,15 @@ class PostRepositoryImpl @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    override suspend fun createPost(text: String, imageUris: List<Uri>): PostResult {
+    override suspend fun createPost(
+        text: String,
+        imageUris: List<Uri>,
+        attachedBoard: AttachedBoardPreview?
+    ): PostResult {
         val user = firebaseAuth.currentUser ?: return PostResult.Error("Вы не авторизованы")
-        val trimmedText = text.trim().take(2000)
-        if (trimmedText.isBlank() && imageUris.isEmpty())
-            return PostResult.Error("Добавьте текст или фото")
+        val trimmedText = text.trim().take(4000) // увеличен лимит — теперь текст может содержать markdown-разметку
+        if (trimmedText.isBlank() && imageUris.isEmpty() && attachedBoard == null)
+            return PostResult.Error("Добавьте текст, фото или доску")
 
         return try {
             // Свежие данные автора (имя/аватар) — берём из документа пользователя,
@@ -76,7 +81,12 @@ class PostRepositoryImpl @Inject constructor(
                 "authorPhotoUrl" to authorPhotoUrl,
                 "text" to trimmedText,
                 "photosBase64" to photosBase64,
-                "createdAtMillis" to System.currentTimeMillis()
+                "createdAtMillis" to System.currentTimeMillis(),
+                // НОВОЕ: только статичное превью доски — исходное содержимое (CanvasDocument)
+                // никогда не покидает устройство автора.
+                "attachedBoardTitle" to attachedBoard?.title,
+                "attachedBoardPreviewBase64" to attachedBoard?.bitmapBase64,
+                "attachedBoardObjectCount" to attachedBoard?.objectCount
             )
             postRef.set(data).await()
             PostResult.Success
@@ -220,6 +230,9 @@ class PostRepositoryImpl @Inject constructor(
         likedBy = (get("likedBy") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
         views = (getLong("views") ?: 0L).toInt(),
         // НОВОЕ (AK): число комментариев для кнопки под постом.
-        commentCount = (getLong("commentCount") ?: 0L).toInt().coerceAtLeast(0)
+        commentCount = (getLong("commentCount") ?: 0L).toInt().coerceAtLeast(0),
+        attachedBoardTitle = getString("attachedBoardTitle"),
+        attachedBoardPreviewBase64 = getString("attachedBoardPreviewBase64"),
+        attachedBoardObjectCount = getLong("attachedBoardObjectCount")?.toInt()
     )
 }
