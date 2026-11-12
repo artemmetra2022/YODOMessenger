@@ -206,29 +206,68 @@
     <div id="app-main">
     <aside id="sidebar">
       <header id="sidebar-header">
-        <span class="app-title">YODO</span>
-        <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
-        <button id="btn-shortcuts" class="icon-btn" title="Горячие клавиши (F1)" aria-label="Горячие клавиши">?</button>
-        <!-- Стабильное всплывающее меню: занимает в шапке только место кнопки «+»,
-             поэтому при раскрытии соседние кнопки не сдвигаются и hover не мерцает. -->
-        <div id="new-actions">
-          <button id="btn-new-toggle" class="icon-btn" type="button" title="Создать"
-                  aria-label="Открыть меню создания" aria-haspopup="menu"
-                  aria-expanded="false" aria-controls="new-actions-menu">＋</button>
-          <div id="new-actions-menu" role="menu" aria-label="Создать">
-            <button id="btn-new-chat" class="icon-btn new-action" type="button" role="menuitem" title="Новый чат" aria-label="Новый чат">💬</button>
-            <button id="btn-new-group" class="icon-btn new-action" type="button" role="menuitem" title="Новая группа" aria-label="Новая группа">👥</button>
-            <button id="btn-new-channel" class="icon-btn new-action" type="button" role="menuitem" title="Новый канал" aria-label="Новый канал">📢</button>
-            <button id="btn-boards" class="icon-btn new-action" type="button" role="menuitem" title="Мои доски" aria-label="Мои доски">🎨</button>
+        <div class="sidebar-brand" aria-label="YODO Messenger">
+          <span class="sidebar-brand-mark" aria-hidden="true">Y</span>
+          <span class="sidebar-brand-copy">
+            <span class="sidebar-brand-name">YODO</span>
+            <span class="sidebar-brand-subtitle">Messenger</span>
+          </span>
+        </div>
+
+        <div class="sidebar-header-actions">
+          <button id="btn-support-inbox" class="sidebar-icon-btn hidden" type="button"
+                  title="Обращения в поддержку" aria-label="Обращения в поддержку">🔔</button>
+
+          <!-- Создание: компактная акцентная кнопка и вертикальное меню с подписями. -->
+          <div id="new-actions" class="sidebar-menu-anchor">
+            <button id="btn-new-toggle" class="sidebar-create-btn" type="button" title="Создать"
+                    aria-label="Открыть меню создания" aria-haspopup="menu"
+                    aria-expanded="false" aria-controls="new-actions-menu"><span class="sidebar-create-glyph" aria-hidden="true">＋</span></button>
+            <div id="new-actions-menu" class="sidebar-popover" role="menu" aria-label="Создать">
+              <div class="sidebar-popover-title">Создать</div>
+              <button id="btn-new-chat" class="sidebar-menu-item new-action" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">💬</span><span>Новый чат</span>
+              </button>
+              <button id="btn-new-group" class="sidebar-menu-item new-action" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">👥</span><span>Новая группа</span>
+              </button>
+              <button id="btn-new-channel" class="sidebar-menu-item new-action" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">📢</span><span>Новый канал</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Редко используемые действия убраны из шапки в одно аккуратное меню. -->
+          <div id="sidebar-actions" class="sidebar-menu-anchor">
+            <button id="btn-sidebar-menu" class="sidebar-icon-btn" type="button" title="Меню"
+                    aria-label="Открыть меню" aria-haspopup="menu"
+                    aria-expanded="false" aria-controls="sidebar-more-menu">•••</button>
+            <div id="sidebar-more-menu" class="sidebar-popover" role="menu" aria-label="Меню приложения">
+              <div class="sidebar-popover-title">YODO</div>
+              <button id="btn-boards" class="sidebar-menu-item" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">🎨</span><span>Мои доски</span>
+              </button>
+              <button id="btn-shortcuts" class="sidebar-menu-item" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">⌨️</span><span>Горячие клавиши</span><kbd>F1</kbd>
+              </button>
+              <button id="btn-open-settings" class="sidebar-menu-item" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">⚙️</span><span>Настройки</span>
+              </button>
+              <div class="sidebar-menu-separator" role="separator"></div>
+              <button id="btn-logout" class="sidebar-menu-item sidebar-menu-danger" type="button" role="menuitem">
+                <span class="sidebar-menu-icon" aria-hidden="true">↪</span><span>Выйти</span>
+              </button>
+            </div>
           </div>
         </div>
-        <button id="btn-open-settings" class="icon-btn" title="Настройки">⚙️</button>
-        <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
       </header>
-      <!-- НОВОЕ (перенос из main): строка поиска по списку чатов -->
+      <!-- Поиск визуально продолжает шапку и не конкурирует с действиями. -->
       <div id="sidebar-search">
-        <input type="text" id="chat-search" placeholder="Поиск" autocomplete="off">
-        <button type="button" id="chat-search-clear" class="hidden" title="Очистить">✕</button>
+        <svg class="sidebar-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path>
+        </svg>
+        <input type="text" id="chat-search" placeholder="Поиск по чатам" autocomplete="off" aria-label="Поиск по чатам">
+        <button type="button" id="chat-search-clear" class="hidden" title="Очистить" aria-label="Очистить поиск">✕</button>
       </div>
       <div id="chat-list"></div>
     </aside>
