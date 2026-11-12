@@ -1,5 +1,13 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.DropdownMenuItem
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -9,7 +17,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +35,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Comment
@@ -39,21 +49,16 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -146,7 +151,7 @@ fun ChannelProfileScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -167,29 +172,14 @@ fun ChannelProfileScreen(
                             IconButton(onClick = { shareMenuExpanded = true }) {
                                 Icon(Icons.Filled.Share, contentDescription = "Поделиться каналом")
                             }
-                            DropdownMenu(
-                                expanded = shareMenuExpanded,
-                                onDismissRequest = { shareMenuExpanded = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Просто ссылка") },
-                                    onClick = {
-                                        shareMenuExpanded = false
-                                        shareChannelInviteLink(context, uiState.profile!!)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Ссылка с описанием канала") },
-                                    onClick = {
-                                        shareMenuExpanded = false
-                                        shareChannelInviteLinkWithDescription(
-                                            context,
-                                            uiState.profile!!,
-                                            uiState.currentUser
-                                        )
-                                    }
-                                )
+                            if (shareMenuExpanded) {
+                                YodoActionSheet(title = "Поделиться каналом", subtitle = uiState.profile?.title,
+                                    onDismissRequest = { shareMenuExpanded = false }, actions = listOf(
+                                        YodoMenuAction("Только ссылка", Icons.Filled.Link, description = "Короткое приглашение в канал") { shareChannelInviteLink(context, uiState.profile!!) },
+                                        YodoMenuAction("Ссылка с описанием", Icons.Filled.Description, description = "О канале и отправителе приглашения") { shareChannelInviteLinkWithDescription(context, uiState.profile!!, uiState.currentUser) }
+                                    ))
                             }
+
                         }
                     }
                 }

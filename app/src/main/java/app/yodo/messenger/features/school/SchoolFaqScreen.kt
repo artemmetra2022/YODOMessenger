@@ -1,5 +1,6 @@
 package app.yodo.messenger.features.school
 
+import app.yodo.messenger.ui.components.GlassScaffold
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 
 /**
  * НОВОЕ (раздел «Школа»): FAQ — часто задаваемые вопросы о разделе
@@ -33,7 +34,7 @@ import androidx.compose.foundation.clickable
 fun SchoolFaqScreen(onBackClick: () -> Unit) {
     var expandedIndex by remember { mutableStateOf<Int?>(null) }
 
-    Scaffold(
+    GlassScaffold(
         topBar = { SchoolTopBar("FAQ", onBackClick) },
         containerColor = Color.Transparent
     ) { padding ->

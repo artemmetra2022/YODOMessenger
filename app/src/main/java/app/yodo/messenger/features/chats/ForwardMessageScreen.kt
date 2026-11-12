@@ -1,7 +1,9 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,7 +32,6 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -98,7 +99,7 @@ fun ForwardMessageScreen(
 
     val sections = groupChatsForForward(chats)
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {
@@ -426,15 +427,5 @@ private fun formatForwardTimestamp(millis: Long): String {
 
 @androidx.compose.runtime.Composable
 private fun formatForwardLastSeen(millis: Long): String {
-    val diff = System.currentTimeMillis() - millis
-    val minutes = diff / (60 * 1000)
-    val hours = diff / (60 * 60 * 1000)
-    val days = diff / (24 * 60 * 60 * 1000)
-    return when {
-        minutes < 1 -> stringResource(R.string.forward_just_now)
-        minutes < 60 -> "$minutes мин. назад"
-        hours < 24 -> "$hours ч. назад"
-        days == 1L -> stringResource(R.string.forward_yesterday)
-        else -> SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date(millis))
-    }
+    return app.yodo.messenger.util.LastSeenFormatter.format(millis)
 }

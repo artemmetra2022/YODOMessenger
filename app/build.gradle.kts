@@ -41,9 +41,12 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0-mvp"
 
+        // Publication date of this exact release; not a build or installation timestamp.
+        val releaseDate = (project.findProperty("releaseDate") as String?).orEmpty()
+            .takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }.orEmpty()
+        buildConfigField("String", "RELEASE_DATE", "\"$releaseDate\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        val openWeatherApiKey = (project.findProperty("OPENWEATHER_API_KEY") as String?).orEmpty()
-        buildConfigField("String", "OPENWEATHER_API_KEY", "\"$openWeatherApiKey\"")
         // НОВОЕ (OTA-обновления): репозиторий GitHub, из последнего релиза которого
         // приложение проверяет новую версию и откуда скачивает APK (см. UpdateRepositoryImpl).
         buildConfigField("String", "GITHUB_REPO", "\"artemmetra2022/YODOMessenger\"")
@@ -121,12 +124,19 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // Room (local DB) — 2.7.0+ добавляет полноценную поддержку KSP2 (2.6.1 её не имел,
     // что дополнительно повышало риск конфликтов между Room- и Hilt-процессорами в KSP).
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
+
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Виджеты рабочего стола (непрочитанные и погода)
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 
     // DataStore (preferences)
     implementation("androidx.datastore:datastore-preferences:1.1.1")

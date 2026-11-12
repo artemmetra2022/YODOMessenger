@@ -408,6 +408,10 @@ function startSettings() {
   const settingsRef = doc(db, "config/appSettings");
 
   onSnapshot(settingsRef, (snap) => {
+    const interval = snap.get("boardSyncIntervalMs");
+    const validInterval = Number.isInteger(interval) && interval >= 0 && interval <= 5000 ? interval : 0;
+    if (document.activeElement !== $("board-sync-ms")) $("board-sync-ms").value = String(validInterval);
+    $("board-sync-status").textContent = validInterval === 0 ? "Сейчас: в реальном времени" : `Сейчас: каждые ${validInterval} мс`;
     const hidden = snap.get("schoolSectionHidden") === true;
     $("toggle-school-hidden").checked = hidden;
 
@@ -445,6 +449,23 @@ function startSettings() {
     $("banner-start-at").value = toDatetimeLocal(snap.get("bannerStartAt"));
     $("banner-end-at").value = toDatetimeLocal(snap.get("bannerEndAt"));
   }, handleErr("Не удалось загрузить настройки"));
+
+  $("form-board-sync").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("board-sync-ms");
+    const interval = input.valueAsNumber;
+    if (!Number.isInteger(interval) || interval < 0 || interval > 5000) {
+      toast("Введите целое число от 0 до 5000 мс"); return;
+    }
+    const button = e.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await setDoc(settingsRef, { boardSyncIntervalMs: interval }, { merge: true });
+      toast("Интервал синхронизации досок сохранён");
+      logAdminAction("BOARD_SYNC_INTERVAL_CHANGED", `${interval} мс`);
+    } catch (err) { handleErr("Не удалось сохранить интервал")(err); }
+    finally { button.disabled = false; }
+  });
 
   $("toggle-school-hidden").addEventListener("change", async (e) => {
     try {
@@ -1423,110 +1444,12 @@ $("btn-close-questions").addEventListener("click", () => {
   $("questions-card").classList.add("hidden");
 });
 
-// НОВОЕ (учителя): базовый список предметов для формы создания учителя.
-// Свои категории админ добавляет через «＋ Своя категория…» — они хранятся
-// в localStorage браузера и дальше отображаются в списке наравне с базовыми.
-const TEACHER_SUBJECTS = [
-  "Математика",
-  "Алгебра",
-  "Геометрия",
-  "Русский язык",
-  "Литература",
-  "Английский язык",
-  "Немецкий язык",
-  "Французский язык",
-  "История",
-  "Обществознание",
-  "География",
-  "Биология",
-  "Физика",
-  "Химия",
-  "Информатика",
-  "Экономика",
-  "Право",
-  "Астрономия",
-  "Физкультура",
-  "Музыка",
-  "ИЗО",
-  "Технология",
-  "ОБЖ",
-  "Черчение",
-  "Начальные классы",
-  "Другое",
-];
-const SUBJECT_CUSTOM_VALUE = "__custom__";
-const TEACHER_CUSTOM_SUBJECTS_KEY = "yodo-teacher-custom-subjects";
-
-function loadCustomTeacherSubjects() {
-  try {
-    const list = JSON.parse(localStorage.getItem(TEACHER_CUSTOM_SUBJECTS_KEY) || "[]");
-    return Array.isArray(list) ? list.filter((s) => typeof s === "string" && s.trim()) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveCustomTeacherSubjects(list) {
-  try {
-    localStorage.setItem(TEACHER_CUSTOM_SUBJECTS_KEY, JSON.stringify(list));
-  } catch (e) { /* приватный режим — категория просто не сохранится в списке */ }
-}
-
-/** Заполнение select предметами: базовые + сохранённые свои + «Своя категория…». */
-function fillTeacherSubjectSelect() {
-  const select = $("teacher-subject");
-  if (!select) return;
-  const base = TEACHER_SUBJECTS;
-  const custom = loadCustomTeacherSubjects().filter((s) => !base.includes(s));
-  select.innerHTML = '<option value="" disabled selected>Предмет…</option>';
-  base.concat(custom).forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    select.appendChild(opt);
-  });
-  const customOpt = document.createElement("option");
-  customOpt.value = SUBJECT_CUSTOM_VALUE;
-  customOpt.textContent = "＋ Своя категория…";
-  select.appendChild(customOpt);
-  select.selectedIndex = 0;
-}
-
 function startTeachers() {
-  // НОВОЕ (учителя): выпадающий список предметов + своя категория.
-  const subjectSelect = $("teacher-subject");
-  const subjectCustom = $("teacher-subject-custom");
-  fillTeacherSubjectSelect();
-  subjectSelect.addEventListener("change", () => {
-    const isCustom = subjectSelect.value === SUBJECT_CUSTOM_VALUE;
-    subjectCustom.classList.toggle("hidden", !isCustom);
-    if (isCustom) subjectCustom.focus();
-  });
   $("form-add-teacher").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("teacher-name").value.trim();
-    let subject = subjectSelect.value;
+    const subject = $("teacher-subject").value.trim();
     if (!name) return;
-    if (!subject) {
-      toast("Выберите предмет учителя", false);
-      subjectSelect.focus();
-      return;
-    }
-    if (subject === SUBJECT_CUSTOM_VALUE) {
-      subject = subjectCustom.value.trim();
-      if (!subject) {
-        toast("Введите название своего предмета", false);
-        subjectCustom.focus();
-        return;
-      }
-      // Своя категория запоминается и появляется в списке для следующих учителей.
-      const custom = loadCustomTeacherSubjects();
-      if (!custom.includes(subject) && !TEACHER_SUBJECTS.includes(subject)) {
-        custom.unshift(subject);
-        saveCustomTeacherSubjects(custom);
-        fillTeacherSubjectSelect();
-      }
-    }
     try {
       // id документа = имя учителя (стабильный ключ, как upsertTeacherProfile)
       await setDoc(
@@ -1540,9 +1463,7 @@ function startTeachers() {
         { merge: true }
       );
       $("teacher-name").value = "";
-      subjectSelect.selectedIndex = 0;
-      subjectCustom.value = "";
-      subjectCustom.classList.add("hidden");
+      $("teacher-subject").value = "";
       toast("Профиль учителя создан");
       logAdminAction(
         "SCHOOL_TEACHER_CREATED",
@@ -1797,67 +1718,12 @@ const REPORT_STATUS_LABELS = {
   DISMISSED: "Отклонена",
 };
 
-// НОВОЕ: иконка для каждой причины — карточка жалобы считывается быстрее.
-const REPORT_REASON_ICONS = {
-  SPAM: "🚮",
-  HARASSMENT: "💢",
-  VIOLENCE: "⚠️",
-  ILLEGAL_CONTENT: "🚫",
-  FRAUD: "💰",
-  NSFW: "🔞",
-  ADVERTISING: "📢",
-  OTHER: "❓",
-  APPEAL: "🔔",
-};
-
 let reportsCache = []; // снапшот последнего запроса для CSV
 let reportsLimit = 200; // НОВОЕ (пагинация): размер окна ленты жалоб
 let reportsFilter = "PENDING";
 // НОВОЕ (расширенная модерация): независимый от статуса фильтр по типу жалобы.
 let reportsReasonFilter = "ALL";
 let reportsUnsub = null;
-// НОВОЕ (повторные жалобы): фильтр «только жалобы на этого нарушителя».
-let reportsTargetFilter = "";
-let reportsTargetFilterName = "";
-
-/** Возраст жалобы по-человечески: «12 мин назад», «3 ч назад», «2 дн назад». */
-function fmtTimeAgo(ms) {
-  if (!ms) return "";
-  const minutes = Math.floor((Date.now() - ms) / 60000);
-  if (minutes < 1) return "только что";
-  if (minutes < 60) return minutes + " мин назад";
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return hours + " ч назад";
-  const days = Math.floor(hours / 24);
-  if (days < 30) return days + " дн назад";
-  return fmtDate(ms);
-}
-
-/** Инициалы для круглого аватара нарушителя («Иван Петров» → «ИП»). */
-function initialsOf(name) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  return parts
-    .slice(0, 2)
-    .map((p) => Array.from(p)[0] || "")
-    .join("")
-    .toUpperCase();
-}
-
-/**
- * НОВОЕ (повторные жалобы): сколько жалоб в загруженном окне на каждого
- * нарушителя — по всем статусам. Жалобы на него из других чатов тоже считаются:
- * так видно «серийных» нарушителей, даже если часть жалоб уже закрыта.
- */
-function reportRepeatCounts() {
-  const counts = new Map();
-  reportsCache.forEach((d) => {
-    const t = d.data().targetUserId || "";
-    if (!t) return;
-    counts.set(t, (counts.get(t) || 0) + 1);
-  });
-  return counts;
-}
 
 // Мягкое удаление сообщения — поля 1:1 с MessageRepositoryImpl.deleteMessage
 // (deletedByAdmin=true показывает в чате «Сообщение удалено администратором»).
@@ -1962,57 +1828,26 @@ function reportItem(docSnap) {
   const status = r.status || "PENDING";
   const isPending = status === "PENDING";
   const el = document.createElement("div");
-  el.className = "item report-item";
-  el.dataset.status = status;
-  // НОВОЕ: если жалоба в работе у текущего админа — подсвечиваем карточку.
-  const claim = claimState(r);
-  if (claim.active && claim.mine) el.classList.add("mine");
+  el.className = "item";
   const statusBadge =
     status === "PENDING" ? '<span class="badge badge-yellow">На рассмотрении</span>'
     : status === "RESOLVED" ? '<span class="badge badge-green">Решена</span>'
     : '<span class="badge badge-dim">Отклонена</span>';
-  const reason = REPORT_REASONS[r.reason] || r.reason || "?";
-  const reasonIcon = REPORT_REASON_ICONS[r.reason] || "🚩";
-  // НОВОЕ (повторные жалобы): сколько всего жалоб на этого нарушителя.
-  const repeats = reportRepeatCounts().get(r.targetUserId || "") || 0;
-  const repeatBadge =
-    repeats >= 2 && r.targetUserId
-      ? `<button type="button" class="badge badge-yellow report-repeats" title="Показать все жалобы на этого пользователя">⚠ ${repeats} жалоб</button>`
-      : "";
-  // НОВОЕ (SLA): жалоба на рассмотрении больше суток — заметное напоминание.
-  const stale =
-    isPending && Date.now() - Number(r.createdAt || 0) > 24 * 3600 * 1000
-      ? '<span class="badge badge-red">⏰ Давно висит</span>'
-      : "";
-  const ageLabel = fmtTimeAgo(r.createdAt) || fmtDate(r.createdAt);
   el.innerHTML = `
-    <div class="report-item-top">
-      <span class="report-avatar" title="${esc(r.targetUserName || "Пользователь")}">${esc(initialsOf(r.targetUserName))}</span>
-      <div class="report-item-body">
-        <div class="item-head">
-          <span class="item-title">${r.isAppeal ? "🔔 Обжалование: " : ""}${esc(r.targetUserName || "Пользователь")}</span>
-          ${statusBadge}${repeatBadge}${stale}${claimBadge(r)}
-          <span class="item-date" title="${esc(fmtDate(r.createdAt))}">${esc(ageLabel)}</span>
-        </div>
-        <div class="report-meta">
-          <button type="button" class="report-reason-chip" title="Показать жалобы этой причины">${reasonIcon} ${esc(reason)}</button>
-          <span>Жалоба от ${esc(r.reporterName || "—")}</span>
-        </div>
-        ${r.targetMessagePreview ? `<div class="item-text report-preview">💬 ${esc(r.targetMessagePreview)}</div>` : ""}
-        ${r.customReasonText ? `<div class="item-text">${esc(r.customReasonText)}</div>` : ""}
-        ${
-          !isPending
-            ? `<div class="question-answer">✅ <b>${esc(REPORT_STATUS_LABELS[status] || status)}</b> · ${esc(r.reviewedByName || "")}, ${fmtDate(r.reviewedAt)}
-                 ${r.resolution ? " · " + esc(r.resolution) : ""}${r.reviewerComment ? "<br>" + esc(r.reviewerComment) : ""}</div>`
-            : ""
-        }
-      </div>
-    </div>`;
-  // Чип причины кликает фильтр по типу, счётчик повторов — фильтр по нарушителю.
-  const reasonChip = el.querySelector(".report-reason-chip");
-  reasonChip.addEventListener("click", () => setReasonFilter(r.reason || ""));
-  const repeatsBtn = el.querySelector(".report-repeats");
-  if (repeatsBtn) repeatsBtn.addEventListener("click", () => setReportTargetFilter(r.targetUserId, r.targetUserName));
+    <div class="item-head">
+      <span class="item-title">${r.isAppeal ? "🔔 Обжалование: " : ""}${esc(r.targetUserName || "Пользователь")}</span>
+      ${statusBadge}${claimBadge(r)}
+      <span class="item-date">${fmtDate(r.createdAt)}</span>
+    </div>
+    <div class="item-sub">Жалоба от ${esc(r.reporterName || "—")} · причина: ${esc(REPORT_REASONS[r.reason] || r.reason || "?")}</div>
+    ${r.targetMessagePreview ? `<div class="item-text report-preview">💬 ${esc(r.targetMessagePreview)}</div>` : ""}
+    ${r.customReasonText ? `<div class="item-text">${esc(r.customReasonText)}</div>` : ""}
+    ${
+      !isPending
+        ? `<div class="question-answer">✅ <b>${esc(REPORT_STATUS_LABELS[status] || status)}</b> · ${esc(r.reviewedByName || "")}, ${fmtDate(r.reviewedAt)}
+             ${r.resolution ? " · " + esc(r.resolution) : ""}${r.reviewerComment ? "<br>" + esc(r.reviewerComment) : ""}</div>`
+        : ""
+    }`;
   const actions = document.createElement("div");
   actions.className = "item-actions";
   if (r.targetType === "MESSAGE" && r.targetMessageId) {
@@ -2958,18 +2793,13 @@ function statusFilteredReports() {
 
 /**
  * Жалобы, прошедшие все фильтры: статус, тип, а также НОВОЕ —
- * период, «только взятые мной», сортировка (см. applyReportExtras)
- * и фильтр по конкретному нарушителю (повторные жалобы).
+ * период, «только взятые мной» и сортировка (см. applyReportExtras).
  */
 function filteredReports() {
   const byReason = statusFilteredReports().filter(
     (d) => reportsReasonFilter === "ALL" || (d.data().reason || "") === reportsReasonFilter
   );
-  const rows = typeof applyReportExtras === "function" ? applyReportExtras(byReason) : byReason;
-  if (reportsTargetFilter) {
-    return rows.filter((d) => (d.data().targetUserId || "") === reportsTargetFilter);
-  }
-  return rows;
+  return typeof applyReportExtras === "function" ? applyReportExtras(byReason) : byReason;
 }
 
 function setReasonFilter(reason) {
@@ -3057,65 +2887,18 @@ function renderReportsView() {
     reportsReasonFilter = "ALL";
   }
   renderReasonFilters(counts);
-  renderTargetFilterChip();
   renderReportsChart(counts);
   const listEl = $("reports-list");
   const docs = filteredReports();
   if (!docs.length) {
     const nothingNew = reportsFilter === "PENDING" && reportsReasonFilter === "ALL";
-    const targetNote = reportsTargetFilter
-      ? `На нарушителя «${esc(reportsTargetFilterName)}» жалоб с такими фильтрами нет.`
-      : "";
-    listEl.innerHTML = `<p class="empty-note">${
-      reportsTargetFilter ? targetNote : nothingNew ? "Новых жалоб нет — всё чисто! ✅" : "Жалоб с такими фильтрами нет."
-    }</p>`;
+    listEl.innerHTML = `<p class="empty-note">${nothingNew ? "Новых жалоб нет — всё чисто! ✅" : "Жалоб с такими фильтрами нет."}</p>`;
     return;
   }
   listEl.innerHTML = "";
   docs.forEach((d) => listEl.appendChild(reportItem(d)));
   // НОВОЕ (массовые действия): панель ��ыбора под текущим списком.
   if (typeof renderBulkBar === "function") renderBulkBar();
-}
-
-/** НОВОЕ (повторные жалобы): чип активного фильтра по нарушителю. */
-function renderTargetFilterChip() {
-  const row = $("reports-target-row");
-  if (!row) return;
-  if (!reportsTargetFilter) {
-    row.innerHTML = "";
-    row.classList.add("hidden");
-    return;
-  }
-  row.classList.remove("hidden");
-  row.innerHTML = "";
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "filter-btn active";
-  btn.title = "Сбросить фильтр по нарушителю";
-  btn.textContent = `Нарушитель: ${reportsTargetFilterName || reportsTargetFilter} ✕`;
-  btn.addEventListener("click", clearReportTargetFilter);
-  row.appendChild(btn);
-  const note = document.createElement("span");
-  note.className = "report-target-note";
-  note.textContent = "Показаны жалобы только на этого пользователя";
-  row.appendChild(note);
-}
-
-/** НОВОЕ (повторные жалобы): включить фильтр «жалобы только на этого нарушителя». */
-function setReportTargetFilter(uid, name) {
-  if (!uid) return;
-  reportsTargetFilter = uid;
-  reportsTargetFilterName = name || "Пользователь";
-  // Фильтр по типу мог не совпасть с жалобами этого нарушителя — сбрасываем,
-  // чтобы список не оказался пустым из-за пересечения двух фильтров.
-  reportsReasonFilter = "ALL";
-  renderReportsView();
-}
-
-function clearReportTargetFilter() {
-  reportsTargetFilter = "";
-  reportsTargetFilterName = "";
-  renderReportsView();
 }
 
 function startReports() {
@@ -3148,10 +2931,9 @@ function startReports() {
   });
   $("btn-export-reports").addEventListener("click", () => {
     if (!reportsCache.length) return toast("Жалоб пока нет — выгружать нечего", false);
-    const repeats = reportRepeatCounts();
     downloadCsv(
       "yodo-reports.csv",
-      ["Дата", "Статус", "Причина", "Тип", "Нарушитель", "Жалоб на нарушителя", "Жаловался", "Превью сообщения", "Комментарий жалобы", "Решение", "Рецензент"],
+      ["Дата", "Статус", "Причина", "Тип", "Нарушитель", "Жаловался", "Превью сообщения", "Комментарий жалобы", "Решение", "Рецензент"],
       reportsCache.map((d) => {
         const r = d.data();
         return [
@@ -3160,7 +2942,6 @@ function startReports() {
           REPORT_REASONS[r.reason] || r.reason || "",
           r.isAppeal ? "Обжалование" : r.targetType === "MESSAGE" ? "Сообщение" : "Пользователь",
           r.targetUserName || "",
-          repeats.get(r.targetUserId || "") || 0,
           r.reporterName || "",
           r.targetMessagePreview || "",
           r.customReasonText || "",
@@ -5877,54 +5658,6 @@ function applyRolePermissions() {
   }
 }
 
-/** Есть ли право у произвольной роли (вне зависимости от того, кто в панели). */
-function roleCan(role, permission) {
-  const perms = ROLE_PERMISSIONS[role] || [];
-  if (perms.includes("*")) return true;
-  if (perms.includes(permission)) return true;
-  // Подправо вида "content.faq" также даётся корневым "content".
-  return perms.includes(permission.split(".")[0]);
-}
-
-/**
- * НОВОЕ (роли): краткая таблица «кто что может» в карточке выдачи ролей
- * (+/-). Строится из ROLE_PERMISSIONS 1:1, поэтому не рассинхронизируется.
- * Столбец выбранной роли в select подсвечивается.
- */
-const ROLE_MATRIX_ROWS = [
-  { label: "Обзор и настройки, push-рассылки", perm: "settings" },
-  { label: "Контент: новости, опросы, канал, школа", perm: "content" },
-  { label: "FAQ-бот поддержки", perm: "content.faq" },
-  { label: "Обращения в поддержку, вопросы учеников", perm: "support" },
-  { label: "Жалобы и обжалования", perm: "moderation" },
-  { label: "Блокировки, муты и санкции", perm: "users.block" },
-  { label: "Видеть список пользователей", perm: "users.view" },
-  { label: "Журнал аудита", perm: "audit" },
-  { label: "Массовые удаления и чистки", perm: "destructive" },
-  { label: "Выдача и отзыв ролей админам", perm: "roles" },
-];
-
-function renderRolesMatrix(selectedRole) {
-  const box = $("roles-matrix");
-  if (!box) return;
-  // Роли, которые можно выдать: все, кроме владельца (owner из ADMIN_EMAILS).
-  const grantable = Object.keys(ROLE_PERMISSIONS).filter((r) => r !== "owner");
-  const rows = [];
-  rows.push("<thead><tr><th>Возможность</th>" +
-    grantable.map((r) => `<th>${esc(ROLE_LABELS[r] || r)}</th>`).join("") +
-    "</tr></thead>");
-  rows.push("<tbody>" + ROLE_MATRIX_ROWS.map((row) => {
-    const cells = grantable.map((r) => {
-      const yes = roleCan(r, row.perm);
-      const active = r === selectedRole ? " matrix-cell-active" : "";
-      return `<td class="${yes ? "matrix-yes" : "matrix-no"}${active}">${yes ? "+" : "−"}</td>`;
-    }).join("");
-    return `<tr><td>${esc(row.label)}</td>${cells}</tr>`;
-  }).join("") + "</tbody>");
-  box.innerHTML = `<table class="roles-matrix-table">${rows.join("")}</table>
-    <p class="card-hint">Владелец (${esc(Object.keys(ADMIN_EMAILS).length)} аккаунт${ADMIN_EMAILS.length === 1 ? "" : "а"} из списка владельцев) — всегда все права, включая выдачу ролей.</p>`;
-}
-
 /** Список админов и их ролей в разделе «Обзор». */
 function renderRolesList() {
   const box = $("roles-list");
@@ -5994,11 +5727,6 @@ async function startAccessControl() {
         select.appendChild(opt);
       });
       enhanceSelect(select);
-    }
-    // Краткая таблица прав и подсветка выбранного столбца (+/-).
-    if (select) {
-      renderRolesMatrix(select.value);
-      select.addEventListener("change", () => renderRolesMatrix(select.value));
     }
     form.addEventListener("submit", async (e) => {
       e.preventDefault();

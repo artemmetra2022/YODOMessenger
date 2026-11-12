@@ -49,7 +49,7 @@ fun UpdateGate(
     LaunchedEffect(enabled) { if (enabled) viewModel.autoCheck() }
     HandleUpdateEvents(viewModel)
 
-    val showDialog = state.update != null && when (state.phase) {
+    val showDialog = !state.instantDownload && state.update != null && when (state.phase) {
         UpdatePhase.AVAILABLE,
         UpdatePhase.DOWNLOADING,
         UpdatePhase.READY_TO_INSTALL,

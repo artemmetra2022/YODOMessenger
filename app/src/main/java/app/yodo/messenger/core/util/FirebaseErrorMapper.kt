@@ -23,6 +23,7 @@ import com.google.firebase.storage.StorageException
  * fallback — сообщение по умолчанию для конкретного действия, если тип ошибки не распознан.
  */
 fun Throwable.toUserMessage(fallback: String): String {
+    if (this is app.yodo.messenger.core.crypto.SecureMessagingException) return userMessage
     // Сначала — типизированные исключения FirebaseAuth, они надёжнее сравнения строк.
     when (this) {
         is FirebaseAuthInvalidCredentialsException -> return "Неверный пароль"

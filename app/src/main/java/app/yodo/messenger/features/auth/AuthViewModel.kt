@@ -6,6 +6,7 @@ import app.yodo.messenger.data.local.UserSettingsPreferences
 import app.yodo.messenger.domain.repository.AuthRepository
 import app.yodo.messenger.domain.repository.AuthResult
 import app.yodo.messenger.domain.repository.ResetPasswordResult
+import app.yodo.messenger.features.weather.WeatherRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,7 +44,8 @@ sealed class ResetPasswordUiState {
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    private val userSettingsPreferences: UserSettingsPreferences
+    private val userSettingsPreferences: UserSettingsPreferences,
+    private val weatherRepository: WeatherRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
@@ -89,7 +91,18 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun register(name: String, username: String, email: String, password: String) {
+    /**
+     * [weatherCity] — необязательный город для погоды. Пустая строка (или null) = пользователь
+     * отказался его указывать; тогда настройка погоды не трогается и остаётся город по умолчанию,
+     * а сменить его можно позже в «Настройки → Чаты → Погода».
+     */
+    fun register(
+        name: String,
+        username: String,
+        email: String,
+        password: String,
+        weatherCity: String? = null
+    ) {
         if (name.isBlank()) {
             _uiState.value = AuthUiState.Error("Введите имя")
             return
@@ -99,7 +112,23 @@ class AuthViewModel @Inject constructor(
 
         _uiState.value = AuthUiState.Loading
         viewModelScope.launch {
-            when (val result = authRepository.register(name, username, email, password)) {
+            // Проверка города до создания аккаунта: опечатку лучше поймать сразу, а не
+            // получить «Город не найден» на экране погоды. Если проверить не удалось
+            // (нет сети/сервис недоступен) — не блокируем регистрацию.
+            val city = weatherCity?.trim()?.takeIf { it.isNotEmpty() }
+            if (city != null && weatherRepository.cityExists(city) == false) {
+                _uiState.value = AuthUiState.Error(
+                    "Город «$city» не найден. Проверьте название или отметьте «Не указывать город»"
+                )
+                return@launch
+            }
+            val result = authRepository.register(name, username, email, password)
+            // Город сохраняем только если аккаунт реально создан (успех или ожидание
+            // подтверждения почты) и пользователь его указал.
+            if (result !is AuthResult.Error) {
+                city?.let { userSettingsPreferences.setWeatherCity(it) }
+            }
+            when (result) {
                 is AuthResult.Success -> _uiState.value = AuthUiState.Success
                 is AuthResult.Error -> _uiState.value = AuthUiState.Error(result.message)
                 is AuthResult.RequiresEmailVerification ->

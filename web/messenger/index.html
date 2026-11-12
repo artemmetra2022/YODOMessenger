@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YodoMessenger — общайтесь, делитесь, создавайте вместе</title>
+  <meta name="description" content="YodoMessenger для Android: чаты, группы, каналы, интерактивные доски и общение поблизости без интернета. Узнайте о возможностях и скачайте APK с GitHub.">
+  <meta name="theme-color" content="#f7f8fc" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111822" media="(prefers-color-scheme: dark)">
+  <link rel="canonical" href="https://yodomessenger.web.app/messenger/">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:title" content="YodoMessenger — больше, чем переписка">
+  <meta property="og:description" content="Чаты, каналы и доски для ваших идей. Скачайте приложение для Android или откройте веб-версию.">
+  <meta property="og:url" content="https://yodomessenger.web.app/messenger/">
+  <meta property="og:site_name" content="YodoMessenger">
+  <meta name="twitter:card" content="summary">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="page.mjs"></script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"MobileApplication","name":"YodoMessenger","operatingSystem":"Android 8.0+","applicationCategory":"CommunicationApplication","url":"https://yodomessenger.web.app/messenger/","downloadUrl":"https://github.com/artemmetra2022/YODOMessenger/releases/latest","isAccessibleForFree":true,"license":"https://github.com/artemmetra2022/YODOMessenger/blob/main/LICENSE","offers":{"@type":"Offer","price":"0","priceCurrency":"RUB"}}</script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Перейти к содержимому</a>
+  <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4V4Zm4 5h8m-8 3h5"/></symbol>
+    <symbol id="i-board" viewBox="0 0 24 24"><path d="M3 4h18v13H3zm9 13v4m-5 0h10M8 13l3-5 5 5"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3 8a15 15 0 0 1 18 0M6 12a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 4h.01"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v5c0 5-8 10-8 10S4 16 4 11V6l8-3Zm-4 8 3 3 5-6"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-15-2 18"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9h-9V3Z"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5m10-2a7 7 0 0 0-12-4m-2 8a7 7 0 0 0 12 4"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="m4 16 12-12 4 4L8 20H4v-4Zm9-9 4 4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 10h14v11H5zm3 0V7a4 4 0 0 1 8 0v3m-4 4v3"/></symbol>
+  </defs></svg>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="#" class="brand" aria-label="YodoMessenger — начало страницы"><span class="brand-mark" aria-hidden="true">Y</span><span>Yodo<span class="brand-rest">Messenger</span></span></a>
+      <button class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="navigation" aria-label="Открыть меню"><svg class="icon"><use href="#i-menu"/></svg></button>
+      <nav id="navigation" aria-label="Главная навигация">
+        <a href="#features">Возможности</a><a href="#boards">Доски</a><a href="#download">Скачать</a>
+        <a href="https://github.com/artemmetra2022/YODOMessenger" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+        <a href="../" class="nav-web">Открыть веб-версию <svg class="icon"><use href="#i-arrow"/></svg></a>
+      </nav>
+    </div>
+  </header>
+  <main id="main">
+    <section class="hero container" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="small-line"></span> Мессенджер для ваших идей</p>
+        <h1 id="hero-title">Больше,<br>чем <span>переписка.</span></h1>
+        <p class="hero-description">Общайтесь с близкими. Собирайте команды. Рисуйте прямо из чата. А когда интернет пропадёт — оставайтесь на связи с теми, кто рядом.</p>
+        <div class="hero-actions"><a href="#download" class="button primary"><svg class="icon"><use href="#i-download"/></svg>Скачать для Android</a><a href="../" class="text-link">Открыть в браузере <svg class="icon"><use href="#i-arrow"/></svg></a></div>
+        <p class="hero-note">Бесплатно · Android 8.0+ · Открытый код</p>
+        <div class="hero-bottom"><svg class="icon"><use href="#i-board"/></svg><p>От «привет» до общей идеи.<br><strong>В одном YodoMessenger.</strong></p></div>
+      </div>
+      <figure class="product-preview">
+        <div class="preview-stage">
+          <div class="preview-top"><span class="preview-wordmark">YODO / ВМЕСТЕ</span><span class="preview-label">Пример интерфейса</span></div>
+          <div class="app-preview">
+            <div class="preview-tabs" role="tablist" aria-label="Демонстрация возможностей">
+              <button id="tab-chat" role="tab" aria-selected="true" aria-controls="demo-chat" tabindex="0">Общение</button>
+              <button id="tab-board" role="tab" aria-selected="false" aria-controls="demo-board" tabindex="-1">Идеи на доске</button>
+            </div>
+            <div id="demo-chat" class="demo-panel" role="tabpanel" aria-labelledby="tab-chat">
+              <div class="demo-heading"><span class="avatar coral">К</span><div><strong>Команда проекта</strong><span>От обсуждения — к делу</span></div><span class="more-dots" aria-hidden="true">•••</span></div>
+              <div class="demo-messages">
+                <span class="day-label">Сегодня</span>
+                <div class="bubble incoming"><strong>Анна</strong><p>А если сначала набросать идею?</p><span class="message-meta">14:32</span></div>
+                <div class="bubble outgoing"><p>Уже рисую. Вот наш план!</p><span class="message-meta">14:33 <span class="read-check" aria-label="Прочитано">✓✓</span></span></div>
+                <div class="bubble board-message"><div class="mini-board"><span class="mini-note">Наша идея</span><svg viewBox="0 0 260 120" aria-label="Эскиз плана: идея, обсуждение, запуск" role="img"><path d="M65 60h40m55 0h35" stroke="currentColor" fill="none" stroke-width="2"/><rect x="4" y="38" width="64" height="44" rx="12"/><rect x="103" y="28" width="60" height="64" rx="12"/><circle cx="220" cy="60" r="29"/><path d="m119 60 10 10 19-23m60 12 10 10 15-20M25 58h22m-17-8 12 16" class="board-lines"/></svg></div><div class="board-caption"><svg class="icon"><use href="#i-board"/></svg><span>План проекта · доска</span></div><div class="reaction-row"><span>💙 3</span><span class="message-meta">14:34</span></div></div>
+              </div>
+            </div>
+            <div id="demo-board" class="demo-panel board-panel" role="tabpanel" aria-labelledby="tab-board" hidden>
+              <div class="demo-heading"><svg class="icon"><use href="#i-board"/></svg><div><strong>Идеи для проекта</strong><span>Рисунок, формулы и ваши заметки</span></div></div>
+              <div class="geometry-canvas"><span class="canvas-tag">От мысли к эскизу</span><svg viewBox="0 0 280 230" role="img" aria-label="Треугольник с основанием a и высотой h"><path d="m40 175 100-130 100 130Z"/><path d="M140 45v130M40 192h200" class="geometry-dash"/><text x="149" y="120">h</text><text x="134" y="213">a</text></svg></div>
+              <div class="demo-tools"><span><svg class="icon" aria-hidden="true"><use href="#i-pen"/></svg>Перо</span><span>△ Фигуры</span><span>Т Текст</span></div>
+              <p class="demo-board-note">Вставьте фото, добавьте пояснения и отправьте результат в чат.</p>
+            </div>
+          </div>
+          <div class="preview-footer"><span class="preview-dot"></span> Общайтесь. Делитесь. Создавайте.</div>
+        </div>
+        <figcaption>Демонстрационный макет. Имена и переписка вымышлены.</figcaption>
+      </figure>
+    </section>
+
+    <section class="feature-strip" aria-label="Главные возможности"><div class="container strip-inner"><span><svg class="icon"><use href="#i-chat"/></svg>Чаты, группы, каналы</span><span><svg class="icon"><use href="#i-board"/></svg>Интерактивные доски</span><span><svg class="icon"><use href="#i-wifi"/></svg>Офлайн рядом</span><span><svg class="icon"><use href="#i-code"/></svg>Открытый код</span></div></section>
+
+    <section id="features" class="section container">
+      <div class="section-heading"><p class="eyebrow">На каждый день</p><h2>Меньше переключений.<br>Больше общения.</h2><p>Всё, что нужно для разговора, команды и небольшого сообщества — в одном приложении.</p></div>
+      <div class="features-grid">
+        <article><span class="feature-icon"><svg class="icon"><use href="#i-chat"/></svg></span><h3>Разговор в вашем ритме</h3><p>Личные сообщения, группы и каналы. Фото, документы, голосовые, реакции и ответы — чтобы легко продолжить любую мысль.</p></article>
+        <article><span class="feature-icon"><svg class="icon"><use href="#i-board"/></svg></span><h3>Не только словами</h3><p>Объясняйте на доске: рисунком, фигурами или формулой. Добавляйте фото, сохраняйте идеи и делитесь результатом в чате.</p></article>
+        <article><span class="feature-icon"><svg class="icon"><use href="#i-theme"/></svg></span><h3>Ваше пространство</h3><p>Светлая и тёмная темы, цветовые схемы, фон переписки, папки и архив. Организуйте общение так, как удобно вам.</p></article>
+      </div>
+    </section>
+
+    <section id="boards" class="boards-section section">
+      <div class="container boards-layout">
+        <div class="board-poster" aria-label="Возможности интерактивной доски"><div class="poster-top"><span>ИДЕЯ → ЭСКИЗ → ОБСУЖДЕНИЕ</span><svg class="icon"><use href="#i-board"/></svg></div><div class="poster-body"><span class="poster-number">01 /</span><h3>Хорошую идею<br>проще показать.</h3><div class="poster-sketch" aria-hidden="true"><span class="sketch-a">Идея</span><span class="sketch-arrow">→</span><span class="sketch-b">Вместе</span></div><p>Схема, формула, набросок.<br>Начните с чистого листа.</p></div><div class="poster-bottom"><span>ДОСКИ В YODO</span><span aria-hidden="true">↗</span></div></div>
+        <div class="boards-copy"><p class="eyebrow">Идеи не помещаются в сообщение</p><h2>Для мыслей, <br>которым нужен <br><span>целый холст.</span></h2><p>План проекта, объяснение задачи или быстрый эскиз — создайте доску, не теряя контекст разговора.</p><ul class="check-list"><li><svg class="icon"><use href="#i-check"/></svg>Рисование, фигуры, текст и формулы</li><li><svg class="icon"><use href="#i-check"/></svg>Импорт изображений и отправка в чат</li><li><svg class="icon"><use href="#i-check"/></svg>Библиотека сохранённых досок на устройстве</li></ul><a href="#download" class="text-link">Попробовать в приложении <svg class="icon"><use href="#i-arrow"/></svg></a></div>
+      </div>
+    </section>
+
+    <section class="section container nearby-layout" id="nearby">
+      <div><p class="eyebrow">Связь поблизости</p><h2>Нет интернета?<br>Есть те, кто рядом.</h2><p class="section-description">Офлайн-режим помогает обмениваться сообщениями с людьми поблизости через Bluetooth и Wi-Fi Direct.</p><p class="fine-print">Оба участника должны открыть подходящий режим в YodoMessenger и разрешить необходимые подключения. Дальность зависит от устройств и окружающих условий. Это не замена мобильной сети.</p></div>
+      <div class="nearby-diagram" role="img" aria-label="Два устройства YodoMessenger обмениваются сообщениями поблизости без интернета"><span class="device device-one"><span class="device-camera"></span><b>Y</b><span class="device-chat"></span><span class="device-chat short"></span></span><div class="nearby-middle"><svg class="icon"><use href="#i-wifi"/></svg><span>Без интернета</span><span class="connection-line"></span></div><span class="device device-two"><span class="device-camera"></span><b>Y</b><span class="device-chat"></span><span class="device-chat short"></span></span></div>
+    </section>
+
+    <section class="trust-section"><div class="container trust-layout"><div><p class="eyebrow">Больше контроля</p><h2>Личное —<br>под вашим контролем.</h2></div><div class="trust-items"><article><svg class="icon"><use href="#i-lock"/></svg><div><h3>Настройки безопасности</h3><p>PIN-блокировка, двухфакторная аутентификация и управление активными устройствами.</p></div></article><article><svg class="icon"><use href="#i-shield"/></svg><div><h3>Приватность по вашим правилам</h3><p>Настройки видимости профиля и исчезающие сообщения. Возможности зависят от типа чата.</p></div></article><article><svg class="icon"><use href="#i-code"/></svg><div><h3>Код открыт для изучения</h3><p>Исходники и история изменений доступны на GitHub. Лицензия Apache 2.0.</p></div></article></div></div></section>
+
+    <section id="download" class="section container download-section" aria-labelledby="download-title">
+      <div class="download-copy"><p class="eyebrow">Начните с «привет»</p><h2 id="download-title">Ваши люди. <br>Ваши идеи. <br><span>Ваш Yodo.</span></h2><p>Установите приложение на Android или откройте веб-версию на компьютере.</p><a href="../" class="text-link">Перейти в веб-версию <svg class="icon"><use href="#i-arrow"/></svg></a></div>
+      <div class="download-card"><span class="download-platform"><svg class="icon"><use href="#i-download"/></svg>Для Android</span><h3 id="release-version">Android 8.0 и новее</h3><p id="release-status" role="status" aria-live="polite">Последняя версия доступна в GitHub Releases.</p><p id="release-detail" class="release-detail"></p><a class="button primary download-button" id="apk-download" href="https://github.com/artemmetra2022/YODOMessenger/releases/latest">Открыть релизы на GitHub</a><button id="refresh-release" class="refresh-button" type="button">Проверить ещё раз <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg></button><noscript><p class="fine-print">JavaScript выключен. Нажмите кнопку выше, чтобы выбрать APK на странице релиза.</p></noscript><div class="download-note"><svg class="icon"><use href="#i-shield"/></svg><p>APK загружается из официального репозитория проекта. Установка потребует подтверждения Android.</p></div></div>
+    </section>
+
+    <section class="section container faq-section" aria-labelledby="faq-title"><div class="section-heading"><p class="eyebrow">Перед первым сообщением</p><h2 id="faq-title">Коротко о главном.</h2></div><div class="faq-list">
+      <details><summary>Как установить YodoMessenger?<svg class="icon"><use href="#i-plus"/></svg></summary><p>Скачайте APK из последнего релиза и откройте файл на Android. Если система попросит, разрешите установку из этого источника. Затем подтвердите установку. Скачивайте приложение только из официального репозитория.</p></details>
+      <details><summary>Какие устройства поддерживаются?<svg class="icon"><use href="#i-plus"/></svg></summary><p>Приложение предназначено для Android 8.0 и новее. На компьютере можно использовать <a href="../">веб-версию</a>. Отдельные приложения для iOS, Windows и macOS здесь не предлагаются; возможности веб-версии могут отличаться от Android.</p></details>
+      <details><summary>Что делать, если релиз уже есть, а APK ещё нет?<svg class="icon"><use href="#i-plus"/></svg></summary><p>APK может появиться после публикации самого релиза. Нажмите «Проверить ещё раз» или откройте релиз на GitHub. Страница не скачивает файлы автоматически — загрузка начинается только по вашей ссылке.</p></details>
+      <details><summary>Как работает общение без интернета?<svg class="icon"><use href="#i-plus"/></svg></summary><p>Устройства поблизости связываются через Bluetooth и Wi-Fi Direct. У обоих участников должен быть YodoMessenger с открытым офлайн-режимом и необходимыми разрешениями. Для удалённой переписки обычным способом нужен интернет.</p></details>
+      <details><summary>Где посмотреть исходный код и изменения?<svg class="icon"><use href="#i-plus"/></svg></summary><p>В <a href="https://github.com/artemmetra2022/YODOMessenger" target="_blank" rel="noopener noreferrer">репозитории проекта на GitHub</a>. Описание каждого обновления находится в разделе <a href="https://github.com/artemmetra2022/YODOMessenger/releases" target="_blank" rel="noopener noreferrer">Releases</a>, а краткая история версий также доступна в приложении.</p></details>
+    </div></section>
+    <section class="source-section container"><div><span class="brand-mark" aria-hidden="true">Y</span><h2>Создаём открыто.</h2><p>Изучайте код, сообщайте об ошибках и предлагайте идеи.</p></div><a href="https://github.com/artemmetra2022/YODOMessenger" class="button secondary" target="_blank" rel="noopener noreferrer">Открыть GitHub <svg class="icon"><use href="#i-arrow"/></svg></a></section>
+  </main>
+  <footer class="container site-footer"><a class="brand" href="#"><span class="brand-mark" aria-hidden="true">Y</span><span>YodoMessenger</span></a><p>Общайтесь. Делитесь. Создавайте вместе.</p><div><a href="../">Веб-версия</a><a href="https://github.com/artemmetra2022/YODOMessenger/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Apache 2.0</a><a href="#download">Скачать</a></div></footer>
+</body>
+</html>

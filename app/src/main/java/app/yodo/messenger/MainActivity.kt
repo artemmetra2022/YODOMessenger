@@ -51,17 +51,18 @@ class MainActivity : ComponentActivity() {
     // НОВОЕ (ссылка-приглашение и шаринг): chatId канала из входящей ссылки
     // yodo://channel/<chatId> — проверяется в Compose-дереве и открывает профиль канала.
     private val pendingChannelDeepLink = mutableStateOf<String?>(null)
-
-    // НОВОЕ (QR-вход из обычных считывателей): ссылка yodo://qrlogin/{sessionId}?pk=...
-    // открывается со страницы-моста qr-login.html. Приложение переходит на экран
-    // сканера с уже «отсканированной» сессией — пользователю остаётся подтвердить вход.
-    private val pendingQrLoginDeepLink = mutableStateOf<android.net.Uri?>(null)
+    private data class ReminderTarget(val uid: String, val chatId: String, val messageId: String, val topicId: String?)
+    private val pendingReminder = mutableStateOf<ReminderTarget?>(null)
+    // Нажатие на виджет рабочего стола («Непрочитанные» / «Погода»).
+    private data class WidgetTarget(val uid: String, val target: String, val chatId: String?)
+    private val pendingWidgetTarget = mutableStateOf<WidgetTarget?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingChannelDeepLink.value = extractChannelIdFromIntent(intent)
-        pendingQrLoginDeepLink.value = extractQrLoginDataFromIntent(intent)
+        pendingReminder.value = extractReminderTarget(intent)
+        pendingWidgetTarget.value = extractWidgetTarget(intent)
 
         val startDestination = if (authRepository.isLoggedIn()) {
             Routes.ChatList.route
@@ -206,6 +207,35 @@ class MainActivity : ComponentActivity() {
                             // для авторизованных — чтобы не мешать на экранах входа.
                             UpdateGate(enabled = authRepository.isLoggedIn())
 
+                            LaunchedEffect(pendingReminder.value, authRepository.isLoggedIn()) {
+                                pendingReminder.value?.let { target ->
+                                    if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid == target.uid) {
+                                        navController.navigate(Routes.Chat.createRoute(target.chatId,
+                                            topicId = target.topicId, messageId = target.messageId))
+                                    }
+                                    pendingReminder.value = null
+                                }
+                            }
+
+                            LaunchedEffect(pendingWidgetTarget.value, authRepository.isLoggedIn()) {
+                                pendingWidgetTarget.value?.let { t ->
+                                    // Открываем только для того аккаунта, чьи данные показывал виджет.
+                                    if (authRepository.isLoggedIn() &&
+                                        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid == t.uid
+                                    ) {
+                                        when (t.target) {
+                                            app.yodo.messenger.features.widget.WidgetIntents.TARGET_CHAT ->
+                                                t.chatId?.let { navController.navigate(Routes.Chat.createRoute(it)) }
+                                            app.yodo.messenger.features.widget.WidgetIntents.TARGET_WEATHER ->
+                                                navController.navigate(Routes.Weather.route)
+                                            app.yodo.messenger.features.widget.WidgetIntents.TARGET_SCHOOL ->
+                                                navController.navigate(Routes.SchoolSchedule.route)
+                                        }
+                                    }
+                                    pendingWidgetTarget.value = null
+                                }
+                            }
+
                             // НОВОЕ (ссылка-приглашение и шаринг): при открытии приложения по ссылке-
                             // приглашению (yodo://channel/<chatId>) — сразу переходит к профилю канала.
                             // Авторизованный и неавторизованный пользователь попадает сразу в обычный
@@ -215,22 +245,6 @@ class MainActivity : ComponentActivity() {
                                 if (channelId != null && authRepository.isLoggedIn()) {
                                     navController.navigate(app.yodo.messenger.navigation.Routes.ChannelProfile.createRoute(channelId))
                                     pendingChannelDeepLink.value = null
-                                }
-                            }
-                            // НОВОЕ (QR-вход из обычных считывателей): deep link
-                            // yodo://qrlogin/{sessionId}?pk=... открывает экран сканера
-                            // с готовой сессией — остаётся только подтвердить вход.
-                            LaunchedEffect(pendingQrLoginDeepLink.value, authRepository.isLoggedIn()) {
-                                val data = pendingQrLoginDeepLink.value
-                                if (data != null && authRepository.isLoggedIn()) {
-                                    pendingQrLoginDeepLink.value = null
-                                    val sessionId = data.pathSegments?.firstOrNull().orEmpty()
-                                    val pk = data.getQueryParameter("pk").orEmpty()
-                                    if (sessionId.isNotBlank() && pk.isNotBlank()) {
-                                        navController.navigate(
-                                            app.yodo.messenger.navigation.Routes.QrLogin.createRoute(sessionId, pk)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -243,10 +257,30 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        pendingReminder.value = extractReminderTarget(intent)
+        pendingWidgetTarget.value = extractWidgetTarget(intent)
         // НОВОЕ: launchMode="singleTask" — при повторном открытии ссылки, когда активити
         // уже запущена, новый intent приходит сюда, а не в onCreate.
         extractChannelIdFromIntent(intent)?.let { pendingChannelDeepLink.value = it }
-        extractQrLoginDataFromIntent(intent)?.let { pendingQrLoginDeepLink.value = it }
+    }
+
+    private fun extractWidgetTarget(intent: android.content.Intent?): WidgetTarget? {
+        if (intent?.action != app.yodo.messenger.features.widget.WidgetIntents.ACTION_OPEN) return null
+        val target = intent.getStringExtra(app.yodo.messenger.features.widget.WidgetIntents.EXTRA_TARGET) ?: return null
+        val uid = intent.getStringExtra(app.yodo.messenger.features.widget.WidgetIntents.EXTRA_UID)
+            ?.takeIf { it.isNotBlank() } ?: return null
+        val chat = intent.getStringExtra(app.yodo.messenger.features.widget.WidgetIntents.EXTRA_CHAT_ID)
+            ?.takeIf { it.isNotBlank() && '/' !in it }
+        return WidgetTarget(uid, target, chat)
+    }
+
+    private fun extractReminderTarget(intent: android.content.Intent?): ReminderTarget? {
+        if (intent?.action != app.yodo.messenger.features.reminders.MessageReminderWorker.ACTION_OPEN_REMINDER) return null
+        val uid = intent.getStringExtra("reminderUid") ?: return null
+        val chat = intent.getStringExtra("reminderChatId")?.takeIf { it.isNotBlank() && '/' !in it } ?: return null
+        val message = intent.getStringExtra("reminderMessageId")?.takeIf { it.isNotBlank() && '/' !in it } ?: return null
+        val topic = intent.getStringExtra("reminderTopicId")?.takeIf { it.isNotBlank() && '/' !in it }
+        return ReminderTarget(uid, chat, message, topic)
     }
 
     /** Извлекает chatId канала из ссылки вида yodo://channel/<chatId>, если она есть в intent. */
@@ -254,16 +288,5 @@ class MainActivity : ComponentActivity() {
         val data = intent?.data ?: return null
         if (data.scheme != "yodo" || data.host != "channel") return null
         return data.pathSegments?.firstOrNull()?.takeIf { it.isNotBlank() }
-    }
-
-    /**
-     * НОВОЕ (QR-вход из обычных считывателей): распознаёт ссылку вида
-     * yodo://qrlogin/{sessionId}?pk={base64url-ключ}. Возвращает data-URI целиком —
-     * sessionId и pk вынимаются из него при переходе на экран.
-     */
-    private fun extractQrLoginDataFromIntent(intent: android.content.Intent?): android.net.Uri? {
-        val data = intent?.data ?: return null
-        if (data.scheme != "yodo" || data.host != "qrlogin") return null
-        return data
     }
 }

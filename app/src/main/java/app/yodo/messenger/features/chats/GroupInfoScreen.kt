@@ -1,6 +1,12 @@
 package app.yodo.messenger.features.chats
 
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,17 +31,14 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -94,7 +97,7 @@ fun GroupInfoScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -387,43 +390,16 @@ fun GroupInfoScreen(
     // список пунктов (две длинные надписи в одной строке confirm/dismiss сжимались
     // и налезали друг на друга на узких экранах).
     memberActions?.let { member ->
-        AlertDialog(
-            onDismissRequest = { memberActions = null },
-            title = {
-                Text(
-                    member.displayName,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    MemberActionRow(
-                        icon = Icons.Filled.PersonRemove,
-                        label = "Исключить из группы",
-                        onClick = { memberActions = null; confirmMemberAction = member to "kick" }
-                    )
-                    MemberActionRow(
-                        icon = Icons.Filled.Block,
-                        label = "Забанить",
-                        onClick = { memberActions = null; confirmMemberAction = member to "ban" }
-                    )
-                    // НОВОЕ (передача владения): доступно только текущему владельцу группы,
-                    // не обычному админу.
-                    if ((uiState as? GroupInfoUiState.Content)?.info?.createdBy == viewModel.myUid) {
-                        MemberActionRow(
-                            icon = Icons.Filled.Shield,
-                            label = "Назначить владельцем",
-                            onClick = { memberActions = null; confirmTransferTo = member }
-                        )
-                    }
+        YodoActionSheet(title = member.displayName, subtitle = "Управление участником",
+            onDismissRequest = { memberActions = null }, actions = buildList {
+                if ((uiState as? GroupInfoUiState.Content)?.info?.createdBy == viewModel.myUid) {
+                    add(YodoMenuAction("Назначить владельцем", Icons.Filled.Shield, "Права участника",
+                        description = "Передача владения группой") { confirmTransferTo = member })
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { memberActions = null }) { Text("Отмена") }
-            }
-        )
+                add(YodoMenuAction("Исключить из группы", Icons.Filled.PersonRemove, "Модерация", destructive = true) { confirmMemberAction = member to "kick" })
+                add(YodoMenuAction("Забанить", Icons.Filled.Block, "Модерация", destructive = true) { confirmMemberAction = member to "ban" })
+            })
+
     }
 
     // НОВОЕ (админ-функции групп): подтверждение исключения/бана.

@@ -27,6 +27,10 @@ import app.yodo.messenger.notifications.NotificationHelper
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,13 +49,22 @@ data class ChatUiState(
     val messages: List<Message> = emptyList(),
     val pinnedMessages: List<Message> = emptyList(),
     val isSending: Boolean = false,
+    val queuedTextCount: Int = 0,
+    val failedTextCount: Int = 0,
+    val outboxError: String? = null,
     val errorMessage: String? = null,
+    val noticeMessage: String? = null,
+    val pendingChecklistItems: Set<String> = emptySet(),
+    val conversationSecurity: app.yodo.messenger.core.crypto.ConversationSecurity? = null,
+    val securityLoading: Boolean = false,
+    val securityError: String? = null,
     val otherUserPresence: UserPresence? = null,
     val isOtherUserTyping: Boolean = false,
     // НОВОЕ (индикатор набора текста в группах): имена участников группы, которые сейчас печатают
     // (в приватных чатах используется isOtherUserTyping, здесь — для GROUP/CHANNEL).
     val typingUserNames: List<String> = emptyList(),
     val authorNames: Map<String, String> = emptyMap(),
+    val mentionMembers: List<app.yodo.messenger.domain.model.YodoUser> = emptyList(),
     val replyingTo: Message? = null,
     val editingMessage: Message? = null,
     // НОВОЕ (лента новостей): это официальный канал YodoMessenger (режим новостной ленты).
@@ -101,7 +114,14 @@ data class ChatUiState(
     // НОВОЕ (п.7 «вышел из чата и зашёл — сообщений нет»): false, пока от Firestore
     // не пришёл первый снапшот сообщений (даже пустой). До этого момента в UI
     // показывается индикатор загрузки, а не ложное «Сообщений пока нет».
-    val initialMessagesReceived: Boolean = false
+    val initialMessagesReceived: Boolean = false,
+    // НОВОЕ (пагинация истории): в «живом» окне только последние сообщения. Флаг
+    // говорит, есть ли ещё история выше, а isLoadingOlder — идёт ли подгрузка.
+    val hasMoreHistory: Boolean = true,
+    val isLoadingOlder: Boolean = false,
+    // Растёт после каждой подгруженной страницы — ChatScreen по нему возвращает
+    // прокрутку на то же сообщение, чтобы список не прыгал при вставке сверху.
+    val historyPage: Int = 0
 )
 
 // НОВОЕ (FAQ-бот поддержки): три состояния кнопочного бота внутри чата поддержки —
@@ -109,15 +129,11 @@ data class ChatUiState(
 // Раздел "Не нашли нужный вопрос?" обрабатывается как обычный FaqSection (id = OTHER_SECTION_ID),
 // но его единственный "вопрос" на самом деле не открывает экран ответа, а сразу зовёт оператора
 // (см. ChatScreen: SupportFaqPanel).
-sealed class SupportFaqScreen {
-    object SectionList : SupportFaqScreen()
-    data class QuestionList(val sectionId: String) : SupportFaqScreen()
-    data class Answer(val sectionId: String, val questionId: String) : SupportFaqScreen()
-}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val messageRepository: MessageRepository,
+    private val textOutbox: app.yodo.messenger.data.outbox.TextMessageOutbox,
     private val chatRepository: ChatRepository,
     private val presenceRepository: PresenceRepository,
     private val userRepository: UserRepository,
@@ -127,6 +143,8 @@ class ChatViewModel @Inject constructor(
     private val pendingForwardUndoHolder: PendingForwardUndoHolder,
     private val firebaseAuth: FirebaseAuth,
     private val notificationMessageStore: NotificationMessageStore,
+    private val cryptoManager: app.yodo.messenger.core.crypto.CryptoManager,
+    private val reminderScheduler: app.yodo.messenger.features.reminders.ReminderScheduler,
     @ApplicationContext private val appContext: Context,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -142,7 +160,6 @@ class ChatViewModel @Inject constructor(
         if (sendRateLimiter.tryAcquire()) return false
         val waitSeconds = (sendRateLimiter.retryAfterMillis() / 1000L) + 1
         _uiState.value = _uiState.value.copy(
-            isSending = false,
             errorMessage = "Слишком много сообщений подряд. Подождите $waitSeconds сек."
         )
         return true
@@ -182,6 +199,7 @@ class ChatViewModel @Inject constructor(
     // Заголовок темы, переданный при переходе (для отображения в шапке чата поверх
     // названия группы), если чат открыт как раздел форума.
     val topicTitle: String? = savedStateHandle["topicTitle"]
+    val initialMessageId: String? = savedStateHandle["messageId"]
     val currentUserId: String? get() = firebaseAuth.currentUser?.uid
     // НОВОЕ (FAQ-бот поддержки): чтобы ChatScreen не показывал кнопочный FAQ оператору,
     // который зашёл в этот же support_<uid> чат из админ-панели, чтобы ответить пользователю.
@@ -242,8 +260,62 @@ class ChatViewModel @Inject constructor(
     private val isMySupportChat: Boolean
         get() = chatId.startsWith(ChatRepository.SUPPORT_CHAT_PREFIX) && !chatRepository.isSupportAdmin()
 
+    private var unreadBadge: app.yodo.messenger.domain.model.UnreadBadgeSnapshot? = null
+    private var visibleBadgeMessages: List<Message> = emptyList()
+    private var badgeClearJob: Job? = null
+
+    // НОВОЕ (пагинация истории): уже подгруженные «старые» страницы и текущая
+    // задача подгрузки. Якорь следующей страницы вычисляется на лету в loadOlderPage
+    // (самое старое из известных сообщений), а не хранится отдельным полем: иначе
+    // при последовательной подгрузке нескольких страниц (loadHistoryUntil) якорь
+    // успевал бы устареть, и одна и та же страница читалась бы повторно.
+    private val olderHistory = MutableStateFlow<List<Message>>(emptyList())
+    private var olderLoadJob: Job? = null
+    // Последнее «живое» окно — чтобы при сдвиге окна (пришло новое сообщение)
+    // перенести выпавшие сообщения в olderHistory, а не потерять их.
+    private var lastWindowMessages: List<Message> = emptyList()
+
+    private fun observeUnreadBadge() {
+        viewModelScope.launch {
+            messageRepository.observeUnreadBadge(chatId, topicId).collect { badge ->
+                unreadBadge = badge
+                syncUnreadBadge()
+            }
+        }
+    }
+
+    private fun syncUnreadBadge() {
+        val badge = unreadBadge ?: return
+        val target = badge.topic ?: badge.chat
+        if (target.count == 0 || badgeClearJob?.isActive == true ||
+            !app.yodo.messenger.domain.model.isUnreadTailVisible(target, visibleBadgeMessages)) return
+        val visibleIds = visibleBadgeMessages.map { it.id }
+        badgeClearJob = viewModelScope.launch {
+            try {
+                if (messageRepository.clearUnreadForVisibleMessages(chatId, visibleIds, topicId)) {
+                    notificationMessageStore.clear(chatId)
+                    NotificationHelper.cancelNotification(appContext, chatId)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Retry when the active viewport ticks or the badge changes. */ }
+            finally {
+                badgeClearJob = null
+                if (unreadBadge != badge) syncUnreadBadge()
+            }
+        }
+    }
+
     init {
         loadChatInfo()
+        // НОВОЕ («отметить как непрочитанное»): как только чат реально открыт, локальная
+        // пометка снимается — иначе бейдж в списке чатов оставался бы навсегда.
+        viewModelScope.launch {
+            runCatching {
+                if (chatId in userSettingsPreferences.manualUnreadChatIds.first()) {
+                    userSettingsPreferences.setChatManuallyUnread(chatId, false)
+                }
+            }
+        }
         // НОВОЕ (FAQ-бот поддержки): в чате поддержки бот открыт по умолчанию —
         // пользователь сразу видит разделы вопросов вместо пустого поля ввода.
         // Если это чат поддержки не выяснится сразу (chatType грузится асинхронно
@@ -255,11 +327,11 @@ class ChatViewModel @Inject constructor(
             }
         }
         observeMessages()
+        observeUnreadBadge()
         observePinnedMessages()
         observeTyping()
         observeDisappearingTtl()
         observeScheduledMessages()
-        markAsRead()
         loadDraft()
         cleanupExpiredMessagesPeriodically()
         publishDueScheduledMessagesPeriodically()
@@ -338,24 +410,24 @@ class ChatViewModel @Inject constructor(
     }
 
     /** Планирует отправку текста (и/или фото из reply-контекста) на указанный момент времени. */
-    fun scheduleMessage(text: String, scheduledForMillis: Long) {
-        if (text.isBlank()) return
+    fun scheduleMessage(text: String, scheduledForMillis: Long, onScheduled: (() -> Unit)? = null) {
+        if (_uiState.value.isSending || text.isBlank() || blockGuard() || supportRestrictionGuard() || rateLimitGuard()) return
         clearTypingStatus()
-        viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
         val replying = _uiState.value.replyingTo
-        val replyContext = replying?.let {
-            ReplyContext(
-                messageId = it.id,
-                senderName = if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle,
-                text = it.previewText()
-            )
-        }
-        _uiState.value = _uiState.value.copy(replyingTo = null)
+        val replyContext = replying?.let { ReplyContext(it.id, if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle, it.previewText()) }
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            when (val result = messageRepository.scheduleMessage(chatId, text, scheduledForMillis, replyTo = replyContext)) {
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
-                else -> {}
-            }
+            try {
+                when (val result = messageRepository.scheduleMessage(chatId, text, scheduledForMillis, replyTo = replyContext)) {
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                    is SendMessageResult.Success -> {
+                        _uiState.value = _uiState.value.copy(replyingTo = null)
+                        if (onScheduled != null) onScheduled() else draftsPreferences.clearDraft(chatId)
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось запланировать сообщение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
@@ -468,9 +540,13 @@ class ChatViewModel @Inject constructor(
                 if (!chatInfoInitialized) {
                     chatInfoInitialized = true
                     info.otherUserId?.let { observePresence(it) }
+                    if (info.type == "PRIVATE" && !chatId.startsWith("support_") && !chatId.startsWith("saved_")) {
+                        info.otherUserId?.let { observeSecurity(it) }
+                    }
                     if (info.type == "GROUP" || info.type == "CHANNEL") {
-                        val names = chatRepository.getGroupInfo(chatId)?.members?.associate { it.uid to it.displayName }.orEmpty()
-                        _uiState.value = _uiState.value.copy(authorNames = names)
+                        val members = chatRepository.getGroupInfo(chatId)?.members.orEmpty()
+                        val names = members.associate { it.uid to it.displayName }
+                        _uiState.value = _uiState.value.copy(authorNames = names, mentionMembers = members)
                         // НОВОЕ (модерация): права текущего пользователя (владелец/роль) —
                         // по ним UI решает, показывать ли удаление чужих сообщений.
                         if (myUid != null) {
@@ -556,24 +632,197 @@ class ChatViewModel @Inject constructor(
         return uids.mapNotNull { cache[it] }
     }
 
+    private var securityListenerJob: Job? = null
+
+    private fun observeSecurity(peerUid: String) {
+        securityListenerJob?.cancel()
+        securityListenerJob = viewModelScope.launch {
+            cryptoManager.observeKeyChanges(peerUid).collectLatest { refreshSecurity(peerUid) }
+        }
+        viewModelScope.launch { runCatching { messageRepository.clearLegacyPrivatePreview(chatId) } }
+    }
+
+    private suspend fun refreshSecurity(peerUid: String) {
+        _uiState.value = _uiState.value.copy(securityLoading = true, securityError = null)
+        try {
+            val info = cryptoManager.inspectConversation(peerUid)
+            _uiState.value = _uiState.value.copy(conversationSecurity = info, securityError = null)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(securityError = e.toUserMessage("Не удалось проверить ключи. Подключитесь к сети"))
+        } finally { _uiState.value = _uiState.value.copy(securityLoading = false) }
+    }
+
+    fun refreshConversationSecurity() {
+        val peer = _uiState.value.otherUserId ?: return
+        viewModelScope.launch { refreshSecurity(peer) }
+    }
+
+    fun verifyPeerKey(expected: String) {
+        val peer = _uiState.value.otherUserId ?: return
+        _uiState.value = _uiState.value.copy(securityLoading = true, securityError = null)
+        viewModelScope.launch {
+            try {
+                cryptoManager.verifyPeerKey(peer, expected)
+                refreshSecurity(peer)
+                _uiState.value = _uiState.value.copy(noticeMessage = appContext.getString(app.yodo.messenger.R.string.security_peer_verified))
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(securityError = e.toUserMessage("Не удалось подтвердить ключ")) }
+            finally { _uiState.value = _uiState.value.copy(securityLoading = false) }
+        }
+    }
+
+    fun activateOwnKey(expected: String?) {
+        val peer = _uiState.value.otherUserId ?: return
+        _uiState.value = _uiState.value.copy(securityLoading = true, securityError = null)
+        viewModelScope.launch {
+            try { cryptoManager.activateThisDevice(expected); refreshSecurity(peer) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(securityError = e.toUserMessage("Не удалось активировать ключ")) }
+            finally { _uiState.value = _uiState.value.copy(securityLoading = false) }
+        }
+    }
+
     private fun observeMessages() {
         viewModelScope.launch {
-            messageRepository.observeMessages(chatId, topicId).collect { messages ->
-                _uiState.value = _uiState.value.copy(
-                    messages = messages,
-                    // п.7: первый снапшот (даже пустой) означает, что данные получены —
-                    // дальше «Сообщений пока нет» уже не ложное, а настоящее состояние.
-                    initialMessagesReceived = true
+            val localEchoes = mutableMapOf<String, Message>()
+            var previouslyFailedIds = emptySet<String>()
+            combine(
+                // НОВОЕ (пагинация истории): слушаем только последнюю страницу сообщений,
+                // а не всю историю чата. Старые страницы докидываются в olderHistory по
+                // прокрутке вверх (loadOlderMessages) — см. mergeHistoryPages.
+                messageRepository.observeMessages(chatId, topicId, limit = CHAT_HISTORY_PAGE_SIZE),
+                textOutbox.items,
+                olderHistory
+            ) { window, outbox, older ->
+                val messages = mergeHistoryPages(older, window)
+                val pending = outbox.filter { it.owner == currentUserId && it.chat == chatId && (topicId == null || it.topic == topicId) }
+                localEchoes.keys.removeAll(previouslyFailedIds - pending.map { it.id }.toSet())
+                previouslyFailedIds = pending.filter { it.failed }.map { it.id }.toSet()
+                pending.forEach { localEchoes[it.id] = it.message() }
+                // A commit result and a snapshot can arrive on different dispatchers. Keep the echo
+                // across that gap, but let an acknowledged snapshot (including deletion) always win.
+                val acknowledgedIds = messages.filter { it.status != app.yodo.messenger.domain.model.MessageStatus.SENDING }.map { it.id }.toSet()
+                localEchoes.keys.removeAll(acknowledgedIds)
+                localEchoes.entries.removeAll { it.value.senderId != currentUserId }
+                Triple(
+                    app.yodo.messenger.data.outbox.mergeOutgoingMessages(messages, localEchoes.values.toList()),
+                    pending,
+                    window
                 )
-                // ФИКС (бейдж непрочитанных): markAsRead() раньше вызывался только при
-                // открытии чата. Если сообщение (например одноразовое фото) приходило, пока
-                // чат уже открыт, счётчик непрочитанных на сервере рос, а в главном меню бейдж
-                // оставался. Теперь помечаем как прочитанное при каждом входящем сообщении,
-                // пока экран чата открыт.
-                val myUid = firebaseAuth.currentUser?.uid
-                val lastFromOther = messages.lastOrNull()?.senderId?.let { it != myUid } ?: false
-                if (lastFromOther) markAsRead()
+            }.collect { (messages, pending, window) ->
+                // Скользящее окно: когда приходят новые сообщения, самые старые выпадают
+                // из него. Их нельзя терять — пользователь уже видел их выше, поэтому
+                // переносим в olderHistory (удаление сообщений здесь soft-delete, документ
+                // остаётся в окне с isDeleted = true, так что «выпасть» может только по сдвигу).
+                val windowIds = window.map { it.id }.toSet()
+                val windowOldest = window.firstOrNull()?.timestamp
+                val droppedFromWindow = if (windowOldest == null) emptyList() else
+                    lastWindowMessages.filter { old -> old.timestamp < windowOldest && old.id !in windowIds }
+                if (droppedFromWindow.isNotEmpty()) {
+                    olderHistory.value = (olderHistory.value + droppedFromWindow)
+                        .distinctBy { it.id }
+                        .sortedBy { it.timestamp }
+                }
+                lastWindowMessages = window
+                _uiState.value = _uiState.value.copy(messages = messages, initialMessagesReceived = true,
+                    queuedTextCount = pending.size, failedTextCount = pending.count { it.failed },
+                    outboxError = pending.firstOrNull { it.failed }?.error,
+                    // Короткое окно = в чате меньше одной страницы сообщений, значит
+                    // вся история уже загружена и подгружать сверху нечего.
+                    hasMoreHistory = _uiState.value.hasMoreHistory && window.size >= CHAT_HISTORY_PAGE_SIZE)
             }
+        }
+    }
+
+    /**
+     * НОВОЕ (пагинация истории): подгрузить следующую страницу старых сообщений.
+     * Вызывается, когда пользователь докрутил чат почти до верхней границы.
+     */
+    fun loadOlderMessages() {
+        if (olderLoadJob?.isActive == true) return
+        if (!_uiState.value.hasMoreHistory) return
+        olderLoadJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingOlder = true)
+            try {
+                loadOlderPage()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось загрузить историю"))
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoadingOlder = false)
+            }
+        }
+    }
+
+    /**
+     * НОВОЕ (переход к старому сообщению): прокручивает историю вверх, пока сообщение
+     * не появится в загруженном окне (ограниченное число страниц — защита от циклов).
+     */
+    fun loadHistoryUntil(messageId: String) {
+        if (olderLoadJob?.isActive == true) return
+        if (isMessageLoaded(messageId)) return
+        olderLoadJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingOlder = true)
+            try {
+                var pages = 0
+                while (pages < 10 && _uiState.value.hasMoreHistory && !isMessageLoaded(messageId)) {
+                    if (!loadOlderPage()) break
+                    pages++
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось загрузить историю"))
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoadingOlder = false)
+            }
+        }
+    }
+
+    /**
+     * Сообщение уже загружено? Проверяем и очередь старых страниц: после loadOlderPage
+     * она обновляется сразу, а uiState.messages — чуть позже, следующим эмитом combine.
+     */
+    private fun isMessageLoaded(messageId: String): Boolean =
+        _uiState.value.messages.any { it.id == messageId } || olderHistory.value.any { it.id == messageId }
+
+    /** Читает одну страницу вверх и добавляет её в olderHistory. false — история кончилась. */
+    private suspend fun loadOlderPage(): Boolean {
+        // Якорь — самое старое из уже известных сообщений: страницы в olderHistory
+        // идут по возрастанию, живое окно тоже, поэтому достаточно двух первых.
+        // Считаем здесь, а не в combine: при последовательной подгрузке нескольких
+        // страниц combine ещё не успевает эмитить, и закешированный якорь был бы старым.
+        val anchor = listOfNotNull(
+            olderHistory.value.firstOrNull()?.timestamp,
+            lastWindowMessages.firstOrNull()?.timestamp,
+            _uiState.value.messages.firstOrNull()?.timestamp
+        ).minOrNull() ?: return false
+        val page = messageRepository.getMessagesPage(chatId, topicId, anchor, CHAT_HISTORY_PAGE_SIZE)
+        if (page.isEmpty()) {
+            _uiState.value = _uiState.value.copy(hasMoreHistory = false)
+            return false
+        }
+        olderHistory.value = (olderHistory.value + page).distinctBy { it.id }
+        _uiState.value = _uiState.value.copy(
+            historyPage = _uiState.value.historyPage + 1,
+            hasMoreHistory = hasOlderHistory(page, CHAT_HISTORY_PAGE_SIZE)
+        )
+        return true
+    }
+
+    fun retryQueuedMessages() {
+        viewModelScope.launch {
+            try { textOutbox.retry(chatId) }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.message) }
+        }
+    }
+
+    fun discardFailedMessages() {
+        viewModelScope.launch {
+            try { textOutbox.discardFailed(chatId) }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.message) }
         }
     }
 
@@ -585,18 +834,28 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun markAsRead() {
-        // НОВОЕ (бейдж непрочитанных по темам): если открыт конкретный раздел форума,
-        // сбрасываем непрочитанные именно у него, а не у чата целиком.
-        if (topicId != null) {
-            viewModelScope.launch { chatRepository.markTopicAsRead(chatId, topicId) }
-        } else {
-            viewModelScope.launch { messageRepository.markChatAsRead(chatId) }
+    private val receiptConfirmedIds = mutableSetOf<String>()
+    private val receiptPendingIds = mutableSetOf<String>()
+
+    fun onMessagesVisible(ids: List<String>) {
+        visibleBadgeMessages = _uiState.value.messages.filter {
+            it.id in ids && it.status !in listOf(app.yodo.messenger.domain.model.MessageStatus.SENDING, app.yodo.messenger.domain.model.MessageStatus.FAILED)
         }
-        // Пользователь открыл чат — накопленная для rich-уведомления история больше не нужна,
-        // и само уведомление (если ещё висит в шторке) можно убрать.
-        viewModelScope.launch { notificationMessageStore.clear(chatId) }
-        NotificationHelper.cancelNotification(appContext, chatId)
+        syncUnreadBadge()
+        val visible = _uiState.value.messages.filter { it.id in ids && !it.isDeleted && !it.textDecryptionFailed }
+            .map { it.id }.filter { it !in receiptConfirmedIds && it !in receiptPendingIds }
+        if (visible.isEmpty()) return
+        receiptPendingIds.addAll(visible)
+        viewModelScope.launch {
+            try {
+                messageRepository.markMessagesAsRead(chatId, visible, topicId)
+                receiptConfirmedIds.addAll(visible)
+                notificationMessageStore.clear(chatId)
+                NotificationHelper.cancelNotification(appContext, chatId)
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* The active viewport retries; do not acknowledge unseen messages. */ }
+            finally { receiptPendingIds.removeAll(visible.toSet()) }
+        }
     }
 
     fun onInputTextChanged(text: String) {
@@ -630,6 +889,10 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setEditingMessage(message: Message?) {
+        if (message?.textDecryptionFailed == true) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Сообщение не расшифровано — редактирование остановлено")
+            return
+        }
         _uiState.value = _uiState.value.copy(editingMessage = message, replyingTo = null)
     }
 
@@ -639,54 +902,47 @@ class ChatViewModel @Inject constructor(
     // - hasExplicitTtl = true, explicitTtlSeconds = null -> пользователь явно ВЫКЛЮЧИЛ
     //   исчезание для этого конкретного сообщения (даже если в чате TTL по умолчанию включён).
     // - hasExplicitTtl = true, explicitTtlSeconds = N -> пользователь явно выбрал таймер N сек.
-    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false, silent: Boolean = false) {
-        if (text.isBlank()) return
-        // НОВОЕ (реальная блокировка): нельзя писать, если кто-то кого-то заблокировал.
-        if (blockGuard()) return
-        // НОВОЕ (п.19 ТЗ): нельзя писать в поддержку при активном ограничении.
-        if (supportRestrictionGuard()) return
+    fun sendMessage(text: String, explicitTtlSeconds: Long? = null, hasExplicitTtl: Boolean = false, silent: Boolean = false, onSent: (() -> Unit)? = null) {
+        if (_uiState.value.isSending || text.isBlank() || blockGuard() || supportRestrictionGuard()) return
         val editing = _uiState.value.editingMessage
-        // НОВОЕ (rate limiting): лимитируем только отправку новых сообщений, а не
-        // редактирование уже существующих — правка не создаёт новый флуд.
-        if (editing == null && rateLimitGuard()) return
         clearTypingStatus()
-        viewModelScope.launch { draftsPreferences.clearDraft(chatId) }
-        if (editing != null) {
-            _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null, editingMessage = null)
+        val replying = _uiState.value.replyingTo
+        val replyContext = replying?.let {
+            ReplyContext(it.id, if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle, it.previewText())
+        }
+        if (editing == null) {
+            // Clear the composer only after the encrypted request has been durably saved.
+            _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
             viewModelScope.launch {
-                when (val result = messageRepository.editMessage(chatId, editing.id, text)) {
-                    is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
-                }
+                try {
+                    textOutbox.enqueue(chatId, text, topicId, replyContext, hasExplicitTtl, explicitTtlSeconds, silent)
+                    _uiState.value = _uiState.value.copy(replyingTo = null)
+                    if (onSent != null) onSent() else draftsPreferences.clearDraft(chatId)
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось сохранить сообщение")) }
+                finally { _uiState.value = _uiState.value.copy(isSending = false) }
             }
             return
         }
-        val replying = _uiState.value.replyingTo
-        val replyContext = replying?.let {
-            ReplyContext(
-                messageId = it.id,
-                senderName = if (it.senderId == currentUserId) "Вы" else _uiState.value.chatTitle,
-                text = it.previewText()
-            )
-        }
-        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null, replyingTo = null)
+        // Do not clear the input, draft, quote, or edit target before the protected write succeeds.
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
-            // НОВОЕ (п.18 ТЗ): только 1 активное обращение в поддержку без ответа —
-            // проверяем непосредственно перед отправкой (актуальное состояние из Firestore).
-            if (awaitingSupportReplyGuard()) return@launch
-            when (val result = messageRepository.sendMessage(
-                chatId, text, replyContext,
-                hasTtlOverride = hasExplicitTtl, ttlOverrideSeconds = explicitTtlSeconds,
-                silent = silent, topicId = topicId
-            )) {
-                is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
-            }
+            try {
+                val result = messageRepository.editMessage(chatId, editing.id, text)
+                when (result) {
+                    is SendMessageResult.Success -> {
+                        _uiState.value = _uiState.value.copy(editingMessage = null, replyingTo = null)
+                        if (onSent != null) onSent() else draftsPreferences.clearDraft(chatId)
+                    }
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить сообщение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
-    // НОВОЕ (реальная блокировка): единая проверка перед отправкой. Возвращает true,
-    // если отправка запрещена (и выставляет понятное сообщение об ошибке).
+    // Existing contact block checks still apply before encryption.
     private fun blockGuard(): Boolean {
         val s = _uiState.value
         if (s.otherBlockedMe) {
@@ -732,32 +988,40 @@ class ChatViewModel @Inject constructor(
 
     // НОВОЕ (картинки из буфера + подпись): передаём необязательную подпись к фото.
     fun sendImage(base64: String, caption: String = "", isViewOnce: Boolean = false) {
-        if (blockGuard()) return
+        if (_uiState.value.isSending || blockGuard()) return
         if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            try {
             if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendImageMessage(chatId, base64, caption = caption, isViewOnce = isViewOnce, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить вложение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
     // НОВОЕ (несколько фото): отправляем несколько фото одним сообщением-альбомом.
     fun sendImages(imagesBase64: List<String>, caption: String = "") {
         if (imagesBase64.isEmpty()) return
-        if (blockGuard()) return
+        if (_uiState.value.isSending || blockGuard()) return
         if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            try {
             if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendImagesMessage(chatId, imagesBase64, caption = caption, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить вложение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
@@ -781,47 +1045,59 @@ class ChatViewModel @Inject constructor(
 
     // НОВОЕ (п.37): отправка записанного голосового сообщения.
     fun sendVoice(base64: String, durationMs: Long) {
-        if (blockGuard()) return
+        if (_uiState.value.isSending || blockGuard()) return
         if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            try {
             if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendVoiceMessage(chatId, base64, durationMs, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить вложение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
     // НОВОЕ: отправка файлового вложения — base64 + метаданные уже подготовлены
     // на уровне UI (см. FileUtils.prepareFileForSending), здесь только пересылка в репозиторий.
     fun sendFile(base64: String, fileName: String, mimeType: String, sizeBytes: Long) {
-        if (blockGuard()) return
+        if (_uiState.value.isSending || blockGuard()) return
         if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            try {
             if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendFileMessage(chatId, base64, fileName, mimeType, sizeBytes, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить вложение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
     // НОВОЕ: отправка геолокации — точки на карте.
     fun sendLocation(lat: Double, lng: Double) {
-        if (blockGuard()) return
+        if (_uiState.value.isSending || blockGuard()) return
         if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            try {
             if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendLocationMessage(chatId, lat, lng, topicId = topicId)) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить вложение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
@@ -839,23 +1115,83 @@ class ChatViewModel @Inject constructor(
         correctOptionIndex: Int? = null,
         explanation: String? = null
     ) {
-        if (blockGuard()) return
+        if (_uiState.value.isSending || blockGuard()) return
         if (supportRestrictionGuard()) return
         if (rateLimitGuard()) return
         _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
         viewModelScope.launch {
+            try {
             if (awaitingSupportReplyGuard()) return@launch
             when (val result = messageRepository.sendPollMessage(
                 chatId, question, options, isAnonymous, allowMultipleAnswers, closesAtMillis,
                 isQuiz, correctOptionIndex, explanation, topicId = topicId
             )) {
                 is SendMessageResult.Success -> _uiState.value = _uiState.value.copy(isSending = false)
-                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(isSending = false, errorMessage = result.message)
+                is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
             }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.toUserMessage("Не удалось отправить вложение")) }
+            finally { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 
     // НОВОЕ (расширенные опросы): голос/переголосование по варианту ответа.
+    fun scheduleReminder(message: Message, at: Long) {
+        val uid = currentUserId ?: return
+        viewModelScope.launch {
+            try {
+                reminderScheduler.schedule(uid, chatId, message.id, message.topicId, at)
+                _uiState.value = _uiState.value.copy(noticeMessage = appContext.getString(app.yodo.messenger.R.string.reminder_saved))
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = appContext.getString(app.yodo.messenger.R.string.reminder_save_failed))
+            }
+        }
+    }
+
+    fun cancelReminder(message: Message) {
+        val uid = currentUserId ?: return
+        viewModelScope.launch {
+            try {
+                reminderScheduler.cancel(uid, chatId, message.id)
+                _uiState.value = _uiState.value.copy(noticeMessage = appContext.getString(app.yodo.messenger.R.string.reminder_cancelled))
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = appContext.getString(app.yodo.messenger.R.string.reminder_save_failed))
+            }
+        }
+    }
+
+    fun consumeNotice() { _uiState.value = _uiState.value.copy(noticeMessage = null) }
+
+    fun sendChecklist(title: String, items: List<String>) {
+        if (_uiState.value.isSending || blockGuard() || supportRestrictionGuard() || rateLimitGuard()) return
+        if (_uiState.value.chatType != "GROUP") return
+        _uiState.value = _uiState.value.copy(isSending = true, errorMessage = null)
+        viewModelScope.launch {
+            try {
+                when (val result = messageRepository.sendChecklistMessage(chatId, title, items, topicId)) {
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                    else -> Unit
+                }
+            } finally { _uiState.value = _uiState.value.copy(isSending = false) }
+        }
+    }
+
+    fun setChecklistItemChecked(messageId: String, index: Int, checked: Boolean) {
+        val key = "$messageId:$index"
+        if (key in _uiState.value.pendingChecklistItems || blockGuard()) return
+        _uiState.value = _uiState.value.copy(pendingChecklistItems = _uiState.value.pendingChecklistItems + key)
+        viewModelScope.launch {
+            try {
+                when (val result = messageRepository.setChecklistItemChecked(chatId, messageId, index, checked)) {
+                    is SendMessageResult.Error -> _uiState.value = _uiState.value.copy(errorMessage = result.message)
+                    else -> Unit
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(pendingChecklistItems = _uiState.value.pendingChecklistItems - key)
+            }
+        }
+    }
+
     fun voteOnPoll(messageId: String, optionIndex: Int) {
         viewModelScope.launch {
             when (val result = messageRepository.voteOnPoll(chatId, messageId, optionIndex)) {
@@ -928,8 +1264,35 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // Оптимистичный апдейт реакции: меняем message.reactions в uiState сразу,
+    // не дожидаясь транзакции Firestore. Следующий снапшот из observeMessages()
+    // всё равно перезапишет messages целиком и либо подтвердит, либо (при ошибке)
+    // переопределит наш локальный патч — поэтому на ошибке откатываем вручную.
     fun toggleReaction(messageId: String, emoji: String) {
-        viewModelScope.launch { messageRepository.toggleReaction(chatId, messageId, emoji) }
+        val uid = currentUserId ?: return
+        val before = _uiState.value.messages
+        val after = before.map { msg ->
+            if (msg.id != messageId) return@map msg
+            val current = msg.reactions[emoji] ?: emptyList()
+            val updated = if (uid in current) current - uid else current + uid
+            val newReactions = if (updated.isEmpty()) {
+                msg.reactions - emoji
+            } else {
+                msg.reactions + (emoji to updated)
+            }
+            msg.copy(reactions = newReactions)
+        }
+        _uiState.value = _uiState.value.copy(messages = after)
+        viewModelScope.launch {
+            try {
+                messageRepository.toggleReaction(chatId, messageId, emoji)
+            } catch (e: Exception) {
+                // Откатываем только если список ещё не успел обновиться новым снапшотом.
+                if (_uiState.value.messages === after) {
+                    _uiState.value = _uiState.value.copy(messages = before)
+                }
+            }
+        }
     }
 
     // НОВОЕ (F3 статистика постов): отмечаем просмотр поста канала при показе на экране.

@@ -53,6 +53,41 @@ service cloud.firestore {
         request.resource.data.deletedBy == request.auth.uid;
     }
 
+    // Receipt writers may acknowledge only themselves, never the sender or another device's user.
+    function messageReceiptCreateAllowed(chatId) {
+      let d = request.resource.data;
+      return !('recipientIds' in d) || (
+        d.recipientIds is list &&
+        d.recipientIds.toSet() == get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []).toSet().difference([request.auth.uid].toSet()) &&
+        d.deliveredTo == [] && d.readBy == [] && d.status == 'SENT' && d.sentAt == request.time
+      );
+    }
+    function receiptStatus(d) {
+      return d.recipientIds.size() > 0 && d.readBy.hasAll(d.recipientIds) ? 'READ' :
+        (d.recipientIds.size() > 0 && d.deliveredTo.hasAll(d.recipientIds) ? 'DELIVERED' : 'SENT');
+    }
+    function ownReceiptList(oldList, newList) {
+      return newList is list && newList.size() == newList.toSet().size() &&
+        newList.hasAll(oldList) && newList.toSet().difference(oldList.toSet()).hasOnly([request.auth.uid]);
+    }
+    function validReceiptChange(chatId) {
+      let old = resource.data;
+      let d = request.resource.data;
+      let member = request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participantIds', []);
+      return member && request.auth.uid != old.senderId &&
+        d.diff(old).affectedKeys().hasOnly(['status', 'deliveredTo', 'readBy']) &&
+        (('recipientIds' in old) ? (
+          request.auth.uid in old.recipientIds &&
+          ownReceiptList(old.get('deliveredTo', []), d.deliveredTo) &&
+          ownReceiptList(old.get('readBy', []), d.readBy) &&
+          d.deliveredTo.hasAll(d.readBy) && d.status == receiptStatus(d)
+        ) : (
+          d.diff(old).affectedKeys().hasOnly(['status']) &&
+          ((old.get('status', 'SENT') == 'SENT' && d.status in ['DELIVERED', 'READ']) ||
+           (old.get('status', 'SENT') == 'DELIVERED' && d.status == 'READ') ||
+           old.get('status', 'SENT') == d.status)
+        ));
+    }
     // НОВОЕ (одноразовые медиа "на один просмотр"): получатель (не автор) view-once
     // фото должен иметь возможность стереть imageBase64 и пометить viewOnceOpened=true
     // сразу после полноэкранного просмотра — иначе фото так и останется читаемым на
@@ -67,6 +102,150 @@ service cloud.firestore {
         !("imageBase64" in request.resource.data) &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(["imageBase64", "viewOnceOpened"]);
+    }
+
+    // Canvas v1 is a PNG preview, not a shared editable document or P2P session.
+    function canvasCreationAllowed() {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['canvasLocalId', 'canvasVersion']) || (
+        d.canvasVersion == 1 && d.canvasLocalId is string &&
+        d.canvasLocalId.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') &&
+        d.imageBase64 is string && d.imageBase64.size() > 0 && d.imageBase64.size() <= 650000 &&
+        d.get('isViewOnce', false) == false &&
+        !d.keys().hasAny(['imagesBase64', 'voiceBase64', 'fileBase64', 'checklistTitle'])
+      );
+    }
+    function canvasUpdateAllowed() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['canvasLocalId', 'canvasVersion']);
+    }
+
+    // Group checklists: immutable definition; each operation changes exactly one completion.
+    function checklistGroupMember(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return isSignedIn() && chat.get('type', '') == 'GROUP' &&
+        request.auth.uid in chat.get('participantIds', []) &&
+        !(request.auth.uid in chat.get('bannedUserIds', []));
+    }
+    function validChecklistLabel(items, index) {
+      return items.size() <= index ||
+        (items[index] is string && items[index].size() > 0 && items[index].size() <= 200);
+    }
+    function checklistCreationAllowed(chatId) {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['checklistTitle', 'checklistItems', 'checklistCheckedBy', 'checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) || (
+        checklistGroupMember(chatId) && d.senderId == request.auth.uid &&
+        d.get('text', '') == '' &&
+        d.checklistTitle is string && d.checklistTitle.size() > 0 && d.checklistTitle.size() <= 100 &&
+        d.checklistItems is list && d.checklistItems.size() >= 1 && d.checklistItems.size() <= 20 &&
+        validChecklistLabel(d.checklistItems, 0) &&
+        validChecklistLabel(d.checklistItems, 1) &&
+        validChecklistLabel(d.checklistItems, 2) &&
+        validChecklistLabel(d.checklistItems, 3) &&
+        validChecklistLabel(d.checklistItems, 4) &&
+        validChecklistLabel(d.checklistItems, 5) &&
+        validChecklistLabel(d.checklistItems, 6) &&
+        validChecklistLabel(d.checklistItems, 7) &&
+        validChecklistLabel(d.checklistItems, 8) &&
+        validChecklistLabel(d.checklistItems, 9) &&
+        validChecklistLabel(d.checklistItems, 10) &&
+        validChecklistLabel(d.checklistItems, 11) &&
+        validChecklistLabel(d.checklistItems, 12) &&
+        validChecklistLabel(d.checklistItems, 13) &&
+        validChecklistLabel(d.checklistItems, 14) &&
+        validChecklistLabel(d.checklistItems, 15) &&
+        validChecklistLabel(d.checklistItems, 16) &&
+        validChecklistLabel(d.checklistItems, 17) &&
+        validChecklistLabel(d.checklistItems, 18) &&
+        validChecklistLabel(d.checklistItems, 19) &&
+        d.checklistCheckedBy is map && d.checklistCheckedBy.size() == 0 &&
+        !d.keys().hasAny(['checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) &&
+        (d.get('topicId', null) == null ||
+          get(/databases/$(database)/documents/chats/$(chatId)/topics/$(d.topicId)).data.get('isClosed', false) != true)
+      );
+    }
+    function checklistCompletionAllowed(chatId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let index = after.get('checklistLastItemIndex', -1);
+      let key = string(index);
+      let oldValue = before.get('checklistCheckedBy', {}).get(key, '');
+      let newValue = after.get('checklistCheckedBy', {}).get(key, '');
+      return checklistGroupMember(chatId) && before.get('isDeleted', false) != true &&
+        (before.get('expiresAt', null) == null || before.expiresAt > request.time.toMillis()) &&
+        (before.get('topicId', null) == null ||
+          get(/databases/$(database)/documents/chats/$(chatId)/topics/$(before.topicId)).data.get('isClosed', false) != true) &&
+        before.get('checklistItems', []) is list &&
+        index is int && index >= 0 && index < before.get('checklistItems', []).size() &&
+        after.checklistCheckedBy is map &&
+        after.diff(before).affectedKeys().hasOnly(
+          ['checklistCheckedBy', 'checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) &&
+        after.checklistCheckedBy.diff(before.get('checklistCheckedBy', {})).affectedKeys().hasOnly([key]) &&
+        ((oldValue == '' && newValue == request.auth.uid) || (oldValue != '' && newValue == '')) &&
+        after.checklistUpdatedBy == request.auth.uid && after.checklistUpdatedAt == request.time;
+    }
+    function checklistUpdateGuard(chatId) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['checklistTitle', 'checklistItems', 'checklistCheckedBy', 'checklistLastItemIndex', 'checklistUpdatedBy', 'checklistUpdatedAt']) ||
+        checklistCompletionAllowed(chatId);
+    }
+
+    // Text protection for regular two-person private chats; support/self-chat are explicit exceptions.
+    function protectedPrivateChat(chatId) {
+      return !chatId.matches('saved_.*') && !isSupportChat(chatId) &&
+        get(/databases/$(database)/documents/chats/$(chatId)).data.get('type', '') == 'PRIVATE';
+    }
+    function safePrivateTextShape(d, participants) {
+      return d.get('text', '') == '' && d.get('replyToText', '') == '' &&
+        d.get('replyToSenderName', '') == '' && !d.keys().hasAny(['_plainPreview', 'lastMessagePlain']) &&
+        (d.get('encrypted', false) != true || (
+          participants.size() == 2 && d.get('encryptedPayloadVersion', 0) == 2 &&
+          d.encByUid is map && d.encByUid.keys().hasOnly(participants) && d.encByUid.keys().hasAll(participants) &&
+          d.encByUid[participants[0]] is string && d.encByUid[participants[0]].size() > 0 &&
+          d.encByUid[participants[1]] is string && d.encByUid[participants[1]].size() > 0
+        ));
+    }
+    function privateMessageCreateAllowed(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return !protectedPrivateChat(chatId) || (
+        request.auth.uid in chat.get('participantIds', []) &&
+        safePrivateTextShape(request.resource.data, chat.get('participantIds', []))
+      );
+    }
+    function privateMessageUpdateAllowed(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !protectedPrivateChat(chatId) || (
+        request.resource.data.get('senderId', '') == resource.data.get('senderId', '') && (
+          // Preserve administrative deletion, never administrative plaintext replacement.
+          (isOfficialChannelAdmin() && request.resource.data.get('isDeleted', false) == true &&
+            request.resource.data.get('text', '') == '' &&
+            changed.hasOnly(['isDeleted', 'deletedByAdmin', 'text', 'imageBase64', 'fileBase64', 'fileName',
+                            'fileMimeType', 'fileSizeBytes', 'locationLat', 'locationLng'])) ||
+          (request.auth.uid in chat.get('participantIds', []) && (
+            !changed.hasAny(['text', 'replyToText', 'replyToSenderName', 'encrypted', 'encByUid', 'encryptedPayloadVersion', '_plainPreview', 'lastMessagePlain']) ||
+            safePrivateTextShape(request.resource.data, chat.get('participantIds', [])) ||
+            (request.auth.uid == resource.data.senderId && request.resource.data.get('isDeleted', false) == true &&
+              request.resource.data.get('text', '') == '' &&
+              changed.hasOnly(['isDeleted', 'deletedByAdmin', 'text', 'imageBase64', 'fileBase64', 'fileName',
+                              'fileMimeType', 'fileSizeBytes', 'locationLat', 'locationLng']))
+          ))
+        )
+      );
+    }
+    function previewCreateAllowed(chatId) {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['lastMessagePlain']) &&
+        (d.get('type', '') != 'PRIVATE' || chatId.matches('saved_.*') || isSupportChat(chatId) ||
+         d.get('lastMessage', '') in ['', '🔒 Сообщение', 'Личное сообщение']);
+    }
+    function previewUpdateAllowed(chatId) {
+      let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['lastMessagePlain']) || !d.keys().hasAny(['lastMessagePlain'])) &&
+        (resource.data.get('type', '') != 'PRIVATE' || chatId.matches('saved_.*') || isSupportChat(chatId) || (
+          d.get('type', '') == resource.data.get('type', '') &&
+          d.get('participantIds', []) == resource.data.get('participantIds', []) &&
+          (!changed.hasAny(['lastMessage']) || d.get('lastMessage', '') in ['', '🔒 Сообщение', 'Личное сообщение'])
+        ));
     }
 
     function isOfficialChannelAdmin() {
@@ -229,7 +408,9 @@ service cloud.firestore {
     // "подтвердите почту". Менять могут только 2 доверенных email.
     match /config/appSettings {
       allow read: if true;
-      allow write: if isOfficialChannelAdmin();
+      allow write: if isOfficialChannelAdmin() &&
+        (!('boardSyncIntervalMs' in request.resource.data) ||
+          (request.resource.data.boardSyncIntervalMs is int && request.resource.data.boardSyncIntervalMs >= 0 && request.resource.data.boardSyncIntervalMs <= 5000));
     }
 
     // НОВОЕ (FAQ-бот поддержки): редактируемый из веб-админки (раздел
@@ -571,28 +752,6 @@ service cloud.firestore {
         resource.data.uid == request.auth.uid;
     }
 
-    // НОВОЕ (доски, веб-версия): рисование от руки с автосохранением.
-    // create/delete — только владелец (ownerUid == свой uid). Чтение —
-    // любому авторизованному, иначе получатель не откроет доску,
-    // отправленную в чат. Update разрешён любому авторизованному, но со
-    // строгими ограничениями: нельзя подменить владельца, нельзя раздуть
-    // документ (лимит штрихов), менять можно только title/strokes/updatedAt.
-    match /boards/{boardId} {
-      allow create: if isSignedIn() &&
-        request.resource.data.ownerUid == request.auth.uid;
-
-      allow read: if isSignedIn();
-
-      allow update: if isSignedIn() &&
-        request.resource.data.ownerUid == resource.data.ownerUid &&
-        request.resource.data.strokes.size() <= 1000 &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['title', 'strokes', 'updatedAt']);
-
-      allow delete: if isSignedIn() &&
-        resource.data.ownerUid == request.auth.uid;
-    }
-
     match /chats/{chatId} {
       // п.41: официальный канал YodoMessenger должен быть виден и открываем
       // ВСЕМ авторизованным пользователям (это рассылка от админов, а не
@@ -639,7 +798,7 @@ service cloud.firestore {
       // id (saved_/support_) можно создавать только для самого себя, а официальный
       // канал — только админам. Добавлять чужие uid в participantIds своего нового
       // чата по-прежнему можно — это и есть «создать группу с участниками».
-      allow create: if isSignedIn() &&
+      allow create: if isSignedIn() && previewCreateAllowed(chatId) &&
         request.resource.data.createdBy == request.auth.uid &&
         request.auth.uid in request.resource.data.participantIds &&
         (!isSupportChat(chatId) || chatId == 'support_' + request.auth.uid) &&
@@ -661,7 +820,14 @@ service cloud.firestore {
       //  НОВОЕ (передача владения): поле createdBy теперь защищено явно —
       //  менять его может только нынешний владелец, и только на пользователя,
       //  который уже состоит в группе (see transferOwnership()).
-      allow update: if isSignedIn() &&
+      // A reader of the public official channel may reset only their own badge, not edit posts/settings.
+      allow update: if isSignedIn() && chatId == 'yodo_official_channel' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadCounts']) &&
+        request.resource.data.get('unreadCounts', {}).diff(resource.data.get('unreadCounts', {}))
+          .affectedKeys().hasOnly([request.auth.uid]) &&
+        request.resource.data.get('unreadCounts', {}).get(request.auth.uid, -1) == 0;
+
+      allow update: if isSignedIn() && previewUpdateAllowed(chatId) &&
         (isSupportChat(chatId)
           ? canAccessSupportChat(chatId)
           : chatId == 'yodo_official_channel'
@@ -794,7 +960,7 @@ service cloud.firestore {
             // участников одновременно — это законное совместное обновление любым
             // участником чата (не только владельцем/админом).
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['lastMessage', 'lastMessageTimestamp', 'lastMessageSenderId', 'unreadCounts'])
+              .hasOnly(['lastMessage', 'lastMessageTimestamp', 'lastMessageSenderId', 'lastMessageId', 'unreadCounts'])
           );
 
         allow delete: if isSignedIn() &&
@@ -883,6 +1049,20 @@ service cloud.firestore {
 
       // НОВОЕ (AD): чтение жалоб/обжалований официального канала для двух админов
       // (очередь жалоб). Обычные жалобы в других чатах — по participantIds выше.
+      match /scheduledMessages/{messageId} {
+        allow read: if isSignedIn() && resource.data.senderId == request.auth.uid &&
+          (chatId == ('saved_' + request.auth.uid) ||
+           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds);
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds &&
+          privateMessageCreateAllowed(chatId);
+        allow update: if isSignedIn() && resource.data.senderId == request.auth.uid &&
+          request.resource.data.senderId == resource.data.senderId &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds &&
+          privateMessageUpdateAllowed(chatId);
+        allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+      }
+
       match /messages/{messageId} {
         // Сообщения официального канала читают все, но отправлять (create)
         // в него могут только два админа.
@@ -906,7 +1086,7 @@ service cloud.firestore {
             (isSupportChat(chatId) && canAccessSupportChat(chatId)) ||
             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           );
-        allow create: if isSignedIn() &&
+        allow create: if isSignedIn() && messageReceiptCreateAllowed(chatId) && privateMessageCreateAllowed(chatId) && checklistCreationAllowed(chatId) && canvasCreationAllowed() &&
           (chatId != 'yodo_official_channel' || isOfficialChannelAdmin()) &&
           (
             // Отправитель сообщения обязан совпадать с текущим пользователем —
@@ -942,8 +1122,12 @@ service cloud.firestore {
         // ветка update сужена только до «мягкого удаления» (полей, которые
         // трогает deleteMessage/deleteMessages) — полный произвольный rewrite
         // чужого сообщения остаётся доступным лишь глобальным админам.
-        allow update: if isSignedIn() &&
+        allow update: if isSignedIn() && (
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'recipientIds', 'deliveredTo', 'readBy', 'sentAt'])
+          ? validReceiptChange(chatId)
+          : (privateMessageUpdateAllowed(chatId) && checklistUpdateGuard(chatId) && canvasUpdateAllowed() &&
           (
+            checklistCompletionAllowed(chatId) ||
             // ИСПРАВЛЕНО (AS): админы могут модерировать сообщения в любом чате.
             isOfficialChannelAdmin() ||
             (chatId != 'yodo_official_channel' && request.auth.uid == resource.data.senderId) ||
@@ -969,7 +1153,7 @@ service cloud.firestore {
               .hasOnly(['isPinned']) ||
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['commentsCount'])
-          );
+          )));
 
         // ИСПРАВЛЕНО (AS): раньше админ мог удалить сообщение только в официальном
         // канале, поэтому удаление жалобного сообщения из раздела «Жалобы» падало с
@@ -1009,6 +1193,191 @@ service cloud.firestore {
           allow update: if false;
         }
       }
+    }
+
+    // ============================================================
+    // ОНЛАЙН-ДОСКА (этап 5): совместное рисование через интернет.
+    // Приглашение → сессия → пакеты протокола доски (кадры CanvasFrames).
+    // Содержимое НЕ шифруется сквозным шифрованием: его видят участники и владелец проекта Firebase.
+    // Рекомендуется включить TTL-политику Firestore по полю expireAt для коллекций
+    // canvasSessions, canvasInvites, toGuest, toHost, cursors (остатки удаляются автоматически).
+    // ============================================================
+    function canvasUuid(id) {
+      return id.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+    }
+    function canvasSessionData(sid) {
+      return get(/databases/$(database)/documents/canvasSessions/$(sid)).data;
+    }
+    function canvasParticipant(sid) {
+      let s = canvasSessionData(sid);
+      return isSignedIn() && (s.hostUid == request.auth.uid || s.guestUid == request.auth.uid);
+    }
+    // Пакет может создать только нужная сторона, и только пока сессия активна.
+    function canvasPacketWriter(sid, role) {
+      let s = canvasSessionData(sid);
+      return isSignedIn() && s.status == 'active' &&
+        (role == 'host' ? s.hostUid == request.auth.uid : s.guestUid == request.auth.uid);
+    }
+    function canvasPacketShape(n) {
+      return n.matches('^[0-9]{10}$') &&
+        request.resource.data.keys().hasOnly(['frame', 'expireAt']) &&
+        request.resource.data.frame is string &&
+        request.resource.data.frame.size() > 0 && request.resource.data.frame.size() <= 40000 &&
+        request.resource.data.expireAt is timestamp &&
+        request.resource.data.expireAt > request.time &&
+        request.resource.data.expireAt <= request.time + duration.value(1, 'd');
+    }
+
+    // Одноразовое приглашение: код -> id сессии. Получить можно только по точному коду, списка нет.
+    match /canvasInvites/{code} {
+      allow get: if isSignedIn() && code.matches('^[A-HJ-NP-Z2-9]{8}$');
+      allow list: if false;
+      allow create: if isSignedIn() && code.matches('^[A-HJ-NP-Z2-9]{8}$') &&
+        request.resource.data.keys().hasOnly(['sid', 'hostUid', 'expireAt']) &&
+        request.resource.data.hostUid == request.auth.uid &&
+        request.resource.data.sid is string && canvasUuid(request.resource.data.sid) &&
+        request.resource.data.expireAt is timestamp &&
+        request.resource.data.expireAt > request.time &&
+        request.resource.data.expireAt <= request.time + duration.value(15, 'm') &&
+        getAfter(/databases/$(database)/documents/canvasSessions/$(request.resource.data.sid)).data.hostUid == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/canvasSessions/$(request.resource.data.sid)).data.inviteCode == code;
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+    }
+
+    // Сессия двух участников. status: open -> joined (гость вошёл по коду) -> active (ведущий разрешил) -> ended.
+    match /canvasSessions/{sid} {
+      function canvasChangedKeys() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+      allow get: if canvasUuid(sid) && isSignedIn() &&
+        (resource.data.hostUid == request.auth.uid || resource.data.guestUid == request.auth.uid);
+      allow list: if false;
+      allow create: if isSignedIn() && canvasUuid(sid) &&
+        request.resource.data.keys().hasOnly(['hostUid', 'hostName', 'guestUid', 'guestName', 'status',
+          'inviteCode', 'createdAt', 'expireAt', 'hostSeen', 'guestSeen']) &&
+        request.resource.data.hostUid == request.auth.uid &&
+        request.resource.data.status == 'open' &&
+        request.resource.data.guestUid == null && request.resource.data.guestName == null &&
+        request.resource.data.guestSeen == null &&
+        request.resource.data.hostName is string && request.resource.data.hostName.size() <= 40 &&
+        request.resource.data.inviteCode is string &&
+        request.resource.data.inviteCode.matches('^[A-HJ-NP-Z2-9]{8}$') &&
+        request.resource.data.createdAt == request.time && request.resource.data.hostSeen == request.time &&
+        request.resource.data.expireAt is timestamp &&
+        request.resource.data.expireAt > request.time &&
+        request.resource.data.expireAt <= request.time + duration.value(1, 'd');
+      allow update: if isSignedIn() && canvasUuid(sid) && (
+        // 1) Вход гостя по действующему приглашению (одно место).
+        (resource.data.status == 'open' && resource.data.guestUid == null &&
+          request.auth.uid != resource.data.hostUid &&
+          canvasChangedKeys().hasOnly(['guestUid', 'guestName', 'status', 'guestSeen']) &&
+          request.resource.data.guestUid == request.auth.uid &&
+          request.resource.data.status == 'joined' &&
+          request.resource.data.guestName is string && request.resource.data.guestName.size() <= 40 &&
+          request.resource.data.guestSeen == request.time &&
+          exists(/databases/$(database)/documents/canvasInvites/$(resource.data.inviteCode)) &&
+          get(/databases/$(database)/documents/canvasInvites/$(resource.data.inviteCode)).data.sid == sid &&
+          get(/databases/$(database)/documents/canvasInvites/$(resource.data.inviteCode)).data.expireAt > request.time) ||
+        // 2) Ведущий: разрешить вход, завершить сессию, обновить «пульс».
+        (resource.data.hostUid == request.auth.uid &&
+          canvasChangedKeys().hasOnly(['status', 'hostSeen']) &&
+          (!('status' in canvasChangedKeys()) ||
+            (resource.data.status == 'joined' && request.resource.data.status == 'active') ||
+            request.resource.data.status == 'ended') &&
+          (!('hostSeen' in canvasChangedKeys()) || request.resource.data.hostSeen == request.time)) ||
+        // 3) Гость: завершить сессию, обновить «пульс».
+        (resource.data.guestUid == request.auth.uid &&
+          canvasChangedKeys().hasOnly(['status', 'guestSeen']) &&
+          (!('status' in canvasChangedKeys()) || request.resource.data.status == 'ended') &&
+          (!('guestSeen' in canvasChangedKeys()) || request.resource.data.guestSeen == request.time))
+      );
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+    }
+
+    // Пакеты: ведущий пишет в toGuest, гость — в toHost. Пакет создаётся один раз и не меняется.
+    match /canvasSessions/{sid}/toGuest/{n} {
+      allow read, delete: if canvasUuid(sid) && canvasParticipant(sid);
+      allow create: if canvasUuid(sid) && canvasPacketWriter(sid, 'host') && canvasPacketShape(n);
+      allow update: if false;
+    }
+    match /canvasSessions/{sid}/toHost/{n} {
+      allow read, delete: if canvasUuid(sid) && canvasParticipant(sid);
+      allow create: if canvasUuid(sid) && canvasPacketWriter(sid, 'guest') && canvasPacketShape(n);
+      allow update: if false;
+    }
+    // Курсор: один документ на участника, перезаписывается.
+    match /canvasSessions/{sid}/cursors/{uid} {
+      allow read, delete: if canvasUuid(sid) && canvasParticipant(sid);
+      allow create, update: if canvasUuid(sid) && isSignedIn() && request.auth.uid == uid &&
+        canvasParticipant(sid) &&
+        request.resource.data.keys().hasOnly(['b', 'expireAt']) &&
+        request.resource.data.b is string && request.resource.data.b.size() > 0 && request.resource.data.b.size() <= 3000 &&
+        request.resource.data.expireAt is timestamp && request.resource.data.expireAt <= request.time + duration.value(1, 'd');
+    }
+
+    // ============================================================
+    // ОБЩАЯ ДОСКА ЧАТА (этап 6): одна постоянная доска на личный чат или группу.
+    //   chats/{chatId}/sharedBoard/meta          — название, сетка, кто и когда менял
+    //   chats/{chatId}/sharedBoardObjects/{id}   — один объект рисунка (JSON), неизменяемый
+    // Читать и писать могут только участники чата. Содержимое НЕ шифруется сквозным шифрованием.
+    // ============================================================
+    function sharedBoardAllowed(chatId) {
+      let c = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return isSignedIn() && c.type in ['PRIVATE', 'GROUP'] && request.auth.uid in c.get('participantIds', []);
+    }
+
+    // A generation fence prevents stale/offline clients from restoring a cleared board.
+    function sharedBoardWritable(chatId, data) {
+      let board = get(/databases/$(database)/documents/chats/$(chatId)/sharedBoard/meta).data;
+      return !board.get('deleted', false) && !board.get('clearing', false) &&
+        data.get('generation', 0) == board.get('generation', 0);
+    }
+
+    match /chats/{chatId}/sharedBoard/{docId} {
+      allow read: if docId == 'meta' && sharedBoardAllowed(chatId);
+      allow create: if docId == 'meta' && sharedBoardAllowed(chatId) &&
+        request.resource.data.keys().hasOnly(['title', 'width', 'height', 'grid', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy', 'generation', 'deleted', 'clearing']) &&
+        request.resource.data.createdBy == request.auth.uid && request.resource.data.updatedBy == request.auth.uid &&
+        request.resource.data.width == 1200 && request.resource.data.height == 900 &&
+        request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'] &&
+        request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 100 &&
+        request.resource.data.get('generation', 0) == 0 && request.resource.data.get('deleted', false) == false && request.resource.data.get('clearing', false) == false &&
+        request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if docId == 'meta' && sharedBoardAllowed(chatId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['grid', 'updatedAt', 'updatedBy', 'generation', 'deleted', 'clearing', 'resetToken']) &&
+        request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time &&
+        request.resource.data.grid in ['NONE', 'SQUARES', 'DOTS'] &&
+        request.resource.data.get('generation', 0) is int &&
+        request.resource.data.get('deleted', false) is bool && request.resource.data.get('clearing', false) is bool &&
+        (
+          // Regular edits/completion retain the generation and deletion state.
+          (request.resource.data.get('generation', 0) == resource.data.get('generation', 0) &&
+            request.resource.data.get('deleted', false) == resource.data.get('deleted', false) &&
+            request.resource.data.get('resetToken', '') == resource.data.get('resetToken', '') &&
+            (request.resource.data.get('clearing', false) == resource.data.get('clearing', false) ||
+              (resource.data.get('clearing', false) && request.resource.data.get('clearing', false) == false))) ||
+          // Reset invalidates all previous-generation objects; explicit recreation is separate.
+          (request.resource.data.get('generation', 0) == resource.data.get('generation', 0) + 1 &&
+            ((request.resource.data.get('clearing', false) == true &&
+              request.resource.data.get('resetToken', '') is string && request.resource.data.get('resetToken', '').size() == 36) ||
+             (resource.data.get('deleted', false) == true && resource.data.get('clearing', false) == false &&
+              request.resource.data.get('deleted', false) == false && request.resource.data.get('clearing', false) == false)))
+        );
+      // Keep a tombstone: active editors must not silently recreate a deleted board.
+      allow delete: if false;
+    }
+
+    match /chats/{chatId}/sharedBoardObjects/{objectId} {
+      allow read: if sharedBoardAllowed(chatId);
+      allow create: if canvasUuid(objectId) && sharedBoardAllowed(chatId) &&
+        request.resource.data.keys().hasOnly(['json', 'authorUid', 'at', 'generation']) &&
+        sharedBoardWritable(chatId, request.resource.data) &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.json is string && request.resource.data.json.size() > 0 && request.resource.data.json.size() <= 120000 &&
+        request.resource.data.at == request.time;
+      allow update: if false;
+      allow delete: if sharedBoardAllowed(chatId);
     }
   }
 }

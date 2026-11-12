@@ -1,11 +1,21 @@
 package app.yodo.messenger.features.profile
 
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.IconButton
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.yodo.messenger.ui.components.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,26 +37,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -70,7 +74,6 @@ import app.yodo.messenger.domain.model.PostComment
 import app.yodo.messenger.ui.components.UserAvatar
 import app.yodo.messenger.ui.theme.ColorTheme
 import app.yodo.messenger.util.ImageUtils
-import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -153,10 +156,16 @@ fun ProfilePostsSection(
     }
 
     if (showComposeDialog) {
-        ComposePostDialog(
+        // НОВОЕ: полноценный редактор с форматированием и прикреплением доски из
+        // личной библиотеки (взамен старого простого поля ввода, см. PostEditorDialog.kt).
+        val selectedBoard by viewModel.selectedBoard.collectAsState()
+        PostEditorDialog(
+            colorTheme = colorTheme,
             isPosting = isPosting,
+            selectedBoard = selectedBoard,
+            onSelectBoard = { viewModel.selectBoard(it) },
             onDismiss = { showComposeDialog = false },
-            onPost = { text, uris ->
+            onPublish = { text, uris ->
                 viewModel.createPost(text, uris)
                 showComposeDialog = false
             }
@@ -237,7 +246,14 @@ private fun PostCard(
 
         if (post.text.isNotBlank()) {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(post.text, style = MaterialTheme.typography.bodyMedium)
+            // НОВОЕ: текст поста рендерится с учётом markdown-разметки (жирный/курсив/
+            // зачёркнутый/заголовки/списки/цитаты/ссылки) — см. PostMarkdown.kt.
+            Text(rememberPostAnnotatedText(post.text), style = MaterialTheme.typography.bodyMedium)
+        }
+
+        if (post.hasAttachedBoard) {
+            Spacer(modifier = Modifier.height(10.dp))
+            AttachedBoardCard(post = post, colorTheme = colorTheme)
         }
 
         if (post.photosBase64.isNotEmpty()) {
@@ -361,95 +377,61 @@ private fun PostPhoto(base64: String, modifier: Modifier) {
     }
 }
 
+/**
+ * НОВОЕ: карточка прикреплённой к посту доски — показывает только статичное превью
+ * (bitmap), отрендеренное на момент публикации. Доска остаётся приватной: открыть
+ * или отредактировать её из чужого поста нельзя, здесь нет действия-перехода.
+ */
 @Composable
-private fun ComposePostDialog(
-    isPosting: Boolean,
-    onDismiss: () -> Unit,
-    onPost: (String, List<Uri>) -> Unit
-) {
-    var text by remember { mutableStateOf("") }
-    var selectedUris by remember { mutableStateOf(listOf<Uri>()) }
-    val maxPhotos = 4
-
-    val pickImages = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            selectedUris = (selectedUris + uris).take(maxPhotos)
+private fun AttachedBoardCard(post: Post, colorTheme: ColorTheme) {
+    val base64 = post.attachedBoardPreviewBase64 ?: return
+    val bitmap = remember(base64) { ImageUtils.decodeChatImageBitmapCached(base64) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.Article,
+                contentDescription = null,
+                tint = colorTheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(
+                    post.attachedBoardTitle ?: "Доска",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                post.attachedBoardObjectCount?.let {
+                    Text(
+                        "Объектов: $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
-
-    AlertDialog(
-        onDismissRequest = { if (!isPosting) onDismiss() },
-        title = { Text("Новый пост") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
-                    placeholder = { Text("Что у вас нового?") },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    enabled = !isPosting
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                if (selectedUris.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(selectedUris) { uri ->
-                            Box(modifier = Modifier.size(72.dp)) {
-                                AsyncImage(
-                                    model = uri,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(8.dp))
-                                )
-                                IconButton(
-                                    onClick = { selectedUris = selectedUris - uri },
-                                    modifier = Modifier.size(20.dp).align(Alignment.TopEnd)
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = "Убрать фото",
-                                        tint = Color.White,
-                                        modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                TextButton(
-                    onClick = { pickImages.launch("image/*") },
-                    enabled = !isPosting && selectedUris.size < maxPhotos
-                ) {
-                    Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Добавить фото (${selectedUris.size}/$maxPhotos)")
-                }
-            }
-        },
-        confirmButton = {
-            if (isPosting) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp))
-            } else {
-                Button(
-                    onClick = { onPost(text, selectedUris) },
-                    enabled = text.isNotBlank() || selectedUris.isNotEmpty()
-                ) { Text("Опубликовать") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isPosting) { Text("Отмена") }
-        }
-    )
 }
 
 /**
- * НОВОЕ (AK): окно комментариев под постом в профиле.
- * Комментарий можно удалить, если он ваш или если это ваш пост.
+ * Окно комментариев под постом в профиле: пузыри с аватарками, поле ввода с круглой
+ * кнопкой отправки. Комментарий можно удалить, если он ваш или если это ваш пост.
  */
 @Composable
 private fun PostCommentsDialog(
@@ -463,58 +445,123 @@ private fun PostCommentsDialog(
     onDismiss: () -> Unit
 ) {
     var draft by remember { mutableStateOf("") }
+    val canSend = draft.isNotBlank() && !isSending
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(comments.size) {
+        if (comments.isNotEmpty()) listState.animateScrollToItem(comments.size - 1)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (comments.isEmpty()) "Комментарии" else "Комментарии (${comments.size})") },
+        shape = RoundedCornerShape(26.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Комментарии", fontWeight = FontWeight.Bold)
+                if (comments.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "${comments.size}",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorTheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(colorTheme.primary.copy(alpha = 0.14f))
+                            .padding(horizontal = 9.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (comments.isEmpty()) {
-                    Text(
-                        "Комментариев пока нет. Напишите первым!",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 320.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        comments.forEach { comment ->
-                            Row(modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(colorTheme.primary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Filled.ChatBubbleOutline, contentDescription = null,
+                                tint = colorTheme.primary, modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            "Комментариев пока нет.\nНапишите первым!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(comments.size, key = { comments[it].id }) { i ->
+                            val comment = comments[i]
+                            val mine = currentUserId != null && currentUserId == comment.authorId
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                                 UserAvatar(
                                     displayName = comment.authorName,
                                     photoUrl = comment.authorPhotoUrl,
                                     avatarBase64 = comment.authorAvatarBase64,
-                                    size = 32.dp
+                                    size = 34.dp
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        comment.authorName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colorTheme.primary
-                                    )
-                                    Text(comment.text, style = MaterialTheme.typography.bodyMedium)
-                                    Text(
-                                        formatPostTime(comment.createdAtMillis),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                if (canModerate || (currentUserId != null && currentUserId == comment.authorId)) {
-                                    IconButton(onClick = { onDelete(comment.id) }) {
-                                        Icon(
-                                            Icons.Filled.Delete,
-                                            contentDescription = "Удалить комментарий",
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                                        .background(
+                                            if (mine) colorTheme.primary.copy(alpha = 0.14f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
                                         )
+                                        .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            if (mine) "Вы" else comment.authorName,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colorTheme.primary,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            formatPostTime(comment.createdAtMillis),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        if (canModerate || mine) {
+                                            IconButton(
+                                                onClick = { onDelete(comment.id) },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Delete,
+                                                    contentDescription = "Удалить комментарий",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
+                                    Text(
+                                        comment.text,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
                                 }
                             }
                         }
@@ -522,31 +569,48 @@ private fun PostCommentsDialog(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Ваш комментарий…") },
-                    shape = RoundedCornerShape(20.dp),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    maxLines = 4
-                )
+                Row(verticalAlignment = Alignment.Bottom) {
+                    androidx.compose.material3.TextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Ваш комментарий…") },
+                        shape = RoundedCornerShape(22.dp),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        maxLines = 4,
+                        colors = androidx.compose.material3.TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(if (canSend) colorTheme.primary else colorTheme.primary.copy(alpha = 0.3f))
+                            .clickable(enabled = canSend) {
+                                onSend(draft)
+                                draft = ""
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить",
+                                tint = Color.White, modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
-            if (isSending) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp))
-            } else {
-                Button(
-                    onClick = {
-                        onSend(draft)
-                        draft = ""
-                    },
-                    enabled = draft.isNotBlank()
-                ) { Text("Отправить") }
-            }
-        },
-        dismissButton = {
             TextButton(onClick = onDismiss) { Text("Закрыть") }
         }
     )

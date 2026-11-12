@@ -1,5 +1,7 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.IconButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -42,7 +43,7 @@ fun ArchivedChatsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val colorTheme = LocalColorTheme.current
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             Row(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -83,7 +84,10 @@ fun ArchivedChatsScreen(
                                     onToggleMute = { viewModel.toggleMuteChat(chat.chatId) },
                                     onDelete = { viewModel.deleteChat(chat.chatId) },
                                     onClearHistory = { viewModel.clearChatHistory(chat.chatId) },
-                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) }
+                                    onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
+                                    // НОВОЕ («отметить как непрочитанное»): тот же локальный
+                                    // флаг, что и в основном списке чатов.
+                                    onMarkUnread = { viewModel.markChatUnread(chat.chatId) }
                                 )
                             }
                         }

@@ -1,9 +1,17 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.SupportBotAvatar
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.FloatingActionButton
+import app.yodo.messenger.ui.components.Checkbox
+import app.yodo.messenger.ui.components.DropdownMenuItem
 import app.yodo.messenger.ui.components.OfficialChannelAvatar
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import app.yodo.messenger.ui.components.clickable
+import app.yodo.messenger.ui.components.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +37,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.MarkChatUnread
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
@@ -53,19 +70,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -102,7 +114,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.CompositionLocalProvider
+import app.yodo.messenger.ui.components.LocalGlassBackdrop
+import app.yodo.messenger.ui.components.glassBackdropSource
 import androidx.compose.ui.unit.sp
 import app.yodo.messenger.R
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -157,6 +173,9 @@ fun ChatListScreen(
     // НОВОЕ (админ-функции групп): переход к экрану информации о группе по тапу
     // на бейдж заявок (для владельца/админа — сразу к заявкам, без захода в чат).
     onOpenGroupInfo: (String) -> Unit = {},
+    // Экспериментальный интерфейс: список уходит под нижнюю панель (стекло), поэтому её
+    // высота приходит снаружи и добавляется в contentPadding списка.
+    contentBottomInset: Dp = 0.dp,
     viewModel: ChatListViewModel = hiltViewModel(),
     weatherViewModel: WeatherViewModel = hiltViewModel()
 ) {
@@ -262,21 +281,30 @@ fun ChatListScreen(
                     // настройкой) — отступ, наоборот, УВЕЛИЧЕН (раньше был мелкий
                     // фиксированный 4.dp, из-за чего заголовок оказывался слишком
                     // близко к самому верху экрана).
-                    .liquidGlass(
-                        enabled = experimentalInterface,
-                        shape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp),
-                        tint = glassTint(glassDark),
-                        dark = glassDark,
-                        elevation = 10
-                    )
                     .then(
-                        if (hideStatusBarOnChatList) {
+                        if (experimentalInterface) {
+                            // Плавающая плашка: отступ под статус-баром и по бокам снаружи стекла.
+                            if (hideStatusBarOnChatList) {
+                                Modifier.padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 6.dp)
+                            } else {
+                                val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars
+                                    .asPaddingValues().calculateTopPadding()
+                                Modifier.padding(start = 12.dp, end = 12.dp, top = statusBarHeight + 4.dp, bottom = 6.dp)
+                            }
+                        } else if (hideStatusBarOnChatList) {
                             Modifier.padding(top = 20.dp)
                         } else {
                             val statusBarHeight = androidx.compose.foundation.layout.WindowInsets.statusBars
                                 .asPaddingValues().calculateTopPadding()
                             Modifier.padding(top = (statusBarHeight - 12.dp).coerceAtLeast(0.dp))
                         }
+                    )
+                    .liquidGlass(
+                        enabled = experimentalInterface,
+                        shape = RoundedCornerShape(26.dp),
+                        tint = glassTint(glassDark),
+                        dark = glassDark,
+                        elevation = 10
                     )
             ) {
                 // Заголовок + иконки
@@ -328,7 +356,7 @@ fun ChatListScreen(
                 val tabs = buildList {
                     add(FilterTab(ChatFilter.ALL, stringResource(R.string.chat_filter_all)))
                     add(FilterTab(ChatFilter.UNREAD, stringResource(R.string.chat_filter_unread), 
-                        badge = allActive.count { it.unreadCount > 0 }))
+                        badge = allActive.count { it.unreadCount > 0 || it.isManuallyUnread }))
                     add(FilterTab(ChatFilter.PRIVATE, stringResource(R.string.chat_filter_private)))
                     add(FilterTab(ChatFilter.GROUPS, stringResource(R.string.chat_filter_groups)))
                     // НОВОЕ (расширение интерфейса каналов): отдельный таб «Каналы» —
@@ -382,50 +410,37 @@ fun ChatListScreen(
                         tint = Color.White
                     )
                 }
-                DropdownMenu(
-                    expanded = showFabMenu,
-                    onDismissRequest = { showFabMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_new_chat)) },
-                        onClick = { showFabMenu = false; onSearchClick() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_new_group)) },
-                        onClick = { showFabMenu = false; onCreateGroupClick() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_new_channel)) },
-                        onClick = { showFabMenu = false; onCreateChannelClick() }
-                    )
-                    // НОВОЕ (расширение интерфейса каналов): пункт «Каталог каналов» в FAB-меню —
-                    // рекомендации и подборки каналов по категориям.
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_discover_channels)) },
-                        leadingIcon = { Icon(Icons.Filled.Campaign, contentDescription = null) },
-                        onClick = { showFabMenu = false; onDiscoverChannels() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_list_contacts)) },
-                        leadingIcon = { Icon(Icons.Filled.Contacts, contentDescription = null) },
-                        onClick = { showFabMenu = false; onOpenContacts() }
-                    )
-                    // НОВОЕ (чат поддержки): пункт "Админ-панель поддержки" — только для админов.
-                    if (viewModel.isSupportAdmin) {
-                        DropdownMenuItem(
-                            text = { Text("Админ-панель поддержки") },
-                            leadingIcon = { Icon(Icons.Filled.SupportAgent, contentDescription = null) },
-                            onClick = { showFabMenu = false; onOpenAdminPanel() }
-                        )
-                    }
+                if (showFabMenu) {
+                    YodoActionSheet(title = "Новое общение", subtitle = "Выберите, с чего начать", onDismissRequest = { showFabMenu = false },
+                        actions = buildList {
+                            add(YodoMenuAction(stringResource(R.string.chat_list_new_chat), Icons.Filled.ChatBubbleOutline, "Создать") { onSearchClick() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_new_group), Icons.Filled.Group, "Создать") { onCreateGroupClick() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_new_channel), Icons.Filled.Campaign, "Создать") { onCreateChannelClick() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_discover_channels), Icons.Filled.Campaign, "Найти") { onDiscoverChannels() })
+                            add(YodoMenuAction(stringResource(R.string.chat_list_contacts), Icons.Filled.Contacts, "Найти") { onOpenContacts() })
+                            if (viewModel.isSupportAdmin) add(YodoMenuAction("Админ-панель поддержки", Icons.Filled.AdminPanelSettings, "Управление") { onOpenAdminPanel() })
+                        })
                 }
+
             }
         }
     ) { padding ->
+        // Экспериментальный интерфейс: список проходит под верхней и нижней стеклянными
+        // панелями (иначе нечего преломлять), поэтому вместо padding используем contentPadding.
+        val glassBackdrop = LocalGlassBackdrop.current
+        val listPadding = if (experimentalInterface) {
+            PaddingValues(
+                top = padding.calculateTopPadding(),
+                bottom = padding.calculateBottomPadding() + contentBottomInset
+            )
+        } else {
+            PaddingValues(0.dp)
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .then(if (experimentalInterface) Modifier else Modifier.padding(padding))
+                .glassBackdropSource(if (experimentalInterface) glassBackdrop else null)
                 .softMessengerBackdrop(
                     enabled = experimentalInterface,
                     primary = colorTheme.primary,
@@ -433,6 +448,7 @@ fun ChatListScreen(
                     dark = glassDark
                 )
         ) {
+            CompositionLocalProvider(LocalGlassBackdrop provides null) {
             when (val state = uiState) {
                 is ChatListUiState.Loading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -457,6 +473,7 @@ fun ChatListScreen(
                     } else {
                         LazyColumn(
                             state = chatListState,
+                            contentPadding = listPadding,
                             modifier = Modifier.fillMaxSize().nestedScroll(hiddenPullConnection)
                         ) {
                             // НОВОЕ (папки): внутри папки — кнопка "Добавить" для быстрого добавления
@@ -522,7 +539,7 @@ fun ChatListScreen(
                                 ChatListSortOrder.RECENT -> state.chats
                                 ChatListSortOrder.UNREAD_FIRST -> state.chats.sortedWith(
                                     compareByDescending<ChatPreview> { it.isPinned }
-                                        .thenByDescending { it.unreadCount > 0 }
+                                        .thenByDescending { it.unreadCount > 0 || it.isManuallyUnread }
                                         .thenByDescending { it.lastMessageTimestamp }
                                 )
                                 ChatListSortOrder.ALPHABETICAL -> state.chats.sortedWith(
@@ -542,6 +559,7 @@ fun ChatListScreen(
                                     onToggleArchive = { viewModel.toggleArchiveChat(chat.chatId) },
                                     isHidden = chat.chatId in hiddenChatIds,
                                     onToggleHidden = { viewModel.toggleChatHidden(chat.chatId) },
+                                    onMarkUnread = { viewModel.markChatUnread(chat.chatId) },
                                     // НОВОЕ (админ-функции групп): тап по бейджу заявок —
                                     // сразу к экрану группы с заявками.
                                     onRequestsClick = { onOpenGroupInfo(chat.chatId) },
@@ -623,6 +641,7 @@ fun ChatListScreen(
                     }
                 }
             }
+        }
         }
     }
 
@@ -1218,6 +1237,8 @@ internal fun SwipeableChatListItem(
     onToggleArchive: () -> Unit = {},
     isHidden: Boolean = false,
     onToggleHidden: () -> Unit = {},
+    // НОВОЕ («отметить как непрочитанное»): локальная пометка, снимается при открытии.
+    onMarkUnread: () -> Unit = {},
     // НОВОЕ (админ-функции групп): тап по бейджу заявок на карточке группы.
     onRequestsClick: () -> Unit = {},
     compact: Boolean = false,
@@ -1230,6 +1251,7 @@ internal fun SwipeableChatListItem(
     // или до порога удаления через Animatable, а не через ручной stateful offset.
     val offsetX = remember { androidx.compose.animation.core.Animatable(0f) }
     var showMenu by remember { mutableStateOf(false) }
+    var confirmMenuAction by remember { mutableStateOf<String?>(null) }
     val deleteThreshold = -100f
     val maxDrag = -200f
     val scope = rememberCoroutineScope()
@@ -1310,15 +1332,30 @@ internal fun SwipeableChatListItem(
                 hidePreview = hidePreview
             )
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(text = { Text(if (chat.isPinned) stringResource(R.string.chat_list_unpin) else stringResource(R.string.chat_list_pin)) }, onClick = { showMenu = false; onTogglePin() })
-            DropdownMenuItem(text = { Text(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute)) }, onClick = { showMenu = false; onToggleMute() })
-            DropdownMenuItem(text = { Text(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action)) }, onClick = { showMenu = false; onToggleArchive() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_clear)) }, onClick = { showMenu = false; onClearHistory() })
-            // НОВОЕ (скрытые чаты): скрыть/показать чат (виден только под основным PIN).
-            DropdownMenuItem(text = { Text(if (isHidden) "Показать чат" else "Скрыть чат") }, onClick = { showMenu = false; onToggleHidden() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.chat_list_delete), color = Color.Red) }, onClick = { showMenu = false; onDelete() })
+        if (showMenu) {
+            YodoActionSheet(title = chat.title, subtitle = "Действия с перепиской",
+                onDismissRequest = { showMenu = false }, actions = listOf(
+                    YodoMenuAction(if (chat.isPinned) stringResource(R.string.chat_list_unpin) else stringResource(R.string.chat_list_pin), Icons.Filled.PushPin, "В списке чатов") { onTogglePin() },
+                    YodoMenuAction(if (chat.isMuted) stringResource(R.string.chat_list_unmute) else stringResource(R.string.chat_list_mute), if (chat.isMuted) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, "Уведомления") { onToggleMute() },
+                    YodoMenuAction(if (chat.isArchived) stringResource(R.string.chat_list_unarchive) else stringResource(R.string.chat_list_archive_action), if (chat.isArchived) Icons.Filled.Unarchive else Icons.Filled.Archive, "В списке чатов") { onToggleArchive() },
+                    YodoMenuAction(if (isHidden) "Показать чат" else "Скрыть чат", if (isHidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, "Приватность") { onToggleHidden() },
+                    // НОВОЕ («отметить как непрочитанное»): только локально, серверный
+                    // счётчик непрочитанных вернуть нельзя — пометка снимается при открытии.
+                    YodoMenuAction("Отметить как непрочитанное", Icons.Filled.MarkChatUnread, "Основное") { onMarkUnread() },
+                    YodoMenuAction(stringResource(R.string.chat_list_clear), Icons.Filled.CleaningServices, "Опасные действия", destructive = true) { confirmMenuAction = "clear" },
+                    YodoMenuAction(stringResource(R.string.chat_list_delete), Icons.Filled.Delete, "Опасные действия", destructive = true) { confirmMenuAction = "delete" }
+                ))
         }
+        confirmMenuAction?.let { action ->
+            AlertDialog(onDismissRequest = { confirmMenuAction = null },
+                title = { Text(if (action == "clear") "Очистить историю?" else "Удалить чат?") },
+                text = { Text(if (action == "clear") "Будут удалены сообщения, доступные вам для удаления. Отменить это действие нельзя."
+                    else "Удаление может затронуть историю сообщений. В группе или канале вы также выйдете из числа участников. Продолжить?") },
+                confirmButton = { TextButton(onClick = { confirmMenuAction = null; if (action == "clear") onClearHistory() else onDelete() }) {
+                    Text(if (action == "clear") "Очистить" else "Удалить", color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { TextButton(onClick = { confirmMenuAction = null }) { Text("Отмена") } })
+        }
+
     }
 }
 
@@ -1354,7 +1391,7 @@ private fun ChatListItem(
     // Непрочитанный чат должен читаться с одного взгляда — не только по бейджу
     // с числом, но и по весу заголовка и цвету превью. Прочитанные чаты уходят
     // на второй план, чтобы глаз сам находил, куда нужно вернуться.
-    val hasUnread = !isChannel && chat.unreadCount > 0
+    val hasUnread = chat.unreadCount > 0 || chat.isManuallyUnread
     val titleColor = MaterialTheme.colorScheme.onSurface
     val previewColor = if (hasUnread) {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
@@ -1413,19 +1450,7 @@ private fun ChatListItem(
     ) {
         // Аватар
         if (isSupportChat) {
-            // НОВОЕ (логотип поддержки): фирменный знак поддержки вместо закладки.
-            Box(
-                modifier = Modifier.size(avatarSize).clip(CircleShape)
-                    .background(colorTheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_support_logo),
-                    contentDescription = "Поддержка YodoMessenger",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
+            SupportBotAvatar(size = avatarSize, accent = colorTheme.primary)
         } else if (isSavedChat) {
             Box(
                 modifier = Modifier.size(avatarSize).clip(CircleShape)
@@ -1655,12 +1680,12 @@ private fun ChatListItem(
                         )
                     }
                 }
-                if (!isChannel) {
+                run {
                     // НОВОЕ (motion): бейдж непрочитанных появляется/меняет число с лёгким
                     // всплытием — сообщает "здесь что-то изменилось" тем же языком,
                     // которым бейджи говорят на иконке приложения и в уведомлениях.
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = chat.unreadCount > 0,
+                        visible = hasUnread,
                         enter = androidx.compose.animation.scaleIn(
                             animationSpec = YodoMotion.confirm(),
                             initialScale = 0.4f
@@ -1673,14 +1698,21 @@ private fun ChatListItem(
                         Box(
                             modifier = Modifier.padding(start = 6.dp)
                                 .clip(CircleShape).background(colorTheme.primary)
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                // НОВОЕ («отметить как непрочитанное»): без числа рисуем
+                                // точку 8dp, как в Telegram, — серверного счётчика нет.
+                                .padding(
+                                    horizontal = if (chat.unreadCount > 0) 7.dp else 4.dp,
+                                    vertical = if (chat.unreadCount > 0) 2.dp else 4.dp
+                                )
                         ) {
-                            Text(
-                                text = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            if (chat.unreadCount > 0) {
+                                Text(
+                                    text = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
@@ -1743,13 +1775,7 @@ private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier)
             maxLines = 1,
             modifier = modifier
         )
-        chat.lastSeenMillis > 0 -> Text(
-            stringResource(R.string.chat_list_was_online, formatLastSeen(chat.lastSeenMillis)),
-            style = MaterialTheme.typography.labelMedium,
-            color = Color.Gray,
-            maxLines = 1,
-            modifier = modifier
-        )
+        // «был(а) ...» в списке чатов не показываем — только в самом чате и в профиле.
     }
 }
 
@@ -1764,42 +1790,10 @@ private fun PresenceStatusText(chat: ChatPreview, modifier: Modifier = Modifier)
  */
 @Composable
 private fun LastMessageStatusIcon(rawStatus: String?) {
-    // Тик не влияет на сам статус (он приходит из Firestore), но гарантирует, что
-    // строка списка чатов перерисовывается каждую секунду — так же, как "в сети".
-    rememberNowTick()
-    val (icon, description, tint) = when (rawStatus) {
-        "SENDING" -> Triple(Icons.Filled.Schedule, "Отправка…", Color.Gray)
-        "FAILED" -> Triple(Icons.Filled.ErrorOutline, "Не отправлено", Color(0xFFFF5A5A))
-        "DELIVERED" -> Triple(Icons.Filled.DoneAll, "Доставлено", Color.Gray)
-        "READ" -> Triple(Icons.Filled.DoneAll, "Прочитано", Color(0xFF60E6FF))
-        // "SENT" и любые неизвестные/устаревшие значения — одна серая галочка.
-        else -> Triple(Icons.Filled.Done, "Отправлено", Color.Gray)
-    }
-    Icon(
-        imageVector = icon,
-        contentDescription = description,
-        modifier = Modifier.size(14.dp).padding(top = 2.dp),
-        tint = tint
-    )
-}
+    val status = app.yodo.messenger.domain.model.MessageStatus.entries.firstOrNull { it.name == rawStatus }
+        ?: app.yodo.messenger.domain.model.MessageStatus.SENDING
+    MessageReceiptIndicator(status, compact = true, neutralColor = MaterialTheme.colorScheme.onSurfaceVariant)
 
-@Composable
-private fun formatLastSeen(millis: Long): String {
-    // НОВОЕ (баг 12): время отсчитывается от посекундного тика, а не от момента
-    // композиции — подпись "N сек/мин назад" живая и обновляется каждую секунду.
-    val now = rememberNowTick()
-    val diffMillis = (now - millis).coerceAtLeast(0L)
-    val diffSeconds = diffMillis / 1_000
-    val diffMinutes = diffSeconds / 60
-    return when {
-        diffSeconds < 10 -> stringResource(R.string.chat_list_just_now)
-        diffSeconds < 60 -> "$diffSeconds сек назад"
-        diffMinutes < 60 -> "$diffMinutes мин назад"
-        diffMinutes < 24 * 60 -> "${diffMinutes / 60} ч назад"
-        diffMinutes < 7 * 24 * 60 -> SimpleDateFormat("EEEE, HH:mm", Locale("ru")).format(Date(millis))
-            .replaceFirstChar { it.uppercase() }
-        else -> SimpleDateFormat("d MMM, HH:mm", Locale("ru")).format(Date(millis))
-    }
 }
 
 @Composable

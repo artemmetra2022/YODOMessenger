@@ -1,11 +1,25 @@
 package app.yodo.messenger.data.repository
 
 import app.yodo.messenger.core.crypto.CryptoManager
+import app.yodo.messenger.core.crypto.ProtectedTextPayload
+import app.yodo.messenger.core.crypto.SecureMessagingException
+import com.google.firebase.firestore.MetadataChanges
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import com.google.firebase.firestore.Source
+import kotlinx.coroutines.CancellationException
 import app.yodo.messenger.core.util.toUserMessage
 import app.yodo.messenger.data.local.UserSettingsPreferences
+import app.yodo.messenger.domain.model.UnreadTail
+import app.yodo.messenger.domain.model.UnreadBadgeSnapshot
+import app.yodo.messenger.domain.model.normalizedUnreadCount
+import app.yodo.messenger.domain.model.remainingUnreadAfterTopicRead
 import app.yodo.messenger.domain.model.Comment
 import app.yodo.messenger.domain.model.Message
 import app.yodo.messenger.domain.model.MessageStatus
+import app.yodo.messenger.domain.model.SharedChecklist
 import app.yodo.messenger.domain.model.Poll
 import app.yodo.messenger.domain.model.ScheduledMessage
 import app.yodo.messenger.domain.repository.MessageRepository
@@ -17,6 +31,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import kotlinx.coroutines.delay
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.channels.awaitClose
@@ -37,8 +53,10 @@ class MessageRepositoryImpl @Inject constructor(
     private val userSettingsPreferences: UserSettingsPreferences,
     private val cryptoManager: CryptoManager
 ) : MessageRepository {
+    private val receiptScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val receiptInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    override fun observeMessages(chatId: String, topicId: String?): Flow<List<Message>> = callbackFlow {
+    override fun observeMessages(chatId: String, topicId: String?, limit: Int?): Flow<List<Message>> = callbackFlow {
         // п.7: последний успешно отправленный список — отправляется повторно при ошибке
         // листенера, чтобы сбой сети не очищал уже показанные на экране сообщения.
         var lastEmittedMessages: List<Message>? = null
@@ -50,9 +68,19 @@ class MessageRepositoryImpl @Inject constructor(
         if (topicId != null) {
             query = query.whereEqualTo("topicId", topicId)
         }
+        // НОВОЕ (пагинация истории): с limit слушаем только последние N сообщений —
+        // без него Firestore читал всю историю чата при каждом открытии и на каждое
+        // изменение. Слушатель отдаёт их по возрастанию, как и раньше, чтобы UI
+        // не пришлось менять порядок отрисовки.
+        val pageSize = limit?.takeIf { it > 0 }
+        val paged = pageSize != null
+        query = if (paged) {
+            query.orderBy("timestamp", Query.Direction.DESCENDING).limit(pageSize!!.toLong())
+        } else {
+            query.orderBy("timestamp", Query.Direction.ASCENDING)
+        }
         val listener = query
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 // п.7 («вышел из чата и зашёл — сообщений нет»): при ошибке листенера
                 // (сбой сети в момент подписки, permission denied при устаревшем токене)
                 // НЕ отправляем пустой список — показываем последнее известное состояние,
@@ -62,6 +90,8 @@ class MessageRepositoryImpl @Inject constructor(
                     .mapNotNull { doc -> mapDocToMessage(doc, chatId) }
                     // п.38: истёкшие исчезающие сообщения не показываем в UI
                     .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
+                    // пейджинг читает историю в обратном порядке — возвращаем хронологию
+                    .let { if (paged) it.sortedBy { msg -> msg.timestamp } else it }
                 lastEmittedMessages = messages
                 trySend(messages)
                 // ИСПРАВЛЕНО (индикатор доставлено): как только чужое сообщение со
@@ -81,46 +111,28 @@ class MessageRepositoryImpl @Inject constructor(
      * логируются молча, чат продолжает работать даже если это обновление не удалось.
      */
     private fun markIncomingMessagesAsDelivered(snapshot: QuerySnapshot?) {
-        val myUid = firebaseAuth.currentUser?.uid ?: return
-        if (snapshot == null || snapshot.metadata.hasPendingWrites()) return
-        val toUpdate = snapshot.documents.filter { doc ->
-            doc.getString("senderId") != myUid && doc.getString("status") == MessageStatus.SENT.name
-        }
-        if (toUpdate.isEmpty()) return
-        toUpdate.chunked(500).forEach { chunk ->
-            val batch = firestore.batch()
-            chunk.forEach { doc -> batch.update(doc.reference, "status", MessageStatus.DELIVERED.name) }
-            // Best-effort: если batch не закоммитится (нет сети, отказ правил и т.п.),
-            // просто проглатываем ошибку — это не должно ронять экран чата или ретраить
-            // бесконечно, следующий снапшот всё равно попробует снова.
-            batch.commit().addOnFailureListener { }
-        }
-        // ИСПРАВЛЕНО (галочка "доставлено" не показывалась в списке чатов): раньше
-        // здесь обновлялся только статус самого документа сообщения — поле
-        // chats/{chatId}.lastMessageStatus, которое читает ChatListScreen для
-        // отрисовки одной/двух галочек напротив своего последнего сообщения, оставалось
-        // "SENT" вплоть до READ. У отправителя в списке чатов галочка "доставлено"
-        // никогда не появлялась — сразу перескакивало SENT -> READ (или не менялось
-        // совсем, если получатель ещё не открывал чат). Теперь, если только что
-        // доставленное сообщение — последнее в чате, синхронно поднимаем и статус чата.
-        val chatId = toUpdate.firstOrNull()?.reference?.parent?.parent?.id ?: return
-        val chatRef = firestore.collection("chats").document(chatId)
-        chatRef.get().addOnSuccessListener { chatDoc ->
-            val isStillSent = chatDoc.getString("lastMessageStatus") == MessageStatus.SENT.name
-            val lastMessageIsTheOneJustDelivered =
-                chatDoc.getString("lastMessageSenderId") != myUid
-            if (isStillSent && lastMessageIsTheOneJustDelivered) {
-                chatRef.update("lastMessageStatus", MessageStatus.DELIVERED.name)
-                    .addOnFailureListener { }
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        if (snapshot == null || snapshot.metadata.isFromCache) return
+        snapshot.documents.filter { doc ->
+            doc.getString("senderId") != uid && !doc.metadata.hasPendingWrites() &&
+                if (doc.contains("recipientIds")) uid !in (doc.get("deliveredTo") as? List<*>).orEmpty()
+                else doc.getString("status") == "SENT"
+        }.forEach { doc ->
+            val key = doc.reference.path + ":" + uid
+            if (receiptInFlight.add(key)) receiptScope.launch {
+                try { updateReceipts(doc.reference.parent.parent!!.id, listOf(doc.id), false, null) }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { /* Retry on the next server snapshot / opening. */ }
+                finally { receiptInFlight.remove(key) }
             }
-        }.addOnFailureListener { }
+        }
     }
 
     // НОВОЕ (переработка каналов): одно сообщение — для превью поста в экране комментариев.
     override fun observeMessage(chatId: String, messageId: String): Flow<Message?> = callbackFlow {
         val listener = firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null || snapshot == null || !snapshot.exists()) {
                     trySend(null); return@addSnapshotListener
                 }
@@ -139,13 +151,15 @@ class MessageRepositoryImpl @Inject constructor(
         hasTtlOverride: Boolean = false,
         ttlOverrideSeconds: Long? = null,
         silent: Boolean = false,
-        topicId: String? = null
+        topicId: String? = null,
+        clientMessageId: String? = null
     ): SendMessageResult {
         val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
         return try {
             val chatRef = firestore.collection("chats").document(chatId)
             val chatSnapshot = chatRef.get().await()
             val participantIds = (chatSnapshot.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList<String>()
+            protectTextData(chatId, data, chatSnapshot)
             // БАГ-ФИКС («Кто может мне писать» игнорировалось): раньше настройка
             // whoCanMessageMe проверялась ТОЛЬКО при создании нового чата
             // (ChatRepositoryImpl.createOrGetPrivateChat) — если чат уже существовал
@@ -199,9 +213,14 @@ class MessageRepositoryImpl @Inject constructor(
                 }
             }
             val now = System.currentTimeMillis()
+            if (firebaseAuth.currentUser?.uid != uid) throw SecureMessagingException("Аккаунт изменился. Сообщение не отправлено")
             data["senderId"] = uid
             data["timestamp"] = now
             data["status"] = "SENT"
+            data["sentAt"] = FieldValue.serverTimestamp()
+            data["recipientIds"] = participantIds.filter { it != uid }
+            data["deliveredTo"] = emptyList<String>()
+            data["readBy"] = emptyList<String>()
             topicId?.let { data["topicId"] = it }
             data["notified"] = false
             // НОВОЕ (секретная фича «тихие публикации»): silent-пост не триггерит push
@@ -217,12 +236,9 @@ class MessageRepositoryImpl @Inject constructor(
                 data["expiresAt"] = now + ttlSeconds * 1000L
             }
             val isEncrypted = data["encrypted"] == true
-            // Транзитное поле _plainPreview кладётся tryEncryptTextData перед очисткой
-            // текста — здесь забираем его для открытого превью и сразу убираем,
-            // чтобы в документ сообщения оно не попало.
-            val plainPreview = data.remove("_plainPreview") as? String
             val previewText = if (isEncrypted) "🔒 Сообщение" else (data["text"] as? String)?.takeIf { it.isNotBlank() }
-                ?: if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
+                ?: if (data.containsKey("checklistTitle")) "☑ ${data["checklistTitle"]}"
+                else if (data.containsKey("voiceBase64")) "🎤 Голосовое сообщение"
                 else if (data["isViewOnce"] == true) "📷 Фото (один просмотр)"
                 else if (data.containsKey("imagesBase64")) "📷 Фото (${(data["imagesBase64"] as? List<*>)?.size ?: 1})"
                 else if (data.containsKey("imageBase64")) "📷 Фото"
@@ -233,11 +249,10 @@ class MessageRepositoryImpl @Inject constructor(
                 "lastMessage" to previewText, "lastMessageTimestamp" to now,
                 "lastMessageSenderId" to uid, "lastMessageStatus" to "SENT"
             )
-            // Открытое превью для списка чатов: для шифрованных сообщений — реальный
-            // текст (транзитный _plainPreview), для обычных lastMessage уже содержит
-            // текст и дублировать не нужно.
-            if (isEncrypted && !plainPreview.isNullOrBlank()) {
-                unreadUpdates["lastMessagePlain"] = plainPreview
+            // Legacy plaintext previews are removed, never replaced with message content.
+            unreadUpdates["lastMessagePlain"] = FieldValue.delete()
+            if (isProtectedPrivate(chatId, chatSnapshot.getString("type"))) {
+                unreadUpdates["lastMessage"] = if (isEncrypted) "🔒 Сообщение" else "Личное сообщение"
             }
             participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
                 unreadUpdates["unreadCounts.$otherUid"] = FieldValue.increment(1)
@@ -250,13 +265,15 @@ class MessageRepositoryImpl @Inject constructor(
             // (и «лишний» unread-инкремент). Теперь все записи идут одним атомарным
             // WriteBatch: либо сообщение и сопутствующие обновления применяются вместе,
             // либо не применяется ничего, и повторная отправка действительно оправдана.
-            val newDocRef = chatRef.collection("messages").document()
+            val newDocRef = clientMessageId?.let { chatRef.collection("messages").document(it) }
+                ?: chatRef.collection("messages").document()
             unreadUpdates["lastMessageId"] = newDocRef.id
             val topicUpdates: MutableMap<String, Any?>? = if (topicId != null) {
                 mutableMapOf<String, Any?>(
                     "lastMessage" to previewText,
                     "lastMessageTimestamp" to now,
-                    "lastMessageSenderId" to uid
+                    "lastMessageSenderId" to uid,
+                    "lastMessageId" to newDocRef.id
                 ).also { updates ->
                     participantIds.filterIsInstance<String>().filter { it != uid }.forEach { otherUid ->
                         updates["unreadCounts.$otherUid"] = FieldValue.increment(1)
@@ -278,19 +295,32 @@ class MessageRepositoryImpl @Inject constructor(
             // автоматически повторена (runTransaction), увидит блокировку и завершится ошибкой.
             val isMySupportChatSend = chatId.startsWith("support_") &&
                 chatId == "support_$uid" && data["senderId"] != "support_system"
-            if (isMySupportChatSend) {
+            if (isMySupportChatSend || clientMessageId != null) {
                 try {
                     firestore.runTransaction { txn ->
                         val freshChat = txn.get(chatRef)
+                        val existing = txn.get(newDocRef)
+                        if (existing.exists()) {
+                            check(existing.getString("senderId") == uid) { "ID сообщения уже занят" }
+                            return@runTransaction null
+                        }
+                        val topicRef = topicId?.let { chatRef.collection("topics").document(it) }
+                        val freshTopic = topicRef?.let { txn.get(it) }
+                        check(freshTopic?.getBoolean("isClosed") != true) { "Раздел закрыт для новых сообщений" }
+                        check(firebaseAuth.currentUser?.uid == uid) { "Аккаунт изменился" }
                         val lastSenderId = freshChat.getString("lastMessageSenderId")
                         val lastMessage = freshChat.getString("lastMessage").orEmpty()
-                        if (lastSenderId == uid && lastMessage.isNotBlank()) {
+                        if (isMySupportChatSend && lastSenderId == uid && lastMessage.isNotBlank()) {
                             throw AwaitingSupportReplyException()
                         }
                         txn.set(newDocRef, data)
-                        txn.update(chatRef, unreadUpdates)
-                        if (topicId != null && topicUpdates != null) {
-                            txn.update(chatRef.collection("topics").document(topicId), topicUpdates)
+                        val currentChatUpdates = if ((freshChat.getLong("lastMessageTimestamp") ?: 0L) > now)
+                            unreadUpdates.filterKeys { it.startsWith("unreadCounts.") } else unreadUpdates
+                        txn.update(chatRef, currentChatUpdates)
+                        if (topicRef != null && topicUpdates != null) {
+                            val currentTopicUpdates = if ((freshTopic?.getLong("lastMessageTimestamp") ?: 0L) > now)
+                                topicUpdates.filterKeys { it.startsWith("unreadCounts.") } else topicUpdates
+                            txn.update(topicRef, currentTopicUpdates)
                         }
                         null
                     }.await()
@@ -308,9 +338,11 @@ class MessageRepositoryImpl @Inject constructor(
             if (topicId != null && topicUpdates != null) {
                 batch.update(chatRef.collection("topics").document(topicId), topicUpdates)
             }
+            if (firebaseAuth.currentUser?.uid != uid) throw SecureMessagingException("Аккаунт изменился. Сообщение не отправлено")
             batch.commit().await()
             SendMessageResult.Success(messageId = newDocRef.id)
-        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отправить сообщение")) }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отправить сообщение")) }
     }
 
     // Служебное исключение для runTransaction: сигнализирует, что у пользователя уже
@@ -320,7 +352,7 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun sendMessage(
         chatId: String, text: String, replyTo: ReplyContext?,
         hasTtlOverride: Boolean, ttlOverrideSeconds: Long?, silent: Boolean,
-        topicId: String?
+        topicId: String?, clientMessageId: String?
     ): SendMessageResult {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Сообщение не может быть пустым")
@@ -331,9 +363,8 @@ class MessageRepositoryImpl @Inject constructor(
             data["replyToText"] = replyTo.text
         }
         topicId?.let { data["topicId"] = it }
-        // НОВОЕ (сквозное шифрование): для личных чатов шифруем текст под ключи участников.
-        tryEncryptTextData(chatId, data)
-        val result = sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent, topicId)
+        // All send paths are protected centrally by sendRawMessage, including captions and forwards.
+        val result = sendRawMessage(chatId, data, hasTtlOverride, ttlOverrideSeconds, silent, topicId, clientMessageId)
         // НОВОЕ (автофильтр сообщений): если текст совпал с правилом из
         // config/autoModeration — сразу удаляем отправленное сообщение и пишем
         // запись в историю удалённых. Проверяем открытый текст ДО шифрования,
@@ -344,35 +375,119 @@ class MessageRepositoryImpl @Inject constructor(
         return result
     }
 
-    /**
-     * НОВОЕ (сквозное шифрование, E2EE). Пытается зашифровать текст сообщения для личного
-     * (1-на-1) чата под публичные ключи ОБОИХ участников. При успехе кладёт encByUid
-     * (карту uid -> шифртекст base64), флаг encrypted=true и очищает открытый text, чтобы
-     * на сервере не оставалось читаемого текста. Если чат не личный, участников не двое или
-     * у кого-то нет опубликованного ключа — оставляет обычный текст (плавная деградация).
-     */
-    private suspend fun tryEncryptTextData(chatId: String, data: MutableMap<String, Any?>) {
-        try {
-            val text = data["text"] as? String
-            if (text.isNullOrEmpty()) return
-            val chatSnap = firestore.collection("chats").document(chatId).get().await()
-            val type = chatSnap.getString("type")
-            // Чаты создаются с "type" to "PRIVATE" (заглавными), поэтому сравнение
-            // с "private" строчным регистром отключало E2EE для всех личных чатов.
-            if (type != null && !type.equals("private", ignoreCase = true)) return
-            val participantIds = (chatSnap.get("participantIds") as? List<*>)
-                ?.filterIsInstance<String>() ?: return
-            if (participantIds.size != 2) return
-            val encMap = cryptoManager.encryptForParticipants(participantIds, text) ?: return
-            data["encByUid"] = encMap
-            data["encrypted"] = true
-            // Транзитное поле для открытого превью в списке чатов: sendRawMessage
-            // заберёт его при формировании lastMessagePlain и удалит из data.
-            data["_plainPreview"] = text.take(120)
-            data["text"] = ""
-        } catch (e: Exception) {
-            android.util.Log.w("MessageRepositoryImpl", "tryEncryptTextData failed; sending plaintext", e)
+    private fun isProtectedPrivate(chatId: String, type: String?): Boolean =
+        type.equals("PRIVATE", ignoreCase = true) && !chatId.startsWith("saved_") && !chatId.startsWith("support_")
+
+    /** Fail closed. Only an explicit group/channel/self/support scope may keep plaintext text. */
+    private suspend fun protectTextData(chatId: String, data: MutableMap<String, Any?>, chat: DocumentSnapshot) {
+        val type = chat.getString("type")
+        if (chatId.startsWith("saved_") || chatId.startsWith("support_")) return
+        if (!chat.exists() || type.isNullOrBlank()) throw SecureMessagingException("Не удалось подтвердить тип чата. Сообщение не отправлено")
+        if (!isProtectedPrivate(chatId, type)) {
+            if (type.uppercase() !in listOf("GROUP", "CHANNEL")) throw SecureMessagingException("Неизвестный тип чата. Сообщение не отправлено")
+            return
         }
+        val ids = (chat.get("participantIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+        val owner = firebaseAuth.currentUser?.uid ?: throw SecureMessagingException("Войдите в аккаунт")
+        if (ids.distinct().size != 2 || owner !in ids) throw SecureMessagingException("Не удалось подтвердить участников личного чата")
+        val text = data["text"] as? String ?: ""
+        val replyText = data["replyToText"] as? String
+        val replyName = data["replyToSenderName"] as? String
+        if (text.isEmpty() && replyText.isNullOrEmpty() && replyName.isNullOrEmpty()) return
+        val encrypted = cryptoManager.encryptForParticipants(ids, ProtectedTextPayload(text, replyText, replyName).encode())
+        data["encByUid"] = encrypted
+        data["encrypted"] = true
+        data["encryptedPayloadVersion"] = 2
+        data["text"] = ""
+        data.remove("replyToText")
+        data.remove("replyToSenderName")
+    }
+
+    private fun decryptedPayload(doc: DocumentSnapshot): ProtectedTextPayload? {
+        if (doc.getBoolean("encrypted") != true) {
+            return ProtectedTextPayload(doc.getString("text") ?: "", doc.getString("replyToText"), doc.getString("replyToSenderName"))
+        }
+        val uid = firebaseAuth.currentUser?.uid ?: return null
+        val cipher = (doc.get("encByUid") as? Map<*, *>)?.get(uid) as? String ?: return null
+        val raw = cryptoManager.decrypt(cipher) ?: return null
+        return runCatching {
+            val version = (doc.getLong("encryptedPayloadVersion") ?: 1L).toInt()
+            val decoded = ProtectedTextPayload.decode(raw, version)
+            if (version == 1) decoded.copy(replyText = doc.getString("replyToText"), replySenderName = doc.getString("replyToSenderName")) else decoded
+        }.getOrNull()
+    }
+
+    /** Best effort cleanup of a legacy server preview, without deleting message history. */
+    override suspend fun clearLegacyPrivatePreview(chatId: String) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        val ref = firestore.collection("chats").document(chatId)
+        val doc = ref.get(Source.SERVER).await()
+        if (isProtectedPrivate(chatId, doc.getString("type")) && uid in (doc.get("participantIds") as? List<*>).orEmpty()) {
+            ref.update(mapOf("lastMessagePlain" to FieldValue.delete(), "lastMessage" to "Личное сообщение")).await()
+        }
+    }
+
+    override suspend fun sendChecklistMessage(
+        chatId: String, title: String, items: List<String>, topicId: String?
+    ): SendMessageResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
+        val checklist = runCatching { SharedChecklist.create(title, items) }.getOrNull()
+            ?: return SendMessageResult.Error("Укажите название и от 1 до 20 непустых пунктов")
+        return try {
+            val chat = firestore.collection("chats").document(chatId).get().await()
+            if (chat.getString("type") != "GROUP" || uid !in (chat.get("participantIds") as? List<*>).orEmpty()) {
+                return SendMessageResult.Error("Совместные списки доступны участникам группы")
+            }
+            sendRawMessage(chatId, mutableMapOf<String, Any?>(
+                "text" to "", "checklistTitle" to checklist.title,
+                "checklistItems" to checklist.items, "checklistCheckedBy" to emptyMap<String, String>()
+            ), topicId = topicId)
+        } catch (e: Exception) {
+            SendMessageResult.Error(e.toUserMessage("Не удалось отправить список"))
+        }
+    }
+
+    override suspend fun setChecklistItemChecked(
+        chatId: String, messageId: String, itemIndex: Int, checked: Boolean
+    ): SendMessageResult {
+        val uid = firebaseAuth.currentUser?.uid ?: return SendMessageResult.Error("Вы не авторизованы")
+        return try {
+            val chatRef = firestore.collection("chats").document(chatId)
+            val ref = chatRef.collection("messages").document(messageId)
+            // Desired state, not a blind toggle: transaction retries cannot undo the user's action.
+            firestore.runTransaction { txn ->
+                val chat = txn.get(chatRef)
+                val doc = txn.get(ref)
+                check(chat.getString("type") == "GROUP" && uid in (chat.get("participantIds") as? List<*>).orEmpty())
+                check(doc.exists() && doc.getBoolean("isDeleted") != true)
+                check((doc.getLong("expiresAt") ?: Long.MAX_VALUE) > System.currentTimeMillis())
+                val checklist = SharedChecklist.fromFields(doc.get("checklistTitle"), doc.get("checklistItems"), doc.get("checklistCheckedBy"))
+                    ?: error("Список недоступен")
+                require(itemIndex in checklist.items.indices)
+                doc.getString("topicId")?.let { topic ->
+                    check(txn.get(chatRef.collection("topics").document(topic)).getBoolean("isClosed") != true)
+                }
+                if ((checklist.completedBy(itemIndex) != null) != checked) {
+                    // Only this item changes; concurrent changes to other items survive.
+                    txn.update(ref,
+                        FieldPath.of("checklistCheckedBy", itemIndex.toString()), if (checked) uid else "",
+                        FieldPath.of("checklistLastItemIndex"), itemIndex,
+                        FieldPath.of("checklistUpdatedBy"), uid,
+                        FieldPath.of("checklistUpdatedAt"), FieldValue.serverTimestamp()
+                    )
+                }
+            }.await()
+            SendMessageResult.Success(messageId)
+        } catch (e: Exception) {
+            SendMessageResult.Error(e.toUserMessage("Не удалось изменить пункт. Проверьте связь и права в группе"))
+        }
+    }
+
+    override suspend fun sendCanvasSnapshot(chatId: String, imageBase64: String, title: String, localId: String, topicId: String?): SendMessageResult {
+        if (!app.yodo.messenger.features.canvas.CanvasLimits.validId(localId) || title.isBlank() || title.length > 100 || imageBase64.length !in 1..650000) {
+            return SendMessageResult.Error("Некорректная доска или слишком большое превью")
+        }
+        return sendRawMessage(chatId, mutableMapOf<String, Any?>("imageBase64" to imageBase64, "text" to "🎨 ${title.trim()}", "canvasLocalId" to localId, "canvasVersion" to 1), topicId = topicId)
     }
 
     override suspend fun sendImageMessage(
@@ -627,6 +742,8 @@ class MessageRepositoryImpl @Inject constructor(
                 data["replyToSenderName"] = replyTo.senderName
                 data["replyToText"] = replyTo.text
             }
+            val chat = firestore.collection("chats").document(chatId).get(Source.SERVER).await()
+            protectTextData(chatId, data, chat)
             firestore.collection("chats").document(chatId)
                 .collection("scheduledMessages").add(data).await()
             SendMessageResult.Success()
@@ -636,19 +753,21 @@ class MessageRepositoryImpl @Inject constructor(
     override fun observeScheduledMessages(chatId: String): Flow<List<ScheduledMessage>> = callbackFlow {
         val listener = firestore.collection("chats").document(chatId)
             .collection("scheduledMessages")
+            .whereEqualTo("senderId", firebaseAuth.currentUser?.uid ?: "__signed_out__")
             .orderBy("scheduledFor", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { trySend(emptyList()); return@addSnapshotListener }
                 val items = snapshot?.documents.orEmpty().mapNotNull { doc ->
                     try {
+                        val payload = decryptedPayload(doc)
                         ScheduledMessage(
                             id = doc.id, chatId = chatId,
                             senderId = doc.getString("senderId") ?: return@mapNotNull null,
-                            text = doc.getString("text") ?: "",
+                            text = payload?.text ?: "🔒 Не удалось расшифровать",
                             imageBase64 = doc.getString("imageBase64"),
                             replyToMessageId = doc.getString("replyToMessageId"),
-                            replyToSenderName = doc.getString("replyToSenderName"),
-                            replyToText = doc.getString("replyToText"),
+                            replyToSenderName = payload?.replySenderName,
+                            replyToText = payload?.replyText,
                             scheduledFor = doc.getLong("scheduledFor") ?: 0L,
                             createdAt = doc.getLong("createdAt") ?: 0L
                         )
@@ -667,29 +786,41 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun editScheduledMessage(chatId: String, scheduledMessageId: String, newText: String, newScheduledFor: Long) {
-        try {
-            firestore.collection("chats").document(chatId)
-                .collection("scheduledMessages").document(scheduledMessageId)
-                .update(mapOf("text" to newText.trim(), "scheduledFor" to newScheduledFor)).await()
-        } catch (e: Exception) { }
+        if (newText.isBlank()) throw SecureMessagingException("Отредактированный текст не может быть пустым")
+        val chatRef = firestore.collection("chats").document(chatId)
+        val ref = chatRef.collection("scheduledMessages").document(scheduledMessageId)
+        val original = ref.get(Source.SERVER).await()
+        val uid = firebaseAuth.currentUser?.uid ?: throw SecureMessagingException("Войдите в аккаунт")
+        if (original.getString("senderId") != uid) throw SecureMessagingException("Нет доступа к отложенному сообщению")
+        val payload = decryptedPayload(original) ?: throw SecureMessagingException("Отложенное сообщение не расшифровано")
+        val data = mutableMapOf<String, Any?>("text" to newText.trim(), "scheduledFor" to newScheduledFor)
+        payload.replyText?.let { data["replyToText"] = it }
+        payload.replySenderName?.let { data["replyToSenderName"] = it }
+        protectTextData(chatId, data, chatRef.get(Source.SERVER).await())
+        if (data["encrypted"] == true) {
+            data["replyToText"] = FieldValue.delete()
+            data["replyToSenderName"] = FieldValue.delete()
+        }
+        ref.update(data).await()
     }
 
     override suspend fun publishDueScheduledMessages(chatId: String) {
         try {
-            val now = System.currentTimeMillis()
+            val uid = firebaseAuth.currentUser?.uid ?: return
             val dueRef = firestore.collection("chats").document(chatId).collection("scheduledMessages")
-            val due = dueRef.whereLessThanOrEqualTo("scheduledFor", now).get().await()
-            if (due.isEmpty) return
+            val due = dueRef.whereEqualTo("senderId", uid).whereLessThanOrEqualTo("scheduledFor", System.currentTimeMillis()).get().await()
             due.documents.forEach { doc ->
-                val data = mutableMapOf<String, Any?>("text" to (doc.getString("text") ?: ""))
+                val payload = decryptedPayload(doc) ?: return@forEach
+                val data = mutableMapOf<String, Any?>("text" to payload.text)
                 doc.getString("imageBase64")?.let { data["imageBase64"] = it }
                 doc.getString("replyToMessageId")?.let { data["replyToMessageId"] = it }
-                doc.getString("replyToSenderName")?.let { data["replyToSenderName"] = it }
-                doc.getString("replyToText")?.let { data["replyToText"] = it }
-                sendRawMessage(chatId, data)
-                doc.reference.delete().await()
+                payload.replySenderName?.let { data["replyToSenderName"] = it }
+                payload.replyText?.let { data["replyToText"] = it }
+                // Fresh keys are rechecked by the central send path. Failed sends retain the schedule.
+                if (sendRawMessage(chatId, data) is SendMessageResult.Success) doc.reference.delete().await()
             }
-        } catch (e: Exception) { }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { /* Keep unsent documents; never silently downgrade or delete them. */ }
     }
 
     override suspend fun forwardMessage(
@@ -703,11 +834,21 @@ class MessageRepositoryImpl @Inject constructor(
         // НОВОЕ (одноразовые медиа): view-once фото пересылать нельзя — иначе пересланная
         // копия превратилась бы в обычное, сколько угодно раз открываемое изображение,
         // что противоречит смыслу "один просмотр".
+        if (originalMessage.textDecryptionFailed) return SendMessageResult.Error("Сообщение не расшифровано — пересылка остановлена")
         if (originalMessage.isViewOnce) {
             return SendMessageResult.Error("Фото «на один просмотр» нельзя переслать")
         }
+        // Forward a checklist as a read-only snapshot, never as a linked editable copy.
+        val forwardedText = originalMessage.checklist?.let { checklist ->
+            buildString {
+                appendLine(checklist.title)
+                checklist.items.forEachIndexed { index, label ->
+                    appendLine("${if (checklist.completedBy(index) != null) "[x]" else "[ ]"} $label")
+                }
+            }.trimEnd()
+        } ?: originalMessage.text
         val data = mutableMapOf<String, Any?>(
-            "text" to originalMessage.text,
+            "text" to forwardedText,
             "forwardedFromSenderName" to fromSenderName,
             "forwardedFromSenderId" to fromSenderId
         )
@@ -734,11 +875,32 @@ class MessageRepositoryImpl @Inject constructor(
         val trimmed = newText.trim()
         if (trimmed.isEmpty()) return SendMessageResult.Error("Сообщение не может быть пустым")
         return try {
-            firestore.collection("chats").document(chatId)
-                .collection("messages").document(messageId)
-                .update(mapOf("text" to trimmed, "isEdited" to true)).await()
+            val chatRef = firestore.collection("chats").document(chatId)
+            val ref = chatRef.collection("messages").document(messageId)
+            val original = ref.get(Source.SERVER).await()
+            val uid = firebaseAuth.currentUser?.uid ?: throw SecureMessagingException("Войдите в аккаунт")
+            if (original.getString("senderId") != uid || original.getBoolean("isDeleted") == true) {
+                return SendMessageResult.Error("Это сообщение нельзя редактировать")
+            }
+            val payload = decryptedPayload(original) ?: throw SecureMessagingException("Исходное сообщение не расшифровано. Редактирование остановлено")
+            val data = mutableMapOf<String, Any?>("text" to trimmed, "isEdited" to true)
+            payload.replyText?.let { data["replyToText"] = it }
+            payload.replySenderName?.let { data["replyToSenderName"] = it }
+            val chat = chatRef.get(Source.SERVER).await()
+            protectTextData(chatId, data, chat)
+            if (data["encrypted"] == true) {
+                data["replyToText"] = FieldValue.delete()
+                data["replyToSenderName"] = FieldValue.delete()
+            }
+            ref.update(data).await()
+            if (isProtectedPrivate(chatId, chat.getString("type"))) {
+                try { clearLegacyPrivatePreview(chatId) }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { /* The edit already succeeded; cleanup can be retried later. */ }
+            }
             SendMessageResult.Success()
-        } catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отредактировать")) }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { SendMessageResult.Error(e.toUserMessage("Не удалось отредактировать")) }
     }
 
     override suspend fun deleteMessage(chatId: String, messageId: String, deletedByAdmin: Boolean): SendMessageResult {
@@ -1035,86 +1197,147 @@ class MessageRepositoryImpl @Inject constructor(
                     "lastMessageId" to latestRemaining.id
                 )
             }
-            chatRef.update(updates).await()
+            val safeUpdates = updates.toMutableMap()
+            if (isProtectedPrivate(chatId, chatSnapshot.getString("type")) && latestRemaining != null) {
+                safeUpdates["lastMessage"] = if (latestRemaining.getBoolean("encrypted") == true) "🔒 Сообщение" else "Личное сообщение"
+            }
+            chatRef.update(safeUpdates).await()
         } catch (e: Exception) {
             // Best-effort: если пересчёт не удался (нет сети, отказ правил и т.п.), само
             // удаление сообщения уже применилось — не превращаем это в ошибку пользователю.
         }
     }
 
-    override suspend fun markChatAsRead(chatId: String) {
-        val uid = firebaseAuth.currentUser?.uid ?: return
-        try {
-            val showReadReceipts = userSettingsPreferences.showReadReceipts.first()
-            val chatRef = firestore.collection("chats").document(chatId)
-            val messagesRef = chatRef.collection("messages")
-            // whereNotEqualTo требует составного индекса — заменяем на фильтрацию
-            // в памяти: загружаем SENT- и DELIVERED-сообщения (статусы до READ),
-            // затем отбираем чужие. Читаем это всегда (не только при showReadReceipts),
-            // так как ниже используем этот же список, чтобы синхронизировать unreadCounts
-            // без гонки (см. комментарий ниже) — при выключенных read receipts переход
-            // статусов в READ просто не выполняется, но список для подсчёта нужен всё равно.
-            val sentSnapshot = messagesRef.whereEqualTo("status", "SENT").get().await()
-            val deliveredSnapshot = messagesRef.whereEqualTo("status", "DELIVERED").get().await()
-            val unreadDocs = (sentSnapshot.documents + deliveredSnapshot.documents)
-                .filter { it.getString("senderId") != uid }
-            if (showReadReceipts) {
-                // ИСПРАВЛЕНО: раньше проверялся только "SENT" — сообщения, уже помеченные
-                // DELIVERED, не переходили в READ при открытии чата. Batch делим по 500,
-                // чтобы не превысить лимит Firestore.
-                if (unreadDocs.isNotEmpty()) {
-                    unreadDocs.chunked(500).forEach { chunk ->
-                        val batch = firestore.batch()
-                        chunk.forEach { doc -> batch.update(doc.reference, "status", "READ") }
-                        batch.commit().await()
-                    }
-                }
-                val chatSnapshot = chatRef.get().await()
-                if (chatSnapshot.getString("lastMessageSenderId") != uid) {
-                    chatRef.update("lastMessageStatus", "READ").await()
+    private fun unreadTail(doc: DocumentSnapshot, uid: String) = UnreadTail(
+        count = normalizedUnreadCount((doc.get("unreadCounts") as? Map<*, *>)?.get(uid)),
+        lastMessageId = doc.getString("lastMessageId"),
+        timestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
+        senderId = doc.getString("lastMessageSenderId"))
+
+    override fun observeUnreadBadge(chatId: String, topicId: String?): Flow<UnreadBadgeSnapshot> = callbackFlow {
+        val uid = firebaseAuth.currentUser?.uid ?: run { close(); return@callbackFlow }
+        val chatRef = firestore.collection("chats").document(chatId)
+        var chat: UnreadTail? = null
+        var topic: UnreadTail? = null
+        fun emit() {
+            val current = chat ?: return
+            if (firebaseAuth.currentUser?.uid == uid && (topicId == null || topic != null))
+                trySend(UnreadBadgeSnapshot(current, topic))
+        }
+        val chatListener = chatRef.addSnapshotListener(MetadataChanges.INCLUDE) { doc, error ->
+            if (doc != null && error == null) { chat = unreadTail(doc, uid); emit() }
+        }
+        val topicListener = topicId?.let { id ->
+            chatRef.collection("topics").document(id).addSnapshotListener(MetadataChanges.INCLUDE) { doc, error ->
+                if (doc != null && error == null) { topic = unreadTail(doc, uid); emit() }
+            }
+        }
+        awaitClose { chatListener.remove(); topicListener?.remove() }
+    }
+
+    override suspend fun clearUnreadForVisibleMessages(chatId: String, visibleIds: List<String>, topicId: String?): Boolean =
+        clearUnreadScoped(chatId,visibleIds,topicId,null)
+
+    private suspend fun clearUnreadScoped(chatId: String, visibleIds: List<String>, topicId: String?, expectedAccount: String?): Boolean {
+        val uid = firebaseAuth.currentUser?.uid ?: return false
+        check(expectedAccount == null || expectedAccount == uid) { "Аккаунт изменился" }
+        if (visibleIds.isEmpty()) return false
+        val chatRef = firestore.collection("chats").document(chatId)
+        return firestore.runTransaction { tx ->
+            check(firebaseAuth.currentUser?.uid == uid) { "Аккаунт изменился" }
+            val chat = tx.get(chatRef)
+            if (!chat.exists()) return@runTransaction false
+            val topicRef = topicId?.let { chatRef.collection("topics").document(it) }
+            val topic = topicRef?.let { tx.get(it) }
+            val target = topic ?: chat
+            if (!target.exists()) return@runTransaction false
+            val tail = unreadTail(target, uid)
+            if (tail.count == 0) return@runTransaction true
+            val tailMatches = if (!tail.lastMessageId.isNullOrBlank()) tail.lastMessageId in visibleIds else {
+                // Legacy fallback verifies real visible documents, not a client timestamp claim.
+                visibleIds.takeLast(8).map { tx.get(chatRef.collection("messages").document(it)) }.any {
+                    it.exists() && tail.timestamp > 0 && it.getLong("timestamp") == tail.timestamp &&
+                        (tail.senderId == null || it.getString("senderId") == tail.senderId) &&
+                        (topicId == null || it.getString("topicId") == topicId)
                 }
             }
-            // ФИКС (залипание бейджа при двух сообщениях подряд с разницей ~15 сек):
-            // раньше здесь стояло безусловное chatRef.update("unreadCounts.$uid", 0).
-            // Это гонка с отправителем: когда приходит первое сообщение, наш клиент
-            // (уже открывший чат) тут же запускает этот suspend-вызов и в конце обнуляет
-            // счётчик. Если пока он выполняется (сеть, несколько await() выше) отправитель
-            // шлёт второе сообщение — на сервере выполняется unreadCounts.$uid =
-            // increment(1) для него. Порядок применения двух конкурентных записей на
-            // сервере Firestore не гарантирован: если increment(1) применится ПОСЛЕ нашей
-            // записи 0, счётчик останется равным 1, хотя оба сообщения уже показаны и
-            // прочитаны. А поскольку это изменение поля самого чата, а не нового документа
-            // в /messages, слушатель observeMessages() на него не реагирует и повторно
-            // markAsRead() не вызывает — бейдж "залипает" до выхода из чата и входа заново.
-            // Решение: вместо безусловной записи 0 сверяем unreadCounts с реальным числом
-            // чужих непрочитанных сообщений (unreadDocs, уже посчитанным выше — если
-            // showReadReceipts включён, это ровно то, что мы только что пометили READ).
-            // Если по факту чужих непрочитанных нет — обнуляем, даже если серверный
-            // счётчик "уполз" выше из-за гонки с increment(1) отправителя. Если же
-            // непрочитанные остались (пришло новое сообщение уже после чтения выше) —
-            // подтягиваем счётчик к их реальному числу вместо того, чтобы оставлять
-            // завышенное "залипшее" значение; свежее сообщение при этом всё равно придёт
-            // отдельным snapshot'ом в observeMessages() и вызовет markAsRead() ещё раз.
-            val stillUnreadCount = unreadDocs.size
-            firestore.runTransaction { tx ->
-                val snap = tx.get(chatRef)
-                val unreadMap = snap.get("unreadCounts") as? Map<*, *>
-                val current = (unreadMap?.get(uid) as? Long)?.toInt() ?: 0
-                if (stillUnreadCount == 0) {
-                    // Все чужие сообщения, которые видели выше, действительно прочитаны —
-                    // безопасно обнулить, даже если current сейчас больше (это и есть
-                    // симптом гонки, который мы чиним).
-                    if (current != 0) tx.update(chatRef, "unreadCounts.$uid", 0)
-                } else if (current > stillUnreadCount) {
-                    // Появилось новое сообщение уже после нашей проверки выше (retry
-                    // логика в observeMessages его подхватит и вызовет markAsRead ещё
-                    // раз) — но раз старый счётчик явно завышен относительно того, что
-                    // мы только что нашли, подтягиваем его к реальному значению вместо
-                    // того чтобы оставлять "залипшим".
-                    tx.update(chatRef, "unreadCounts.$uid", stillUnreadCount)
+            if (!tailMatches) return@runTransaction false
+            if (topicRef == null) {
+                tx.update(chatRef, FieldPath.of("unreadCounts", uid), 0)
+            } else {
+                tx.update(topicRef, FieldPath.of("unreadCounts", uid), 0)
+                val remaining = remainingUnreadAfterTopicRead(unreadTail(chat, uid).count, tail.count)
+                tx.update(chatRef, FieldPath.of("unreadCounts", uid), remaining)
+            }
+            true
+        }.await()
+    }
+
+    // Explicit notification action: unlike viewport receipts, this intentionally reads the whole chat.
+    override suspend fun markChatAsRead(chatId: String, expectedAccount: String?) {
+        val uid=firebaseAuth.currentUser?.uid ?: return
+        check(expectedAccount==null || expectedAccount==uid) { "Аккаунт изменился" }
+        val docs = firestore.collection("chats").document(chatId).collection("messages").get(Source.SERVER).await()
+        check(firebaseAuth.currentUser?.uid==uid) { "Аккаунт изменился" }
+        val ids = docs.documents.map { it.id }
+        try { updateReceipts(chatId,ids,userSettingsPreferences.showReadReceipts.first(),null,uid) }
+        finally { if(firebaseAuth.currentUser?.uid==uid)clearUnreadScoped(chatId,ids,null,uid) }
+    }
+
+    override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>, topicId: String?) {
+        updateReceipts(chatId, messageIds, userSettingsPreferences.showReadReceipts.first(), topicId)
+    }
+
+    private suspend fun updateReceipts(chatId: String, ids: List<String>, read: Boolean,
+        topicId: String?, expectedAccount: String? = null) {
+        val uid = firebaseAuth.currentUser?.uid ?: return
+        check(expectedAccount==null || expectedAccount==uid) { "Аккаунт изменился" }
+        val chatRef = firestore.collection("chats").document(chatId)
+        // Small transactions stay within the rules document-access budget. All reads precede writes.
+        ids.distinct().chunked(8).forEach { chunk ->
+            retryReceiptConflict { firestore.runTransaction { tx ->
+                check(firebaseAuth.currentUser?.uid == uid) { "Аккаунт изменился" }
+                val chat = tx.get(chatRef)
+                val topicRef = topicId?.let { chatRef.collection("topics").document(it) }
+                val topic = topicRef?.let { tx.get(it) }
+                val docs = chunk.map { tx.get(chatRef.collection("messages").document(it)) }
+                for (doc in docs) {
+                    if (!doc.exists() || doc.getString("senderId") == uid) continue
+                    val recipients = (doc.get("recipientIds") as? List<*>)?.filterIsInstance<String>()
+                    val old = doc.getString("status")
+                    val updates = mutableMapOf<String, Any>()
+                    val next = if (recipients != null) {
+                        if (uid !in recipients) continue
+                        val delivered = ((doc.get("deliveredTo") as? List<*>)?.filterIsInstance<String>().orEmpty() + uid).distinct()
+                        val readers = ((doc.get("readBy") as? List<*>)?.filterIsInstance<String>().orEmpty() + if (read) listOf(uid) else emptyList()).distinct()
+                        if (doc.get("deliveredTo") != delivered) updates["deliveredTo"] = delivered
+                        if (doc.get("readBy") != readers) updates["readBy"] = readers
+                        aggregateReceiptStatus(recipients, delivered, readers).name
+                    } else {
+                        // Legacy records have only one scalar receipt; never downgrade READ.
+                        if (old == "READ" || read) "READ" else "DELIVERED"
+                    }
+                    if (next != old) updates["status"] = next
+                    if (updates.isNotEmpty()) tx.update(doc.reference, updates)
+                    if (chat.getString("lastMessageId") == doc.id && next != chat.getString("lastMessageStatus")) {
+                        tx.update(chatRef, "lastMessageStatus", next)
+                    }
                 }
-            }.await()
-        } catch (e: Exception) { }
+                null
+            }.await() }
+        }
+    }
+
+    private suspend fun retryReceiptConflict(block: suspend () -> Unit) {
+        // Rules may reject a stale receipt before the SDK reports a transaction conflict.
+        repeat(4) { attempt ->
+            try { block(); return }
+            catch (e: FirebaseFirestoreException) {
+                if (attempt == 3 || e.code !in listOf(FirebaseFirestoreException.Code.ABORTED,
+                        FirebaseFirestoreException.Code.PERMISSION_DENIED)) throw e
+                delay(150L * (attempt + 1))
+            }
+        }
     }
 
     // НОВОЕ (F3 статистика постов канала): регистрируем уникальный просмотр поста.
@@ -1143,18 +1366,18 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun toggleReaction(chatId: String, messageId: String, emoji: String) {
-        val uid = firebaseAuth.currentUser?.uid ?: return
+        val uid = firebaseAuth.currentUser?.uid ?: throw IllegalStateException("Not authenticated")
         val messageRef = firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
-        try {
-            firestore.runTransaction { transaction ->
-                val snapshot = transaction.get(messageRef)
-                val reactionsRaw = snapshot.get("reactions") as? Map<*, *>
-                val currentUids = (reactionsRaw?.get(emoji) as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                val updatedUids = if (uid in currentUids) currentUids - uid else currentUids + uid
-                transaction.update(messageRef, "reactions.$emoji", updatedUids)
-            }.await()
-        } catch (e: Exception) { }
+        // Исключение больше не глотаем: ChatViewModel.toggleReaction() делает оптимистичный
+        // локальный апдейт и должен узнать о неудаче, чтобы откатить его.
+        firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(messageRef)
+            val reactionsRaw = snapshot.get("reactions") as? Map<*, *>
+            val currentUids = (reactionsRaw?.get(emoji) as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            val updatedUids = if (uid in currentUids) currentUids - uid else currentUids + uid
+            transaction.update(messageRef, "reactions.$emoji", updatedUids)
+        }.await()
     }
 
     override suspend fun togglePinMessage(chatId: String, messageId: String): SendMessageResult {
@@ -1270,7 +1493,7 @@ class MessageRepositoryImpl @Inject constructor(
             sb.appendLine()
             snapshot.documents.forEach { doc ->
                 val senderId = doc.getString("senderId") ?: "?"
-                val text = doc.getString("text") ?: ""
+                val text = decryptedPayload(doc)?.text ?: "🔒 Не удалось расшифровать"
                 val timestamp = doc.getLong("timestamp") ?: 0L
                 val time = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale("ru")).format(Date(timestamp))
                 val hasImage = doc.getString("imageBase64") != null
@@ -1278,6 +1501,14 @@ class MessageRepositoryImpl @Inject constructor(
                 val hasLocation = doc.getDouble("locationLat") != null
                 sb.appendLine("[$time] $senderId:")
                 if (text.isNotBlank()) sb.appendLine("  $text")
+                if (doc.getBoolean("isDeleted") != true) {
+                    SharedChecklist.fromFields(doc.get("checklistTitle"), doc.get("checklistItems"), doc.get("checklistCheckedBy"))?.let { list ->
+                        sb.appendLine("  ${list.title}")
+                        list.items.forEachIndexed { index, label ->
+                            sb.appendLine("  ${if (list.completedBy(index) != null) "[x]" else "[ ]"} $label")
+                        }
+                    }
+                }
                 if (hasImage) sb.appendLine("  [📷 Фото]")
                 if (fileName != null) sb.appendLine("  [📎 Файл: $fileName]")
                 if (hasLocation) sb.appendLine("  [📍 Геопозиция]")
@@ -1403,22 +1634,38 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (e: Exception) { emptyList() }
     }
 
-    /** НОВОЕ: общий маппинг документа в Message — используется в observeMessages,
-     *  observeMessage и getRecentMessages, чтобы не дублировать разбор полей. */
     /**
-     * НОВОЕ (сквозное шифрование, E2EE). Возвращает отображаемый текст сообщения. Если оно
-     * зашифровано (encrypted=true), достаёт наш шифртекст из encByUid по нашему uid и
-     * расшифровывает локальным приватным ключом. Плейсхолдеры — если ключа/данных нет.
+     * НОВОЕ (пагинация истории): одна страница истории старше beforeTimestamp.
+     * Читает с сервера (Source.SERVER не задаём — допустим кэш), возвращает
+     * сообщения по возрастанию timestamp, как их ждёт UI. Истёкшие исчезающие
+     * сообщения отфильтрованы так же, как в observeMessages.
+     *
+     * Ошибку не глотаем: в отличие от «история кончилась» (пустой список), сбой сети
+     * не должен навсегда выключать подгрузку — ViewModel показывает сообщение и
+     * позволяет повторить попытку.
      */
-    private fun decryptMessageText(doc: DocumentSnapshot): String {
-        val encrypted = doc.getBoolean("encrypted") ?: false
-        if (!encrypted) return doc.getString("text") ?: ""
-        val myUid = firebaseAuth.currentUser?.uid
-        val encMap = doc.get("encByUid") as? Map<*, *>
-        val cipher = encMap?.get(myUid) as? String ?: return "🔒 Зашифрованное сообщение"
-        return cryptoManager.decrypt(cipher) ?: "🔒 Не удалось расшифровать"
+    override suspend fun getMessagesPage(
+        chatId: String,
+        topicId: String?,
+        beforeTimestamp: Long?,
+        limit: Int
+    ): List<Message> {
+        var query: Query = firestore.collection("chats").document(chatId)
+            .collection("messages")
+        if (topicId != null) query = query.whereEqualTo("topicId", topicId)
+        if (beforeTimestamp != null) query = query.whereLessThan("timestamp", beforeTimestamp)
+        val snapshot = query
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(limit.coerceIn(1, 200).toLong())
+            .get().await()
+        return snapshot.documents
+            .mapNotNull { mapDocToMessage(it, chatId) }
+            .filter { msg -> msg.expiresAt == null || msg.expiresAt > System.currentTimeMillis() }
+            .sortedBy { it.timestamp }
     }
 
+    /** НОВОЕ: общий маппинг документа в Message — используется в observeMessages,
+     *  observeMessage и getRecentMessages, чтобы не дублировать разбор полей. */
     private fun mapDocToMessage(doc: DocumentSnapshot, chatId: String): Message? {
         return try {
             val reactionsRaw = doc.get("reactions") as? Map<*, *>
@@ -1427,21 +1674,28 @@ class MessageRepositoryImpl @Inject constructor(
                 val uids = (value as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                 emoji to uids
             }?.toMap() ?: emptyMap()
+            val payload = decryptedPayload(doc)
             Message(
                 id = doc.id, chatId = chatId,
                 senderId = doc.getString("senderId") ?: return null,
                 topicId = doc.getString("topicId"),
-                text = decryptMessageText(doc),
+                text = payload?.text ?: "🔒 Не удалось расшифровать",
+                canvasLocalId = doc.getString("canvasLocalId")?.takeIf { app.yodo.messenger.features.canvas.CanvasLimits.validId(it) },
+                isTextEncrypted = doc.getBoolean("encrypted") == true,
+                textDecryptionFailed = doc.getBoolean("encrypted") == true && payload == null,
                 timestamp = doc.getLong("timestamp") ?: 0L,
                 // ИСПРАВЛЕНО (индикатор прочитано/доставлено "врёт"): раньше статус брался
                 // прямо из поля "status" без учёта hasPendingWrites, поэтому оптимистично
                 // созданное локальное сообщение могло на мгновение показать неверную
                 // (устаревшую из кэша) галочку. Теперь решение централизовано в
                 // resolveMessageStatus и явно учитывает, подтверждена ли запись сервером.
-                status = resolveMessageStatus(doc.getString("status"), doc.metadata.hasPendingWrites()),
+                status = resolveMessageStatus(doc.getString("status"), doc.metadata.hasPendingWrites(),
+                    doc.getString("senderId") == firebaseAuth.currentUser?.uid, doc.getTimestamp("sentAt") != null),
+                receiptRecipientCount = (doc.get("recipientIds") as? List<*>)?.size ?: 0,
+                receiptReadCount = (doc.get("readBy") as? List<*>)?.size ?: 0,
                 replyToMessageId = doc.getString("replyToMessageId"),
-                replyToSenderName = doc.getString("replyToSenderName"),
-                replyToText = doc.getString("replyToText"),
+                replyToSenderName = payload?.replySenderName ?: if (doc.getLong("encryptedPayloadVersion") != 2L) doc.getString("replyToSenderName") else null,
+                replyToText = payload?.replyText ?: if (doc.getLong("encryptedPayloadVersion") != 2L) doc.getString("replyToText") else null,
                 reactions = reactions,
                 imageBase64 = doc.getString("imageBase64"),
                 imagesBase64 = (doc.get("imagesBase64") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
@@ -1463,6 +1717,7 @@ class MessageRepositoryImpl @Inject constructor(
                 locationLat = doc.getDouble("locationLat"),
                 locationLng = doc.getDouble("locationLng"),
                 commentsCount = (doc.getLong("commentsCount") ?: 0L).toInt(),
+                checklist = SharedChecklist.fromFields(doc.get("checklistTitle"), doc.get("checklistItems"), doc.get("checklistCheckedBy")),
                 poll = mapDocToPoll(doc),
                 isViewOnce = doc.getBoolean("isViewOnce") ?: false,
                 viewOnceOpened = doc.getBoolean("viewOnceOpened") ?: false,

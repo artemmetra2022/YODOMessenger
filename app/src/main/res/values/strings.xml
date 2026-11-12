@@ -598,6 +598,12 @@
 
     <!-- НОВОЕ: быстрые действия в push-уведомлении о сообщении (только личные чаты) -->
     <string name="notification_action_mark_read">Прочитано</string>
+    <string name="notification_action_unmute">Включить звук</string>
+    <string name="notification_chat_sound_restored">Отключение звука этого чата отменено</string>
+    <string name="notification_action_mute">Отключить звук</string>
+    <string name="notification_chat_silenced">Звук и вибрация этого чата отключены</string>
+    <string name="notification_action_failed">Не удалось выполнить действие. Откройте чат и повторите.</string>
+    <string name="notification_reply_queued">Ответ добавлен в очередь отправки</string>
     <string name="notification_action_reply">Ответить</string>
     <string name="notification_reply_sent">Ответ отправлен</string>
     <string name="notification_reply_failed">Не удалось отправить ответ</string>
@@ -606,6 +612,16 @@
          Обновления раздаются через GitHub Releases, не через Google Play. -->
     <string name="about_title">О приложении</string>
     <string name="about_current_version_format">Установленная версия: %1$s</string>
+    <string name="about_release_date_format">Дата релиза: %1$s</string>
+    <string name="about_release_date_unknown">Дата релиза не указана</string>
+    <string name="about_brand_image_description">YodoMessenger: буква Y в облаке диалога</string>
+    <string name="about_brand_tagline">Общайтесь. Делитесь. Создавайте вместе.</string>
+    <string name="about_history_title">История версий</string>
+    <string name="about_history_empty">История пока недоступна. Релизы можно посмотреть на GitHub.</string>
+    <string name="about_history_version">Версия %1$s</string>
+    <string name="about_history_installed">Установлена у вас</string>
+    <string name="about_history_expand">Показать предыдущие версии</string>
+    <string name="about_history_collapse">Свернуть историю</string>
     <string name="about_check_button">Проверить обновления</string>
     <string name="about_check_hint">Нажмите, чтобы проверить наличие новой версии</string>
     <string name="about_checking">Проверяем обновления…</string>
@@ -624,4 +640,104 @@
     <string name="update_downloading_format">Загрузка… %1$d%%</string>
     <string name="update_downloading_unknown">Загрузка…</string>
     <string name="update_ready_text">Обновление скачано. Разрешите установку из этого источника и нажмите «Установить».</string>
+
+    <!-- Message reminders and group checklists -->
+    <string name="reminder_channel">Напоминания о сообщениях</string>
+    <string name="reminder_notification_title">Напоминание о сообщении</string>
+    <string name="reminder_notification_body">Нажмите, чтобы открыть сообщение</string>
+    <string name="reminder_title">Напомнить о сообщении</string>
+    <string name="reminder_explanation">Напоминание хранится на этом устройстве. Новое время заменит прежнее. Android может задержать уведомление в режиме энергосбережения.</string>
+    <string name="reminder_in_hour">Через час</string>
+    <string name="reminder_at_twenty">В ближайшие 20:00</string>
+    <string name="reminder_custom_time">Выбрать дату и время</string>
+    <string name="reminder_cancel">Отменить напоминание</string>
+    <string name="reminder_permission_required">Разрешите уведомления для YODO в настройках телефона</string>
+    <string name="reminder_future_required">Выберите время в будущем</string>
+    <string name="reminder_saved">Напоминание сохранено на этом устройстве</string>
+    <string name="reminder_save_failed">Не удалось сохранить изменение напоминания</string>
+    <string name="reminder_cancelled">Напоминание отменено</string>
+    <string name="reminder_message_unavailable">Сообщение удалено, истекло или пока недоступно. Попробуйте открыть чат после синхронизации.</string>
+    <string name="checklist_create">Совместный список</string>
+    <string name="checklist_name">Название</string>
+    <string name="checklist_items">Пункты — по одному на строке</string>
+    <string name="checklist_limits">От 1 до 20 пунктов, до 200 символов каждый. Название — до 100 символов.</string>
+    <string name="checklist_group_notice">Любой участник группы может отмечать и снимать отметки. Списки не защищены сквозным шифрованием.</string>
+    <string name="checklist_progress">Выполнено: %1$d из %2$d</string>
+    <string name="checklist_completed_by">Отметил(а): %1$s</string>
+    <string name="checklist_you">вы</string>
+    <string name="checklist_member">участник</string>
+    <string name="feature_send">Отправить</string>
+    <string name="feature_cancel">Отмена</string>
+    <string name="feature_close">Закрыть</string>
+
+    <!-- Private-text security and key verification -->
+    <string name="security_keys_title">Проверка ключей</string>
+    <string name="security_scope_notice">Защищаются текст, подписи и цитаты обычных личных чатов. Медиа, группы, каналы, поддержка и Избранное не защищены этой схемой.</string>
+    <string name="security_own_key">Ключ этого устройства</string>
+    <string name="security_peer_key">Текущий ключ собеседника</string>
+    <string name="security_old_peer_key">Ранее сохранённый ключ</string>
+    <string name="security_key_changed">Ключ собеседника изменился. Отправка текста остановлена до повторной проверки.</string>
+    <string name="security_tofu_status">Ключ сохранён при первом использовании, но личность собеседника ещё не подтверждена.</string>
+    <string name="security_verified_status">Вы подтвердили этот ключ на данном устройстве.</string>
+    <string name="security_compare_instruction">Сравните ключ собеседника с ключом на его устройстве лично или по независимому доверенному каналу. Попросите его также сверить ваш ключ. Само совпадение с сервером не подтверждает личность.</string>
+    <string name="security_compared_ack">Я сверил(а) новый отпечаток с собеседником</string>
+    <string name="security_verify_peer">Подтвердить ключ собеседника</string>
+    <string name="security_peer_verified">Ключ собеседника подтверждён на этом устройстве</string>
+    <string name="security_refresh">Обновить проверку</string>
+    <string name="security_own_key_warning">Ключ аккаунта не совпадает с ключом этого устройства или ещё не опубликован. Автоматической замены нет. Старый ключ не переносится: история другого устройства может остаться недоступной.</string>
+    <string name="security_own_replace_ack">Я понимаю: этот ключ станет активным, другое устройство может перестать расшифровывать новые сообщения; контакты должны сверить ключ заново</string>
+    <string name="security_activate_own">Активировать ключ этого устройства</string>
+
+    <!-- Виджеты рабочего стола -->
+    <string name="widget_unread_label">Непрочитанные</string>
+    <string name="widget_unread_description">Число непрочитанных сообщений и список чатов на рабочем столе</string>
+    <string name="widget_weather_label">Погода</string>
+    <string name="widget_weather_description">Погода в вашем городе: температура, ветер и почасовой прогноз</string>
+    <string name="widget_sign_in">Войдите в аккаунт YODO</string>
+    <string name="widget_no_data">Нет данных. Откройте приложение</string>
+    <string name="widget_all_read">Всё прочитано</string>
+    <string name="widget_chats_hidden">Названия чатов скрыты: включена блокировка или скрыты превью</string>
+    <string name="widget_updated">Обновлено %1$s</string>
+    <string name="widget_feels_like">Ощущается как %1$s</string>
+    <string name="widget_wind">Ветер %1$s м/с</string>
+    <string name="widget_humidity">Влажность %1$d%%</string>
+    <string name="widget_precip">Осадки %1$d%%</string>
+    <plurals name="widget_unread_messages">
+        <item quantity="one">непрочитанное сообщение</item>
+        <item quantity="few">непрочитанных сообщения</item>
+        <item quantity="many">непрочитанных сообщений</item>
+        <item quantity="other">непрочитанных сообщений</item>
+    </plurals>
+    <plurals name="widget_in_chats">
+        <item quantity="one">в %d чате</item>
+        <item quantity="few">в %d чатах</item>
+        <item quantity="many">в %d чатах</item>
+        <item quantity="other">в %d чатах</item>
+    </plurals>
+
+    <string name="widget_combined_label">Погода и непрочитанные</string>
+    <string name="widget_combined_description">Погода и непрочитанные сообщения в одном виджете</string>
+
+    <string name="widget_school_label">Школа</string>
+    <string name="widget_school_description">Какой сейчас урок, расписание звонков и сколько дней до каникул</string>
+    <string name="widget_school_lesson">Урок %1$d</string>
+    <string name="widget_school_until">до %1$s</string>
+    <string name="widget_school_break">Перемена</string>
+    <string name="widget_school_lesson_at">Урок %1$d в %2$s</string>
+    <string name="widget_school_before">Уроки не начались</string>
+    <string name="widget_school_first_bell">Первый звонок в %1$s</string>
+    <string name="widget_school_after">Уроки закончились</string>
+    <string name="widget_school_rest">Отдыхайте!</string>
+    <string name="widget_school_day_off">Выходной</string>
+    <string name="widget_school_next_lessons">Уроки: %1$s</string>
+    <string name="widget_school_lessons_left">Осталось уроков: %1$d</string>
+    <string name="widget_school_days_short">%1$d дн.</string>
+    <string name="widget_school_holiday_today">Сегодня начинаются каникулы</string>
+    <string name="widget_school_holiday_ongoing">Каникулы идут</string>
+    <plurals name="widget_school_holiday_in_days">
+        <item quantity="one">%d день до каникул</item>
+        <item quantity="few">%d дня до каникул</item>
+        <item quantity="many">%d дней до каникул</item>
+        <item quantity="other">%d дня до каникул</item>
+    </plurals>
 </resources>

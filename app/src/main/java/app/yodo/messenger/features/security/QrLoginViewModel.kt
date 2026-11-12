@@ -54,31 +54,6 @@ class QrLoginViewModel @Inject constructor(
         _state.value = QrLoginState.AwaitingConfirmation(parsed.first)
     }
 
-    /**
-     * НОВОЕ (обычные считыватели): сессия пришла deep link'ом (yodo://qrlogin/...),
-     * а не через камеру — считаем её сразу отсканированной. Аналог onQrScanned,
-     * но без разбора содержимого кадра: ключ уже распарсен на стороне ссылки.
-     */
-    fun consumeExternalSession(sessionId: String, publicKeyB64url: String) {
-        if (handled) return
-        val publicKey = try {
-            QrLoginCrypto.decodeSitePublicKeyFromQr(publicKeyB64url)
-        } catch (e: Exception) {
-            _state.value = QrLoginState.Error("Некорректная ссылка входа")
-            handled = true
-            return
-        }
-        if (publicKey.size != 65) {
-            _state.value = QrLoginState.Error("Некорректная ссылка входа")
-            handled = true
-            return
-        }
-        handled = true
-        pendingSessionId = sessionId
-        pendingSitePublicKey = publicKey
-        _state.value = QrLoginState.AwaitingConfirmation(sessionId)
-    }
-
     /** Пользователь подтвердил в диалоге, что это действительно он входит на сайте. */
     fun confirmLogin() {
         val sessionId = pendingSessionId ?: return
@@ -143,32 +118,14 @@ class QrLoginViewModel @Inject constructor(
     }
 
     /**
-     * Ожидаемые форматы (см. ниже, НОВОЕ — второй вариант):
-     *   1) yodo://qrlogin/{sessionId}?pk={base64url(raw P-256 point)} — deep link,
-     *      им QR обменивался раньше и по нему же переходит страница-мост;
-     *   2) https://yodomessenger.web.app/qr-login.html?s={sessionId}&pk={...} —
-     *      ссылка внутри QR для обычных считывателей/камеры телефона.
+     * Ожидаемый формат: yodo://qrlogin/{sessionId}?pk={base64url(raw P-256 point)}
      * sessionId и ключ идут именно в URL, а не только в Firestore, чтобы одного
      * скана было достаточно — без дополнительного похода в сеть за метаданными.
      */
     private fun parse(raw: String): Pair<String, ByteArray>? {
-        // НОВОЕ (обычные считыватели): QR теперь кодирует https-ссылку на страницу-мост
-        // qr-login.html (её понимает любой стандартный считыватель и камера), а сама
-        // страница открывает в приложении deep link yodo://qrlogin/... Поддерживаем
-        // оба формата — и прямое сканирование кода с веб-версии, и deep link.
-        val normalized: String = when {
-            raw.startsWith("yodo://qrlogin/") -> raw
-            raw.startsWith("https://yodomessenger.web.app/qr-login.html") -> {
-                val uri = android.net.Uri.parse(raw)
-                val s = uri.getQueryParameter("s").orEmpty()
-                val pk = uri.getQueryParameter("pk").orEmpty()
-                if (s.isBlank() || pk.isBlank()) return null
-                "yodo://qrlogin/$s?pk=$pk"
-            }
-            else -> return null
-        }
+        if (!raw.startsWith("yodo://qrlogin/")) return null
         return try {
-            val withoutPrefix = normalized.removePrefix("yodo://qrlogin/")
+            val withoutPrefix = raw.removePrefix("yodo://qrlogin/")
             val parts = withoutPrefix.split("?pk=", limit = 2)
             if (parts.size != 2) return null
             val sessionId = parts[0].takeIf { it.isNotBlank() } ?: return null

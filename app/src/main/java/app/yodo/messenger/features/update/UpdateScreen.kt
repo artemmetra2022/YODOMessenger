@@ -1,5 +1,17 @@
 package app.yodo.messenger.features.update
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.Button
+import app.yodo.messenger.ui.components.OutlinedButton
+import app.yodo.messenger.ui.components.IconButton
+import android.Manifest
+import android.os.Build
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
+import app.yodo.messenger.ui.components.TextButton
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,12 +26,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -52,10 +61,11 @@ fun UpdateScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val colorTheme = LocalColorTheme.current
+    val releaseHistory = rememberReleaseHistory()
 
     HandleUpdateEvents(viewModel)
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.about_title), style = MaterialTheme.typography.titleLarge) },
@@ -80,21 +90,7 @@ fun UpdateScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            SettingsCard {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.about_current_version_format, state.currentVersionName),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            AboutIdentityCard(state.currentVersionName, releaseHistory)
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -128,6 +124,10 @@ fun UpdateScreen(
                     ActionButtons(state = state, viewModel = viewModel)
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AboutReleaseHistory(releaseHistory, state.currentVersionName)
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -172,9 +172,16 @@ private fun StatusLine(state: UpdateUiState, colorTheme: ColorTheme) {
             color = colorTheme.primary,
             fontWeight = FontWeight.SemiBold
         )
+        UpdatePhase.WAITING_FOR_APK -> Column {
+            Text("Мгновенная загрузка включена", style = MaterialTheme.typography.titleMedium, color = colorTheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(state.message ?: "Ждём APK релиза ${state.update?.versionName.orEmpty()}. Проверяем каждые 30 секунд, затем скачаем автоматически.",
+                style = MaterialTheme.typography.bodyMedium)
+            Text("Ожидание работает в фоне до 6 часов. Установку нужно подтвердить вручную.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         UpdatePhase.DOWNLOADING -> Text(
-            state.progressPercent?.let { stringResource(R.string.update_downloading_format, it) }
-                ?: stringResource(R.string.update_downloading_unknown),
+            formatDownloadProgress(state.downloadedBytes, state.totalBytes, state.progressPercent),
             style = MaterialTheme.typography.bodyMedium,
             color = colorTheme.primary
         )
@@ -194,36 +201,53 @@ private fun StatusLine(state: UpdateUiState, colorTheme: ColorTheme) {
 
 @Composable
 private fun ActionButtons(state: UpdateUiState, viewModel: UpdateViewModel) {
+    val context = LocalContext.current
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
+        viewModel.startInstantDownload()
+    }
+    fun startInstant() {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        else viewModel.startInstantDownload()
+    }
+    val notificationsEnabled = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+    if (state.instantDownload && !notificationsEnabled) {
+        Text("Уведомления отключены. Готовый APK будет доступен здесь; для уведомления об установке разрешите уведомления в настройках Android.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+    }
     when (state.phase) {
-        UpdatePhase.AVAILABLE -> Button(
-            onClick = viewModel::downloadAndInstall,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Filled.NewReleases, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                if (state.update?.apkUrl.isNullOrBlank()) stringResource(R.string.update_btn_open_github)
-                else stringResource(R.string.update_btn_download)
-            )
+        UpdatePhase.WAITING_FOR_APK -> OutlinedButton(onClick = viewModel::cancelInstantDownload, modifier = Modifier.fillMaxWidth()) {
+            Text("Остановить ожидание")
         }
-        UpdatePhase.READY_TO_INSTALL -> Button(
-            onClick = viewModel::installDownloaded,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        UpdatePhase.AVAILABLE -> Column {
+            if (state.update?.apkUrl.isNullOrBlank()) {
+                Text("Релиз опубликован, APK ещё готовится. Можно включить автоматическое ожидание и загрузку.", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = { startInstant() }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.NewReleases, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Мгновенная загрузка")
+                }
+                TextButton(onClick = viewModel::checkForUpdates, modifier = Modifier.fillMaxWidth()) { Text("Проверить снова") }
+                OutlinedButton(onClick = viewModel::downloadAndInstall, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.update_btn_open_github)) }
+            } else Button(onClick = viewModel::downloadAndInstall, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.NewReleases, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.update_btn_download))
+            }
+        }
+        UpdatePhase.READY_TO_INSTALL -> Button(onClick = viewModel::installDownloaded, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.update_btn_install))
         }
-        UpdatePhase.CHECKING, UpdatePhase.DOWNLOADING -> Button(
-            onClick = {},
-            enabled = false,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.about_checking))
+        UpdatePhase.DOWNLOADING -> Column {
+            Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) { Text("Загрузка APK…") }
+            if (state.instantDownload) TextButton(onClick = viewModel::cancelInstantDownload, modifier = Modifier.fillMaxWidth()) { Text("Остановить загрузку") }
         }
-        else -> Button(
-            onClick = viewModel::checkForUpdates,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.about_check_button))
-        }
+        UpdatePhase.CHECKING -> Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.about_checking)) }
+        else -> Button(onClick = {
+            if (state.instantDownload) viewModel.cancelInstantDownload()
+            viewModel.checkForUpdates()
+        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.about_check_button)) }
     }
 }

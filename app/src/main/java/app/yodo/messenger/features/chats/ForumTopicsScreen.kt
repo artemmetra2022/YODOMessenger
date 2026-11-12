@@ -1,7 +1,14 @@
 package app.yodo.messenger.features.chats
 
+import app.yodo.messenger.ui.components.GlassScaffold
+import app.yodo.messenger.ui.components.YodoActionSheet
+import app.yodo.messenger.ui.components.YodoMenuAction
+import app.yodo.messenger.ui.components.TextButton
+import app.yodo.messenger.ui.components.IconButton
+import app.yodo.messenger.ui.components.FloatingActionButton
+import app.yodo.messenger.ui.components.DropdownMenuItem
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import app.yodo.messenger.ui.components.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,18 +32,14 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,7 +77,7 @@ fun ForumTopicsScreen(
         }
     }
 
-    Scaffold(
+    GlassScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.forum_topics_title)) },
@@ -248,27 +251,17 @@ private fun ForumTopicRow(
             }
         }
 
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(if (topic.isPinned) R.string.forum_topics_unpin else R.string.forum_topics_pin)) },
-                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
-                onClick = { showMenu = false; onTogglePin() }
-            )
-            if (canManage) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(if (topic.isClosed) R.string.forum_topics_reopen else R.string.forum_topics_close)) },
-                    leadingIcon = {
-                        Icon(if (topic.isClosed) Icons.Filled.LockOpen else Icons.Filled.Lock, contentDescription = null)
-                    },
-                    onClick = { showMenu = false; onToggleClosed() }
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.forum_topics_delete)) },
-                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                    onClick = { showMenu = false; onDeleteRequest() }
-                )
-            }
+        if (showMenu) {
+            YodoActionSheet(title = "Тема форума", actions = buildList {
+                add(YodoMenuAction(stringResource(if (topic.isPinned) R.string.forum_topics_unpin else R.string.forum_topics_pin), Icons.Filled.PushPin) { onTogglePin() })
+                if (canManage) {
+                    add(YodoMenuAction(stringResource(if (topic.isClosed) R.string.forum_topics_reopen else R.string.forum_topics_close),
+                        if (topic.isClosed) Icons.Filled.LockOpen else Icons.Filled.Lock) { onToggleClosed() })
+                    add(YodoMenuAction(stringResource(R.string.forum_topics_delete), Icons.Filled.Delete, "Опасные действия", destructive = true) { onDeleteRequest() })
+                }
+            }, onDismissRequest = { showMenu = false })
         }
+
     }
 }
 

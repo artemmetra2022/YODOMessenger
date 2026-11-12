@@ -12,6 +12,9 @@ data class ChatPreview(
     val lastMessageTimestamp: Long,
     val lastMessageSenderId: String? = null,
     val lastMessageStatus: String? = null,
+    // ID последнего сообщения — нужен, чтобы локально (на устройстве) расшифровать превью
+    // личного чата, не храня открытый текст на сервере.
+    val lastMessageId: String? = null,
     val unreadCount: Int,
     val isOnline: Boolean,
     // п.30: верифицированный официальный канал — синяя галочка
@@ -46,5 +49,9 @@ data class ChatPreview(
     // ссылке/приглашению/QR — см. ChannelAccessMode). Не путать с isHidden в
     // ChatListScreen — тот отвечает за отдельный PIN-замок конкретного чата
     // именно у меня на устройстве и от accessMode никак не зависит.
-    val isHiddenAccessGroup: Boolean = false
+    val isHiddenAccessGroup: Boolean = false,
+    // НОВОЕ («отметить как непрочитанное»): чат помечен вручную на этом устройстве.
+    // Серверный unreadCount при этом остаётся 0 — в списке показываем точку-бейдж,
+    // а при открытии чата пометка снимается (ChatViewModel.init).
+    val isManuallyUnread: Boolean = false
 )

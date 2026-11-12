@@ -39,6 +39,7 @@ import app.yodo.messenger.features.auth.GlobalBlockGateScreen
 import app.yodo.messenger.features.auth.GlobalBlockViewModel
 import app.yodo.messenger.features.chats.AdminHomeViewModel
 import app.yodo.messenger.features.chats.ChatScreen
+import app.yodo.messenger.features.chats.ChatMediaScreen
 import app.yodo.messenger.features.chats.ChatStatsScreen
 // НОВОЕ (переработка каналов): три новых экрана
 import app.yodo.messenger.features.chats.ChannelProfileScreen
@@ -615,35 +616,20 @@ fun YodoNavGraph(
         composable(Routes.SecurityCenter.route) {
             app.yodo.messenger.features.security.SecurityCenterScreen(
                 onBackClick = { navController.popBackStack() },
-                onOpenQrLogin = { navController.navigate(Routes.QrLogin.createRoute()) }
+                onOpenQrLogin = { navController.navigate(Routes.QrLogin.route) }
             )
         }
         // НОВОЕ (вход по QR-коду): сканер QR с веб-версии.
-        // НОВОЕ (обычные считыватели): при переходе по deep link sessionId и pk
-        // приходят аргументами — сессия считается отсканированной сразу.
-        composable(
-            route = Routes.QrLogin.route,
-            arguments = listOf(
-                navArgument(Routes.QrLogin.ARG_SESSION_ID) {
-                    type = NavType.StringType
-                    defaultValue = ""
-                },
-                navArgument(Routes.QrLogin.ARG_PK) {
-                    type = NavType.StringType
-                    defaultValue = ""
-                },
-            )
-        ) { entry ->
+        composable(Routes.QrLogin.route) {
             app.yodo.messenger.features.security.QrLoginScreen(
-                onBackClick = { navController.popBackStack() },
-                deepLinkSessionId = entry.arguments?.getString(Routes.QrLogin.ARG_SESSION_ID).orEmpty(),
-                deepLinkPk = entry.arguments?.getString(Routes.QrLogin.ARG_PK).orEmpty(),
+                onBackClick = { navController.popBackStack() }
             )
         }
         composable(
             route = Routes.Chat.route,
             arguments = listOf(
                 navArgument(Routes.Chat.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument("messageId") { type = NavType.StringType; nullable = true; defaultValue = null },
                 // НОВОЕ (форумные группы): необязательные параметры темы форума.
                 navArgument(Routes.Chat.ARG_TOPIC_ID) {
                     type = NavType.StringType
@@ -660,6 +646,10 @@ fun YodoNavGraph(
             val chatId = backStackEntry.arguments?.getString(Routes.Chat.ARG_CHAT_ID) ?: ""
             ChatScreen(
                 chatId = chatId,
+                onOpenCanvas = { sourceId, imageIndex, boardId ->
+                    navController.navigate(Routes.Canvas.createRoute(chatId, backStackEntry.arguments?.getString(Routes.Chat.ARG_TOPIC_ID), boardId, sourceId, imageIndex))
+                },
+                onOpenSharedBoard = { id -> navController.navigate(Routes.SharedBoard.createRoute(id)) },
                 onBackClick = { navController.popBackStack() },
                 onOpenUserProfile = { userId ->
                     navController.navigate(Routes.UserProfile.createRoute(userId))
@@ -694,6 +684,37 @@ fun YodoNavGraph(
                 // НОВОЕ (поделиться контактом абонента): "Поделиться контактом" → QR-код контакта собеседника.
                 onShareContactQr = { otherUserId ->
                     navController.navigate(Routes.ContactQr.createRoute(otherUserId))
+                },
+                // НОВОЕ (раздел «Медиа, файлы, ссылки»): вложения открытого чата.
+                onOpenChatMedia = { mediaChatId ->
+                    navController.navigate(
+                        Routes.ChatMedia.createRoute(
+                            mediaChatId,
+                            backStackEntry.arguments?.getString(Routes.Chat.ARG_TOPIC_ID)
+                        )
+                    )
+                }
+            )
+        }
+        // НОВОЕ (раздел «Медиа, файлы, ссылки»): фото/голосовые, документы и ссылки чата.
+        composable(
+            route = Routes.ChatMedia.route,
+            arguments = listOf(
+                navArgument(Routes.ChatMedia.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument(Routes.ChatMedia.ARG_TOPIC_ID) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) {
+            ChatMediaScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenImageViewer = { imageBase64, senderName, timestamp ->
+                    ImageViewerHolder.imageBase64 = imageBase64
+                    ImageViewerHolder.senderName = senderName
+                    ImageViewerHolder.timestamp = timestamp
+                    navController.navigate(Routes.ImageViewer.route)
                 }
             )
         }
@@ -706,6 +727,17 @@ fun YodoNavGraph(
                 onBackClick = { navController.popBackStack() }
             )
         }
+        composable(Routes.Canvas.route, arguments = listOf(
+            navArgument("chatId") { type = NavType.StringType },
+            navArgument("topicId") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("boardId") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("sourceMessageId") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("imageIndex") { type = NavType.IntType; defaultValue = 0 }
+        )) { app.yodo.messenger.features.canvas.CanvasScreen(onBackClick = { navController.popBackStack() }) }
+        composable(
+            Routes.SharedBoard.route,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) { app.yodo.messenger.features.canvas.SharedBoardScreen(onBackClick = { navController.popBackStack() }) }
         composable(Routes.ImageViewer.route) {
             ImageViewerScreen(
                 onBackClick = { navController.popBackStack() }
@@ -1002,6 +1034,26 @@ fun YodoNavGraph(
             app.yodo.messenger.features.settings.ChatsSettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsChats.ARG_ANCHOR)
+            )
+        }
+        composable(
+            route = Routes.SettingsBoard.route,
+            arguments = listOf(navArgument(Routes.SettingsBoard.ARG_ANCHOR) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            })
+        ) { backStackEntry ->
+            app.yodo.messenger.features.settings.BoardSettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                initialAnchorId = backStackEntry.arguments?.getString(Routes.SettingsBoard.ARG_ANCHOR),
+                onOpenLibrary = { navController.navigate(Routes.SavedBoards.route) { launchSingleTop = true } }
+            )
+        }
+        composable(route = Routes.SavedBoards.route) {
+            app.yodo.messenger.features.settings.CanvasLibraryScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenBoard = { chatId, boardId -> navController.navigate(Routes.Canvas.createRoute(chatId, boardId=boardId)) }
             )
         }
         composable(

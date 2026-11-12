@@ -115,6 +115,7 @@ class NearbyMessagingManager @Inject constructor(
     }
 
     fun startAdvertisingAndDiscovery(displayName: String) {
+        if (!NearbyRadioLease.acquire("mesh")) return
         myDisplayName = displayName.ifBlank { "Yodo User" }
         startAdvertising()
         startDiscovery()
@@ -134,6 +135,7 @@ class NearbyMessagingManager @Inject constructor(
     }
 
     private fun startAdvertising() {
+        if (!NearbyRadioLease.owns("mesh")) return
         if (isAdvertising) return
         val options = AdvertisingOptions.Builder().setStrategy(STRATEGY).build()
         connectionsClient.startAdvertising(
@@ -149,6 +151,7 @@ class NearbyMessagingManager @Inject constructor(
     }
 
     private fun startDiscovery() {
+        if (!NearbyRadioLease.owns("mesh")) return
         if (isDiscovering) return
         val options = DiscoveryOptions.Builder().setStrategy(STRATEGY).build()
         connectionsClient.startDiscovery(
@@ -173,6 +176,7 @@ class NearbyMessagingManager @Inject constructor(
     }
 
     fun connectTo(endpointId: String) {
+        if (!NearbyRadioLease.owns("mesh")) return
         if (connectedEndpoints.containsKey(endpointId)) return
         if (!pendingConnections.add(endpointId)) return
         if (connectedEndpoints.isEmpty()) _connectionState.value = ConnectionState.CONNECTING
@@ -305,10 +309,12 @@ class NearbyMessagingManager @Inject constructor(
     }
 
     private fun sendBytes(endpointId: String, bytes: ByteArray) {
+        if (!NearbyRadioLease.owns("mesh")) return
         connectionsClient.sendPayload(endpointId, Payload.fromBytes(bytes))
     }
 
     fun disconnect() {
+        if (!NearbyRadioLease.owns("mesh")) return
         for (endpointId in connectedEndpoints.keys) {
             connectionsClient.disconnectFromEndpoint(endpointId)
         }
@@ -330,6 +336,7 @@ class NearbyMessagingManager @Inject constructor(
     }
 
     fun stopAll() {
+        if (!NearbyRadioLease.owns("mesh")) return
         beaconJob?.cancel()
         beaconJob = null
         connectionsClient.stopAdvertising()
@@ -348,10 +355,12 @@ class NearbyMessagingManager @Inject constructor(
         _neighborCount.value = 0
         _meshNodes.value = emptyList()
         _messages.value = emptyList()
+        NearbyRadioLease.release("mesh")
     }
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+        if (!NearbyRadioLease.owns("mesh")) return
             val (peerName, peerNodeId, peerShort) = parseAdvertisedName(info.endpointName)
             endpointNames[endpointId] = peerName
             if (peerNodeId.isNotBlank()) handshakeNodeId[endpointId] = peerNodeId
@@ -372,6 +381,7 @@ class NearbyMessagingManager @Inject constructor(
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+        if (!NearbyRadioLease.owns("mesh")) return
             val (peerName, peerNodeId, peerShort) = parseAdvertisedName(info.endpointName)
             if (peerName.isNotBlank()) endpointNames[endpointId] = peerName
             if (peerNodeId.isNotBlank()) handshakeNodeId[endpointId] = peerNodeId
@@ -380,6 +390,7 @@ class NearbyMessagingManager @Inject constructor(
         }
 
         override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
+            if (!NearbyRadioLease.owns("mesh")) return
             pendingConnections.remove(endpointId)
             if (resolution.status.statusCode == ConnectionsStatusCodes.STATUS_OK) {
                 val nodeId = handshakeNodeId[endpointId] ?: ""
@@ -417,6 +428,7 @@ class NearbyMessagingManager @Inject constructor(
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            if (!NearbyRadioLease.owns("mesh")) return
             if (payload.type != Payload.Type.BYTES) return
             val bytes = payload.asBytes() ?: return
             val raw = String(bytes, Charsets.UTF_8)

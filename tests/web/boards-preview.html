@@ -1,0 +1,22 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="../../web/styles.css"><link rel="stylesheet" href="../../web/boards.css"><title>YODO — локальный тест досок</title></head><body>
+<div style="padding:24px"><h1>YODO · тестовый стенд</h1><p>Данные демонстрационные. Подключения к Firebase нет.</p><button id="btn-boards" class="icon-btn">Доски</button><button id="btn-shared-board" class="icon-btn">Доска</button><button id="shared-board-preview" class="hidden"><canvas id="shared-board-thumb" width="240" height="180"></canvas><span id="shared-board-label"></span></button></div>
+<script type="module">
+import {initBoards} from '../../web/boards.mjs';
+import {newBoard,encodeSharedObject} from '../../web/board-model.mjs';
+import {saveLocalBoard} from '../../web/board-store.mjs';
+const el=id=>document.getElementById(id), uid='offline-test-user';
+let m={title:'Общая доска чата',grid:'SQUARES',generation:0,deleted:false,clearing:false},objects=[],onMeta,onObjects,fail,sent=0;
+const b=newBoard('Идеи для YODO');
+const object=(kind,points,color,text='')=>({id:crypto.randomUUID(),kind,points,color,width:4,fontSize:32,text});
+b.objects=[object('TEXT',[[110,120]],-14803426,'План нового проекта'),object('ROUNDED_RECT',[[100,180],[480,340]],-14057506),object('TEXT',[[145,250]],-14803426,'Идея → прототип'),object('ARROW',[[500,260],[690,260]],-14057506),object('ELLIPSE',[[720,190],[1060,340]],-12148367),object('TEXT',[[775,275]],-14803426,'Запуск'),object('PEN',[[160,450],[230,420],[290,465],[360,430],[430,460],[510,420],[580,450]],-14057506)];
+objects=b.objects.map(o=>({id:o.id,json:encodeSharedObject(o),generation:0}));
+const api={canSend:()=>true,sendImage:async()=>{sent++;},watchShared(id,ma,ob,er){onMeta=ma;onObjects=ob;fail=er;queueMicrotask(()=>{ma(m);ob(objects);});return()=>{};},async createShared(){m={...m,deleted:false};onMeta(m);return m;},async setSharedGrid(id,grid){m={...m,grid};onMeta(m);},async changeShared(id,g,adds,removes){if(m.deleted||m.clearing||g!==m.generation)throw Error('Поколение изменилось');objects=objects.filter(r=>!removes.some(o=>o.id===r.id));objects.push(...adds.map(o=>({id:o.id,json:encodeSharedObject(o),generation:g})));onObjects(objects);}};
+const boards=initBoards(api);boards.setContext(uid,'test-chat',{type:'GROUP',participantIds:[uid,'peer']});
+window.boardTest={boards,api,get sent(){return sent;},get objects(){return objects;},meta(patch){m={...m,...patch};onMeta(m);},peer(o){objects.push({id:o.id,json:encodeSharedObject(o),generation:m.generation});onObjects(objects);},fail:e=>fail(e)};
+await saveLocalBoard(uid,b);
+const state=document.body.dataset.state||'shared';
+if(state==='shared')el('btn-shared-board').click();
+else{el('btn-boards').click();if(state!=='library'){for(let i=0;i<100&&!el('board-list').querySelector('button');i++)await new Promise(r=>setTimeout(r,10));el('board-list').querySelector('button')?.click();}}
+if(state==='error'){await new Promise(r=>setTimeout(r,20));el('board-status').textContent='Не удалось сохранить: нет доступа к хранилищу. Скачайте JSON-копию.';el('board-status').classList.add('board-error');}
+window.previewReady=true;
+</script></body></html>
