@@ -11,6 +11,9 @@
   --bubble-out: #2b5278;
   --bubble-in: #182533;
   --radius: 12px;
+  --scrollbar-thumb: rgba(74, 163, 255, 0.58);
+  --scrollbar-thumb-hover: #4aa3ff;
+  --scrollbar-track: rgba(4, 10, 16, 0.24);
 }
 
 html.theme-light {
@@ -26,6 +29,9 @@ html.theme-light {
   --bubble-out: #d3e6fb;
   --bubble-in: #f0f2f5;
   --radius: 12px;
+  --scrollbar-thumb: rgba(43, 127, 212, 0.52);
+  --scrollbar-thumb-hover: #2b7fd4;
+  --scrollbar-track: rgba(23, 33, 43, 0.08);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -321,6 +327,9 @@ body {
   gap: 8px;
   padding: 14px 16px;
   border-bottom: 1px solid #101921;
+  position: relative;
+  z-index: 30;
+  overflow: visible;
 }
 
 .app-title { font-weight: 800; letter-spacing: 3px; color: var(--accent); margin-right: auto; }
@@ -378,7 +387,14 @@ body {
   flex-shrink: 0;
 }
 
-#chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 
 #chat-empty {
   flex: 1;
@@ -391,7 +407,14 @@ body {
 }
 .empty-icon { font-size: 56px; }
 
-#chat-active { flex: 1; display: flex; flex-direction: column; }
+#chat-active {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
 
 #chat-header {
   display: flex;
@@ -523,7 +546,9 @@ body {
 
 #messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -560,10 +585,36 @@ body {
 
 #form-send {
   display: flex;
+  flex: 0 0 auto;
   gap: 10px;
   padding: 12px 16px;
   background: var(--bg-panel);
   border-top: 1px solid #101921;
+  position: relative;
+  z-index: 2;
+}
+
+#composer-readonly {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid #101921;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* Ни один нижний элемент композера не может быть вытеснен длинной лентой
+   сообщений за пределы viewport. Прокручивается только #messages. */
+#chat-header,
+#shared-board-preview,
+#private-web-notice,
+#typing-indicator,
+#reply-preview-bar,
+#voice-recording,
+#image-preview,
+#file-preview {
+  flex-shrink: 0;
 }
 
 /* ===== Reply preview bar ===== */
@@ -927,13 +978,14 @@ body {
 #support-faq-panel {
   display: none;
   flex-direction: column;
+  flex-shrink: 0;
   max-height: 45vh;
   background: var(--bg-panel);
   border-top: 1px solid #101921;
 }
 #chat-active.faq-open #support-faq-panel { display: flex; }
-/* Пока открыт FAQ — обычное поле ввода скрыто (безопасно от перезаписи .hidden из app.js) */
-#chat-active.faq-open #form-send { display: none !important; }
+/* FAQ больше не скрывает композер: пользователь может написать оператору
+   в любой момент, а панель быстрых ответов остаётся над полем ввода. */
 
 .faq-header {
   display: flex;
@@ -1029,34 +1081,76 @@ body {
 /* НОВОЕ (перенос из main): улучшения UX из веб-версии main.           */
 /* ================================================================== */
 
-/* --- Меню создания: одна кнопка «+», раскрывающаяся по горизонтали --- */
+/* --- Меню создания: фиксированный якорь + отдельное всплывающее меню.
+       Шапка больше не меняет ширину, поэтому hover не мерцает. --- */
 #new-actions {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  overflow: visible;
+}
+#new-actions > #btn-new-toggle {
+  position: relative;
+  z-index: 2;
+  transition: transform 0.18s ease, background 0.15s, color 0.15s;
+}
+#new-actions:hover > #btn-new-toggle,
+#new-actions:focus-within > #btn-new-toggle,
+#new-actions.open > #btn-new-toggle {
+  background: var(--accent);
+  color: #fff;
+  transform: rotate(45deg);
+}
+#new-actions-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
   display: flex;
   align-items: center;
-  width: 40px;
-  padding: 0 2px;
-  justify-content: flex-start;
-  border-radius: 18px;
-  background: var(--bg-input);
-  overflow: hidden;
-  transition: width 0.3s ease, background 0.2s;
-}
-#new-actions:hover,
-#new-actions:focus-within {
-  width: 224px;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(125, 139, 153, 0.28);
+  border-radius: 999px;
   background: var(--bg-panel-2);
-}
-#new-actions .icon-btn { background: transparent; }
-#new-actions .icon-btn:hover { background: var(--accent); color: #fff; }
-#new-actions .new-action {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
   opacity: 0;
-  transform: translateX(10px);
-  transition: opacity 0.2s ease 0.05s, transform 0.25s ease 0.05s, background 0.15s, color 0.15s;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-6px) scale(0.96);
+  transform-origin: top right;
+  transition: opacity 0.16s ease, transform 0.16s ease,
+              visibility 0s linear 0.16s;
 }
-#new-actions:hover .new-action,
-#new-actions:focus-within .new-action {
+#new-actions-menu::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  height: 12px;
+}
+#new-actions:hover #new-actions-menu,
+#new-actions:focus-within #new-actions-menu,
+#new-actions.open #new-actions-menu {
   opacity: 1;
-  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition-delay: 0s;
+}
+#new-actions-menu .new-action {
+  flex: 0 0 36px;
+  background: var(--bg-input);
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+#new-actions-menu .new-action:hover,
+#new-actions-menu .new-action:focus-visible {
+  background: var(--accent);
+  color: #fff;
+  transform: translateY(-1px);
+  outline: none;
 }
 
 /* --- Поиск по списку чатов + крестик очистки --- */
@@ -1276,72 +1370,36 @@ body {
 .support-row.waiting .chat-item-name { color: var(--accent); }
 .support-cap-hint { padding: 10px 16px; font-size: 12px; color: var(--text-dim); text-align: center; }
 
-/* --- Тонкий скроллбар, видимый при прокрутке/наведении --- */
-#chat-list, #messages, #search-results, #forward-results,
-#group-search-results, .settings-body, .boards-list {
+/* --- Единый красивый скроллбар во всём приложении и во всех модалках. --- */
+* {
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  transition: scrollbar-color 0.2s;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
-#chat-list:hover, #messages:hover, #search-results:hover, #forward-results:hover,
-#group-search-results:hover, .settings-body:hover, .boards-list:hover,
-#chat-list:active, #messages:active, #search-results:active,
-#forward-results:active, #group-search-results:active, .settings-body:active,
-.boards-list:active {
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
-#chat-list::-webkit-scrollbar, #messages::-webkit-scrollbar,
-#search-results::-webkit-scrollbar, #forward-results::-webkit-scrollbar,
-#group-search-results::-webkit-scrollbar, .settings-body::-webkit-scrollbar,
-.boards-list::-webkit-scrollbar {
-  width: 8px;
-  background: transparent;
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
 }
-#chat-list::-webkit-scrollbar-thumb, #messages::-webkit-scrollbar-thumb,
-#search-results::-webkit-scrollbar-thumb, #forward-results::-webkit-scrollbar-thumb,
-#group-search-results::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb,
-.boards-list::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 4px;
+*::-webkit-scrollbar-thumb {
+  min-height: 34px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
 }
-#chat-list:hover::-webkit-scrollbar-thumb, #messages:hover::-webkit-scrollbar-thumb,
-#search-results:hover::-webkit-scrollbar-thumb, #forward-results:hover::-webkit-scrollbar-thumb,
-#group-search-results:hover::-webkit-scrollbar-thumb, .settings-body:hover::-webkit-scrollbar-thumb,
-.boards-list:hover::-webkit-scrollbar-thumb,
-#chat-list:active::-webkit-scrollbar-thumb, #messages:active::-webkit-scrollbar-thumb,
-#search-results:active::-webkit-scrollbar-thumb, #forward-results:active::-webkit-scrollbar-thumb,
-#group-search-results:active::-webkit-scrollbar-thumb, .settings-body:active::-webkit-scrollbar-thumb,
-.boards-list:active::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.28);
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
-#chat-list::-webkit-scrollbar-thumb:hover, #messages::-webkit-scrollbar-thumb:hover,
-#search-results::-webkit-scrollbar-thumb:hover, #forward-results::-webkit-scrollbar-thumb:hover,
-#group-search-results::-webkit-scrollbar-thumb:hover, .settings-body::-webkit-scrollbar-thumb:hover,
-.boards-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.45);
-}
-html.theme-light #chat-list::-webkit-scrollbar-thumb,
-html.theme-light #messages::-webkit-scrollbar-thumb,
-html.theme-light #search-results::-webkit-scrollbar-thumb,
-html.theme-light #forward-results::-webkit-scrollbar-thumb,
-html.theme-light #group-search-results::-webkit-scrollbar-thumb,
-html.theme-light .settings-body::-webkit-scrollbar-thumb,
-html.theme-light .boards-list::-webkit-scrollbar-thumb {
-  background: transparent;
-}
-html.theme-light #chat-list:hover::-webkit-scrollbar-thumb,
-html.theme-light #messages:hover::-webkit-scrollbar-thumb,
-html.theme-light #search-results:hover::-webkit-scrollbar-thumb,
-html.theme-light #forward-results:hover::-webkit-scrollbar-thumb,
-html.theme-light #group-search-results:hover::-webkit-scrollbar-thumb,
-html.theme-light .settings-body:hover::-webkit-scrollbar-thumb,
-html.theme-light .boards-list:hover::-webkit-scrollbar-thumb,
-html.theme-light #chat-list:active::-webkit-scrollbar-thumb,
-html.theme-light #messages:active::-webkit-scrollbar-thumb,
-html.theme-light #search-results:active::-webkit-scrollbar-thumb,
-html.theme-light #forward-results:active::-webkit-scrollbar-thumb,
-html.theme-light #group-search-results:active::-webkit-scrollbar-thumb,
-html.theme-light .settings-body:active::-webkit-scrollbar-thumb,
-html.theme-light .boards-list:active::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.28);
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Резервируем место только там, где действительно есть прокрутка: содержимое
+   не прыгает при появлении/исчезновении полосы. */
+:where(#chat-list, #messages, #search-results, #forward-results,
+  #group-search-results, .settings-body, .settings-blocked-list,
+  .faq-body, .settings-nav, .boards-list, .board-list, textarea) {
+  scrollbar-gutter: stable;
 }

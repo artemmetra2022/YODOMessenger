@@ -1276,6 +1276,15 @@ function updateChatHeader() {
   const canSend = canSendInActiveChat();
   $("form-send").classList.toggle("hidden", !canSend);
   $("btn-attach").classList.toggle("hidden", !canSend);
+  const readonlyComposer = $("composer-readonly");
+  if (readonlyComposer) {
+    readonlyComposer.classList.toggle("hidden", canSend);
+    if (!canSend) {
+      readonlyComposer.textContent = activeChatId === OFFICIAL_CHANNEL_ID
+        ? "🔒 Официальный канал доступен только для чтения"
+        : "🔒 Публиковать здесь могут только владелец и администраторы канала";
+    }
+  }
   if (!canSend) {
     if (activeChatId === OFFICIAL_CHANNEL_ID) {
       $("chat-subtitle").textContent = "Только для чтения — официальные объявления";
@@ -1332,6 +1341,10 @@ function updateChannelSubscribeButton() {
 function openChat(chatId) {
   activeChatId = chatId;
   activeChatData = findChatData(chatId);
+  const chatActiveEl = $("chat-active");
+  // Снимаем состояние FAQ предыдущего support-чата сразу, не дожидаясь
+  // следующего 300-мс обновления: состояние нового чата не мерцает.
+  chatActiveEl.classList.remove("faq-open", "faq-collapsed");
   notifications.setChat(chatId, activeChatData ? chatDisplayName(activeChatData) : "YODO");
   boards.setContext(currentUser?.uid, chatId, activeChatData);
   $("private-web-notice").classList.toggle("hidden", !isPrivate(chatId, activeChatData));
@@ -1340,9 +1353,8 @@ function openChat(chatId) {
   $("chat-subtitle").classList.remove("online");
   updateChatHeader();
   $("chat-empty").classList.add("hidden");
-  $("chat-active").classList.remove("hidden");
+  chatActiveEl.classList.remove("hidden");
   // НОВОЕ (перенос из main): перезапуск анимации открытия чата.
-  const chatActiveEl = $("chat-active");
   chatActiveEl.classList.remove("chat-entering");
   void chatActiveEl.offsetWidth; // принудительный reflow — сброс анимации
   chatActiveEl.classList.add("chat-entering");
@@ -3381,9 +3393,8 @@ $("btn-save-autodelete").addEventListener("click", async () => {
 /* берутся из window.SUPPORT_FAQ (faq-data.js, подключён до app.js).    */
 /* Логика не меняет существующие функции: читает activeChatId /         */
 /* activeChatData / isAdmin и переключает CSS-классы faq-open /         */
-/* faq-collapsed на #chat-active. Пока FAQ открыт — поле ввода скрыто   */
-/* (CSS), «Связаться с поддержкой» сворачивает панель и возвращает      */
-/* обычное поле ввода.                                                  */
+/* faq-collapsed на #chat-active. Поле ввода остаётся доступным и при    */
+/* открытом FAQ; «Связаться с поддержкой» лишь сворачивает подсказки.    */
 /* ------------------------------------------------------------------ */
 
 (function () {
@@ -3669,11 +3680,34 @@ const shortcuts = initShortcuts({
 /* НОВОЕ (перенос из main): мелкие улучшения UX.                        */
 /* ------------------------------------------------------------------ */
 
-// Клик по свёрнутой кнопке «+» — быстрое действие по умолчанию (новый чат);
-// наведение раскрывает остальные пункты.
-document.getElementById("btn-new-toggle")?.addEventListener("click", () => {
-  document.getElementById("btn-new-chat")?.click();
-});
+// Стабильное меню «+»: hover работает на десктопе, клик — на сенсорных
+// устройствах. Меню не меняет ширину шапки и закрывается снаружи/Escape.
+(function () {
+  const actions = document.getElementById("new-actions");
+  const toggle = document.getElementById("btn-new-toggle");
+  const menu = document.getElementById("new-actions-menu");
+  if (!actions || !toggle || !menu) return;
+
+  const setOpen = (open) => {
+    actions.classList.toggle("open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+  };
+
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setOpen(!actions.classList.contains("open"));
+  });
+  menu.addEventListener("click", () => setOpen(false));
+  document.addEventListener("click", (e) => {
+    if (!actions.contains(e.target)) setOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && actions.classList.contains("open")) {
+      setOpen(false);
+      toggle.focus();
+    }
+  });
+})();
 
 // Пока в поле есть символы, форма переходит в режим .typing — поле
 // расширяется и закрывает кнопки вложений.
