@@ -209,13 +209,23 @@
         <span class="app-title">YODO</span>
         <button id="btn-support-inbox" class="icon-btn hidden" title="Обращения в поддержку">🛎️</button>
         <button id="btn-shortcuts" class="icon-btn" title="Горячие клавиши (F1)" aria-label="Горячие клавиши">?</button>
-        <button id="btn-boards" class="icon-btn" title="Мои доски" aria-label="Мои доски">Доски</button>
-        <button id="btn-new-channel" class="icon-btn" title="Новый канал">📢</button>
-        <button id="btn-new-group" class="icon-btn" title="Новая группа">👥</button>
-        <button id="btn-new-chat" class="icon-btn" title="Новый чат">＋</button>
+        <!-- НОВОЕ (перенос из main): одна кнопка «+», при наведении раскрывается
+             по горизонтали, показывая кнопки чата, группы, канала и досок. -->
+        <div id="new-actions">
+          <button id="btn-new-toggle" class="icon-btn" title="Создать">＋</button>
+          <button id="btn-new-chat" class="icon-btn new-action" title="Новый чат">💬</button>
+          <button id="btn-new-group" class="icon-btn new-action" title="Новая группа">👥</button>
+          <button id="btn-new-channel" class="icon-btn new-action" title="Новый канал">📢</button>
+          <button id="btn-boards" class="icon-btn new-action" title="Мои доски" aria-label="Мои доски">🎨</button>
+        </div>
         <button id="btn-open-settings" class="icon-btn" title="Настройки">⚙️</button>
         <button id="btn-logout" class="icon-btn" title="Выйти">⎋</button>
       </header>
+      <!-- НОВОЕ (перенос из main): строка поиска по списку чатов -->
+      <div id="sidebar-search">
+        <input type="text" id="chat-search" placeholder="Поиск" autocomplete="off">
+        <button type="button" id="chat-search-clear" class="hidden" title="Очистить">✕</button>
+      </div>
       <div id="chat-list"></div>
     </aside>
     <main id="chat-area">
@@ -251,8 +261,8 @@
         <div id="support-faq-panel"></div>
         <button type="button" id="btn-faq-reopen" class="faq-reopen-btn">Открыть список вопросов</button>
         <form id="form-send">
-          <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить фото">📎</button>
-          <input type="file" id="file-input" accept="image/*" class="hidden">
+          <button type="button" id="btn-attach" class="icon-btn" title="Прикрепить файл">📎</button>
+          <input type="file" id="file-input" accept="*/*" class="hidden">
           <button type="button" id="btn-record-voice" class="icon-btn" title="Голосовое сообщение">🎤</button>
           <input type="text" id="message-input" placeholder="Сообщение..." autocomplete="off">
           <button type="submit" class="btn-send" aria-label="Отправить сообщение">→</button>
@@ -268,6 +278,15 @@
         <div id="image-preview" class="hidden">
           <img id="image-preview-img" src="" alt="">
           <button type="button" id="btn-cancel-image" class="icon-btn">✕</button>
+        </div>
+        <!-- НОВОЕ (перенос из main): превью не-image файла перед отправкой -->
+        <div id="file-preview" class="hidden">
+          <span class="file-preview-icon" id="file-preview-icon">📄</span>
+          <div class="file-preview-info">
+            <div id="file-preview-name"></div>
+            <div id="file-preview-size"></div>
+          </div>
+          <button type="button" id="btn-cancel-file" class="icon-btn">✕</button>
         </div>
       </div>
     </main>
@@ -332,8 +351,29 @@
     <div id="modal-settings" class="modal hidden">
       <div class="modal-card settings-card">
         <div class="settings-header">
-          <h3>Настройки</h3>
+          <button type="button" class="icon-btn hidden" id="btn-settings-back" title="Назад">←</button>
+          <h3 id="settings-title">Настройки</h3>
           <button type="button" class="icon-btn" id="btn-close-settings-modal">✕</button>
+        </div>
+
+        <!-- НОВОЕ (перенос из main): главное меню настроек — разделы открываются
+             по одному, список виден только на главном экране настроек. -->
+        <div class="settings-nav" id="settings-nav">
+          <button type="button" class="settings-nav-item" data-panel="profile">
+            <span class="settings-nav-icon">👤</span><span class="settings-nav-text">Профиль</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="privacy">
+            <span class="settings-nav-icon">🔒</span><span class="settings-nav-text">Приватность</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="security">
+            <span class="settings-nav-icon">🛡️</span><span class="settings-nav-text">Безопасность</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="notifications">
+            <span class="settings-nav-icon">🔔</span><span class="settings-nav-text">Уведомления</span><span class="settings-nav-arrow">›</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-panel="theme">
+            <span class="settings-nav-icon">🎨</span><span class="settings-nav-text">Тема</span><span class="settings-nav-arrow">›</span>
+          </button>
         </div>
 
         <div class="settings-body">
