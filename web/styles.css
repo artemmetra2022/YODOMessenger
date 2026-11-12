@@ -1024,3 +1024,324 @@ body {
 .auth-presentation-link { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; margin: -12px 0 16px; padding: 8px; font-size: 14px; line-height: 1.5; color: var(--accent); text-decoration: none; border: 1px solid var(--bg-input); border-radius: 8px; }
 .auth-presentation-link:hover { text-decoration: underline; }
 .auth-presentation-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ================================================================== */
+/* НОВОЕ (перенос из main): улучшения UX из веб-версии main.           */
+/* ================================================================== */
+
+/* --- Меню создания: одна кнопка «+», раскрывающаяся по горизонтали --- */
+#new-actions {
+  display: flex;
+  align-items: center;
+  width: 40px;
+  padding: 0 2px;
+  justify-content: flex-start;
+  border-radius: 18px;
+  background: var(--bg-input);
+  overflow: hidden;
+  transition: width 0.3s ease, background 0.2s;
+}
+#new-actions:hover,
+#new-actions:focus-within {
+  width: 224px;
+  background: var(--bg-panel-2);
+}
+#new-actions .icon-btn { background: transparent; }
+#new-actions .icon-btn:hover { background: var(--accent); color: #fff; }
+#new-actions .new-action {
+  opacity: 0;
+  transform: translateX(10px);
+  transition: opacity 0.2s ease 0.05s, transform 0.25s ease 0.05s, background 0.15s, color 0.15s;
+}
+#new-actions:hover .new-action,
+#new-actions:focus-within .new-action {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* --- Поиск по списку чатов + крестик очистки --- */
+#sidebar-search { padding: 8px 12px 10px; position: relative; }
+#chat-search {
+  width: 100%;
+  background: var(--bg-input);
+  border: none;
+  border-radius: 20px;
+  padding: 9px 36px 9px 16px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+#chat-search::placeholder { color: var(--text-dim); }
+#chat-search:focus { box-shadow: 0 0 0 2px var(--accent-dark); }
+#chat-search-clear {
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px;
+  line-height: 1;
+}
+#chat-search-clear:hover { color: var(--text); }
+.chat-item.dimmed { opacity: 0.35; filter: grayscale(0.6); }
+
+/* --- Расширение поля ввода при наборе текста --- */
+#form-send #btn-attach,
+#form-send #btn-record-voice {
+  overflow: hidden;
+  transition: width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+}
+#form-send.typing { gap: 0; }
+#form-send.typing #btn-attach,
+#form-send.typing #btn-record-voice {
+  width: 0;
+  margin-left: -8px;
+  opacity: 0;
+  pointer-events: none;
+}
+#message-input { transition: padding 0.25s ease; }
+#form-send.typing #message-input { padding-left: 20px; }
+
+/* --- Анимация открытия чата: каскад из трёх слоёв --- */
+@keyframes chat-open-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes chat-header-in {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes chat-messages-in {
+  from { opacity: 0; transform: translateY(22px) scale(0.98); filter: blur(6px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes chat-input-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: none; }
+}
+#chat-active.chat-entering { animation: chat-open-in 0.2s ease-out; }
+#chat-active.chat-entering #chat-header { animation: chat-header-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+#chat-active.chat-entering #messages { animation: chat-messages-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.06s backwards; }
+#chat-active.chat-entering #form-send,
+#chat-active.chat-entering #reply-preview-bar,
+#chat-active.chat-entering #support-faq-panel,
+#chat-active.chat-entering .faq-reopen-btn {
+  animation: chat-input-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) 0.1s backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  #chat-active.chat-entering,
+  #chat-active.chat-entering #chat-header,
+  #chat-active.chat-entering #messages,
+  #chat-active.chat-entering #form-send { animation: none; }
+}
+
+/* --- Подсветка сообщения при переходе по цитате --- */
+@keyframes msg-jump-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(74, 163, 255, 0.55); }
+  60% { box-shadow: 0 0 0 10px rgba(74, 163, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 163, 255, 0); }
+}
+.msg.msg-jump .msg-bubble {
+  animation: msg-jump-pulse 1.4s ease-out;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* --- Превью файла перед отправкой --- */
+#file-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.file-preview-icon {
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--bg-input);
+  border-radius: 8px;
+  padding: 12px 10px;
+}
+.file-preview-info { flex: 1; min-width: 0; }
+#file-preview-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#file-preview-size { font-size: 12px; color: var(--text-dim); }
+
+/* --- Карточка файла в ленте сообщений --- */
+.msg-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 2px 0 6px;
+  min-width: 220px;
+}
+.msg-file-icon {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent);
+  background: var(--bg-input);
+  border-radius: 8px;
+  padding: 12px 8px;
+  min-width: 40px;
+  text-align: center;
+}
+.msg-file-info { flex: 1; min-width: 0; }
+.msg-file-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-file-size { font-size: 11.5px; color: var(--text-dim); }
+.msg-file-download { color: var(--accent); text-decoration: none; font-size: 18px; padding: 6px; }
+.msg-file-download:hover { opacity: 0.8; }
+
+/* --- Постраничные настройки --- */
+.settings-header { gap: 8px; }
+.settings-header h3 { flex: 1; text-align: center; }
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 2px;
+  overflow-y: auto;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.settings-nav-item:hover { background: var(--bg-panel-2); }
+.settings-nav-icon { font-size: 18px; width: 26px; text-align: center; }
+.settings-nav-arrow { margin-left: auto; color: var(--text-dim); font-size: 18px; }
+.settings-card.in-panel .settings-nav { display: none; }
+.settings-body .settings-panel { display: none; }
+.settings-body .settings-panel.active { display: flex; }
+.settings-panel { flex-direction: column; gap: 12px; }
+
+/* --- Инбокс поддержки (админ) --- */
+.support-stats { display: flex; gap: 8px; padding: 10px 8px 2px; }
+.support-stat { flex: 1; background: var(--bg-input); border-radius: 12px; padding: 9px 10px; text-align: center; }
+.support-stat-num { font-size: 17px; font-weight: 800; }
+.support-stat-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.support-stat-waiting .support-stat-num { color: var(--accent); }
+.support-search-row { padding: 8px 8px 4px; }
+.support-search {
+  width: 100%;
+  background: var(--bg-input);
+  border: none;
+  border-radius: 18px;
+  padding: 8px 14px;
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+}
+.support-search::placeholder { color: var(--text-dim); }
+.support-search:focus { box-shadow: 0 0 0 2px var(--accent-dark); }
+.support-filters { display: flex; gap: 6px; padding: 6px 8px; }
+.support-filter-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.support-filter-tab:hover { background: var(--bg-panel-2); }
+.support-filter-tab.active { background: var(--accent); color: #fff; }
+.support-row .support-email {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.support-row.waiting .chat-item-name { color: var(--accent); }
+.support-cap-hint { padding: 10px 16px; font-size: 12px; color: var(--text-dim); text-align: center; }
+
+/* --- Тонкий скроллбар, видимый при прокрутке/наведении --- */
+#chat-list, #messages, #search-results, #forward-results,
+#group-search-results, .settings-body, .boards-list {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s;
+}
+#chat-list:hover, #messages:hover, #search-results:hover, #forward-results:hover,
+#group-search-results:hover, .settings-body:hover, .boards-list:hover,
+#chat-list:active, #messages:active, #search-results:active,
+#forward-results:active, #group-search-results:active, .settings-body:active,
+.boards-list:active {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+#chat-list::-webkit-scrollbar, #messages::-webkit-scrollbar,
+#search-results::-webkit-scrollbar, #forward-results::-webkit-scrollbar,
+#group-search-results::-webkit-scrollbar, .settings-body::-webkit-scrollbar,
+.boards-list::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+#chat-list::-webkit-scrollbar-thumb, #messages::-webkit-scrollbar-thumb,
+#search-results::-webkit-scrollbar-thumb, #forward-results::-webkit-scrollbar-thumb,
+#group-search-results::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb,
+.boards-list::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+#chat-list:hover::-webkit-scrollbar-thumb, #messages:hover::-webkit-scrollbar-thumb,
+#search-results:hover::-webkit-scrollbar-thumb, #forward-results:hover::-webkit-scrollbar-thumb,
+#group-search-results:hover::-webkit-scrollbar-thumb, .settings-body:hover::-webkit-scrollbar-thumb,
+.boards-list:hover::-webkit-scrollbar-thumb,
+#chat-list:active::-webkit-scrollbar-thumb, #messages:active::-webkit-scrollbar-thumb,
+#search-results:active::-webkit-scrollbar-thumb, #forward-results:active::-webkit-scrollbar-thumb,
+#group-search-results:active::-webkit-scrollbar-thumb, .settings-body:active::-webkit-scrollbar-thumb,
+.boards-list:active::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+#chat-list::-webkit-scrollbar-thumb:hover, #messages::-webkit-scrollbar-thumb:hover,
+#search-results::-webkit-scrollbar-thumb:hover, #forward-results::-webkit-scrollbar-thumb:hover,
+#group-search-results::-webkit-scrollbar-thumb:hover, .settings-body::-webkit-scrollbar-thumb:hover,
+.boards-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+html.theme-light #chat-list::-webkit-scrollbar-thumb,
+html.theme-light #messages::-webkit-scrollbar-thumb,
+html.theme-light #search-results::-webkit-scrollbar-thumb,
+html.theme-light #forward-results::-webkit-scrollbar-thumb,
+html.theme-light #group-search-results::-webkit-scrollbar-thumb,
+html.theme-light .settings-body::-webkit-scrollbar-thumb,
+html.theme-light .boards-list::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+html.theme-light #chat-list:hover::-webkit-scrollbar-thumb,
+html.theme-light #messages:hover::-webkit-scrollbar-thumb,
+html.theme-light #search-results:hover::-webkit-scrollbar-thumb,
+html.theme-light #forward-results:hover::-webkit-scrollbar-thumb,
+html.theme-light #group-search-results:hover::-webkit-scrollbar-thumb,
+html.theme-light .settings-body:hover::-webkit-scrollbar-thumb,
+html.theme-light .boards-list:hover::-webkit-scrollbar-thumb,
+html.theme-light #chat-list:active::-webkit-scrollbar-thumb,
+html.theme-light #messages:active::-webkit-scrollbar-thumb,
+html.theme-light #search-results:active::-webkit-scrollbar-thumb,
+html.theme-light #forward-results:active::-webkit-scrollbar-thumb,
+html.theme-light #group-search-results:active::-webkit-scrollbar-thumb,
+html.theme-light .settings-body:active::-webkit-scrollbar-thumb,
+html.theme-light .boards-list:active::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.28);
+}
