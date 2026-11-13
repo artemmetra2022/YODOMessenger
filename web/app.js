@@ -801,6 +801,57 @@ function loadAppBanner() {
     .catch((err) => console.warn("Баннер: не удалось загрузить", err?.code || err));
 }
 
+/* Сообщение от админа на экране входа (config/appSettings): бегущая строка
+   сверху или всплывающее окно. Закрытое — не показывается до конца сессии. */
+const LOGIN_NOTICE_KEY = "yodo-login-notice-dismissed";
+
+function loadLoginNotice() {
+  const ticker = $("login-ticker");
+  const modal = $("modal-login-notice");
+  if (!ticker || !modal) return;
+  let dismissed = false;
+  try { dismissed = sessionStorage.getItem(LOGIN_NOTICE_KEY) === "1"; } catch (e) { /* приватный режим */ }
+  getDoc(doc(db, "config/appSettings"))
+    .then((snap) => {
+      if (!snap.exists() || snap.get("loginNoticeEnabled") !== true || dismissed) return;
+      const text = (snap.get("loginNoticeText") || "").trim();
+      const mode = snap.get("loginNoticeMode") === "popup" ? "popup" : "ticker";
+      if (!text) return;
+      if (mode === "popup") {
+        $("login-notice-modal-text").textContent = text;
+        modal.classList.remove("hidden");
+      } else {
+        const track = ticker.querySelector(".login-ticker-track");
+        track.innerHTML = "";
+        // Два одинаковых прогона — бесшовный цикл бегущей строки.
+        for (let i = 0; i < 2; i++) {
+          const run = document.createElement("span");
+          run.className = "login-ticker-run";
+          run.textContent = text;
+          track.appendChild(run);
+        }
+        ticker.classList.remove("hidden");
+      }
+    })
+    .catch((err) => console.warn("Сообщение на входе: не удалось загрузить", err?.code || err));
+}
+
+function dismissLoginNotice() {
+  const ticker = $("login-ticker");
+  const modal = $("modal-login-notice");
+  if (ticker) ticker.classList.add("hidden");
+  if (modal) modal.classList.add("hidden");
+  try { sessionStorage.setItem(LOGIN_NOTICE_KEY, "1"); } catch (e) { /* приватный режим */ }
+}
+
+$("btn-close-login-ticker")?.addEventListener("click", dismissLoginNotice);
+$("btn-close-login-notice")?.addEventListener("click", dismissLoginNotice);
+$("modal-login-notice")?.addEventListener("click", (e) => {
+  if (e.target === $("modal-login-notice")) dismissLoginNotice();
+});
+
+loadLoginNotice();
+
 async function enterApp() {
   if (!currentUser) return;
   boards.setContext(currentUser.uid, null, null);
@@ -1276,6 +1327,15 @@ function updateChatHeader() {
   const canSend = canSendInActiveChat();
   $("form-send").classList.toggle("hidden", !canSend);
   $("btn-attach").classList.toggle("hidden", !canSend);
+  const readonlyComposer = $("composer-readonly");
+  if (readonlyComposer) {
+    readonlyComposer.classList.toggle("hidden", canSend);
+    if (!canSend) {
+      readonlyComposer.textContent = activeChatId === OFFICIAL_CHANNEL_ID
+        ? "🔒 Официальный канал доступен только для чтения"
+        : "🔒 Публиковать здесь могут только владелец и администраторы канала";
+    }
+  }
   if (!canSend) {
     if (activeChatId === OFFICIAL_CHANNEL_ID) {
       $("chat-subtitle").textContent = "Только для чтения — официальные объявления";
@@ -1332,6 +1392,10 @@ function updateChannelSubscribeButton() {
 function openChat(chatId) {
   activeChatId = chatId;
   activeChatData = findChatData(chatId);
+  const chatActiveEl = $("chat-active");
+  // Снимаем состояние FAQ предыдущего support-чата сразу, не дожидаясь
+  // следующего 300-мс обновления: состояние нового чата не мерцает.
+  chatActiveEl.classList.remove("faq-open", "faq-collapsed");
   notifications.setChat(chatId, activeChatData ? chatDisplayName(activeChatData) : "YODO");
   boards.setContext(currentUser?.uid, chatId, activeChatData);
   $("private-web-notice").classList.toggle("hidden", !isPrivate(chatId, activeChatData));
@@ -1340,9 +1404,8 @@ function openChat(chatId) {
   $("chat-subtitle").classList.remove("online");
   updateChatHeader();
   $("chat-empty").classList.add("hidden");
-  $("chat-active").classList.remove("hidden");
+  chatActiveEl.classList.remove("hidden");
   // НОВОЕ (перенос из main): перезапуск анимации открытия чата.
-  const chatActiveEl = $("chat-active");
   chatActiveEl.classList.remove("chat-entering");
   void chatActiveEl.offsetWidth; // принудительный reflow — сброс анимации
   chatActiveEl.classList.add("chat-entering");
@@ -2811,11 +2874,19 @@ $("btn-create-group").addEventListener("click", async () => {
 /* ------------------------------------------------------------------ */
 
 const THEME_STORAGE_KEY = "yodo-theme";
+const ACCENT_STORAGE_KEY = "yodo-accent";
 
 function applyTheme(theme) {
   document.documentElement.classList.toggle("theme-light", theme === "light");
-  document.querySelectorAll(".settings-theme-option").forEach((btn) => {
+  document.querySelectorAll('.settings-theme-option[data-theme]').forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.theme === theme);
+  });
+}
+
+function applyAccent(accent) {
+  document.documentElement.classList.toggle("accent-green", accent === "green");
+  document.querySelectorAll('.settings-theme-option[data-accent]').forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.accent === accent);
   });
 }
 
@@ -2823,14 +2894,25 @@ function initTheme() {
   let saved = "dark";
   try { saved = localStorage.getItem(THEME_STORAGE_KEY) || "dark"; } catch (e) { /* приватный режим и т.п. */ }
   applyTheme(saved);
+  let savedAccent = "blue";
+  try { savedAccent = localStorage.getItem(ACCENT_STORAGE_KEY) || "blue"; } catch (e) { /* приватный режим и т.п. */ }
+  applyAccent(savedAccent);
 }
 initTheme();
 
 document.querySelectorAll(".settings-theme-option").forEach((btn) => {
   btn.addEventListener("click", () => {
     const theme = btn.dataset.theme;
-    applyTheme(theme);
-    try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* игнорируем */ }
+    if (theme) {
+      applyTheme(theme);
+      try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { /* игнорируем */ }
+      return;
+    }
+    const accent = btn.dataset.accent;
+    if (accent) {
+      applyAccent(accent);
+      try { localStorage.setItem(ACCENT_STORAGE_KEY, accent); } catch (e) { /* игнорируем */ }
+    }
   });
 });
 
@@ -3381,9 +3463,8 @@ $("btn-save-autodelete").addEventListener("click", async () => {
 /* берутся из window.SUPPORT_FAQ (faq-data.js, подключён до app.js).    */
 /* Логика не меняет существующие функции: читает activeChatId /         */
 /* activeChatData / isAdmin и переключает CSS-классы faq-open /         */
-/* faq-collapsed на #chat-active. Пока FAQ открыт — поле ввода скрыто   */
-/* (CSS), «Связаться с поддержкой» сворачивает панель и возвращает      */
-/* обычное поле ввода.                                                  */
+/* faq-collapsed на #chat-active. Поле ввода остаётся доступным и при    */
+/* открытом FAQ; «Связаться с поддержкой» лишь сворачивает подсказки.    */
 /* ------------------------------------------------------------------ */
 
 (function () {
@@ -3669,11 +3750,73 @@ const shortcuts = initShortcuts({
 /* НОВОЕ (перенос из main): мелкие улучшения UX.                        */
 /* ------------------------------------------------------------------ */
 
-// Клик по свёрнутой кнопке «+» — быстрое действие по умолчанию (новый чат);
-// наведение раскрывает остальные пункты.
-document.getElementById("btn-new-toggle")?.addEventListener("click", () => {
-  document.getElementById("btn-new-chat")?.click();
-});
+// Компактные меню шапки списка чатов. Открываются по клику (без hover-
+// мерцания), взаимно исключают друг друга и поддерживают клавиатуру.
+(function () {
+  const configs = [
+    ["new-actions", "btn-new-toggle", "new-actions-menu"],
+    ["sidebar-actions", "btn-sidebar-menu", "sidebar-more-menu"],
+  ].map(([rootId, toggleId, menuId]) => ({
+    root: document.getElementById(rootId),
+    toggle: document.getElementById(toggleId),
+    menu: document.getElementById(menuId),
+  })).filter((x) => x.root && x.toggle && x.menu);
+  if (!configs.length) return;
+
+  const setOpen = (config, open) => {
+    config.root.classList.toggle("open", open);
+    config.toggle.setAttribute("aria-expanded", String(open));
+  };
+  const closeAll = (except = null) => {
+    configs.forEach((config) => {
+      if (config !== except) setOpen(config, false);
+    });
+  };
+
+  configs.forEach((config) => {
+    const menuItems = () => Array.from(config.menu.querySelectorAll('[role="menuitem"]'));
+
+    config.toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = !config.root.classList.contains("open");
+      closeAll(config);
+      setOpen(config, willOpen);
+    });
+    config.toggle.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown") return;
+      e.preventDefault();
+      closeAll(config);
+      setOpen(config, true);
+      menuItems()[0]?.focus();
+    });
+    config.menu.addEventListener("click", (e) => {
+      if (e.target.closest('[role="menuitem"]')) setOpen(config, false);
+    });
+    config.menu.addEventListener("keydown", (e) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+      const items = menuItems();
+      if (!items.length) return;
+      e.preventDefault();
+      const current = Math.max(0, items.indexOf(document.activeElement));
+      const next = e.key === "Home" ? 0
+        : e.key === "End" ? items.length - 1
+        : e.key === "ArrowDown" ? (current + 1) % items.length
+        : (current - 1 + items.length) % items.length;
+      items[next].focus();
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!configs.some((config) => config.root.contains(e.target))) closeAll();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const opened = configs.find((config) => config.root.classList.contains("open"));
+    if (!opened) return;
+    setOpen(opened, false);
+    opened.toggle.focus();
+  });
+})();
 
 // Пока в поле есть символы, форма переходит в режим .typing — поле
 // расширяется и закрывает кнопки вложений.

@@ -4,9 +4,43 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YODO Admin</title>
+  <script>
+    // Акцент берём из настроек мессенджера (тот же localStorage), применяем до CSS.
+    try { if ((localStorage.getItem("yodo-accent") || "blue") === "green") document.documentElement.classList.add("accent-green"); } catch (e) { /* приватный режим */ }
+  </script>
   <link rel="stylesheet" href="admin.css">
 </head>
 <body>
+
+  <!-- ЭКРАН: Экран блокировки (стиль Windows) -->
+  <div id="screen-lock" class="lock-screen">
+    <div class="lock-inner">
+      <div class="lock-clock" id="lock-clock">00:00</div>
+      <div class="lock-date" id="lock-date"></div>
+      <form id="form-lock-pin" class="lock-pin-form" autocomplete="off">
+        <div class="lock-pin-title">Введите код доступа</div>
+        <input type="password" id="lock-pin" class="lock-pin-input" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off">
+        <div class="lock-pin-error" id="lock-pin-error"></div>
+        <button type="button" id="btn-lock-request" class="lock-request-btn">📨 Отправить заявку на админку</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: заявка на админку (с экрана блокировки) -->
+  <div id="modal-admin-request" class="modal-overlay hidden">
+    <form id="form-admin-request" class="modal-card">
+      <h2>Заявка на доступ к админке</h2>
+      <p class="card-hint">Заявку рассмотрит владелец. Укажите email, на который выдать доступ.</p>
+      <input type="text" id="req-name" placeholder="Как вас зовут" maxlength="60" autocomplete="off">
+      <input type="email" id="req-email" placeholder="Ваш email" maxlength="120" autocomplete="off" required>
+      <textarea id="req-desc" class="modal-textarea" rows="4" placeholder="Кто вы и зачем нужен доступ (можно оставить пустым)" maxlength="500"></textarea>
+      <div class="modal-actions">
+        <button type="button" id="req-cancel" class="btn-secondary">Отмена</button>
+        <button type="submit" class="btn-primary">Отправить заявку</button>
+      </div>
+      <p class="card-hint req-status" id="req-status"></p>
+    </form>
+  </div>
 
   <!-- ЭКРАН: Логин -->
   <div id="screen-login" class="auth-wrap">
@@ -75,6 +109,16 @@
       <section id="section-settings" class="admin-section active">
         <h1>Обзор</h1>
 
+        <!-- НОВОЕ (заявки): заявки на админку с экрана блокировки -->
+        <div class="card overview-card" id="card-admin-requests" data-admin-area="messenger">
+          <div class="card-head">
+            <h2>📨 Заявки на админку</h2>
+            <button type="button" class="btn-secondary" id="btn-refresh-requests">Обновить</button>
+          </div>
+          <p class="card-hint">Заявки, отправленные с экрана блокировки. Выберите роль и назначьте — доступ выдаётся через «Админы и роли», либо отклоните заявку.</p>
+          <div id="admin-requests-list" class="item-list"></div>
+        </div>
+
         <!-- НОВОЕ (роли): разграничение доступа вместо плоского списка ADMIN_EMAILS -->
         <div class="card overview-card" id="card-roles" data-admin-area="messenger">
           <h2>Админы и роли</h2>
@@ -85,6 +129,8 @@
             <button type="submit" class="btn-primary">Выдать роль</button>
           </form>
           <div id="roles-list" class="item-list"></div>
+          <h3 class="roles-matrix-title">Сравнение ролей</h3>
+          <div id="roles-matrix-wrap" class="roles-matrix-wrap"></div>
         </div>
 
         <div class="card overview-card" data-admin-area="messenger">
@@ -180,6 +226,25 @@
               <input type="datetime-local" id="banner-end-at">
             </div>
             <button type="submit" class="btn-primary">Сохранить баннер</button>
+          </form>
+        </div>
+
+        <!-- Сообщение на экране входа в мессенджер: бегущая строка сверху
+             или всплывающее окно. Хранится в config/appSettings. -->
+        <div class="card overview-card" data-admin-area="messenger">
+          <h2>Сообщение на экране входа</h2>
+          <p class="card-hint">Увидят все, кто откроет страницу входа в веб-мессенджер: бегущая строка сверху или всплывающее окно один раз за сессию.</p>
+          <form id="form-login-notice" class="form-col">
+            <label class="toggle-row">
+              <input type="checkbox" id="login-notice-enabled">
+              <span>Показывать сообщение</span>
+            </label>
+            <select id="login-notice-mode">
+              <option value="ticker">Бегущая строка сверху</option>
+              <option value="popup">Всплывающее окно</option>
+            </select>
+            <textarea id="login-notice-text" rows="2" maxlength="300" placeholder="Текст сообщения (например: Техработы с 14:00 до 15:00)" required></textarea>
+            <button type="submit" class="btn-primary">Сохранить сообщение</button>
           </form>
         </div>
       </section>

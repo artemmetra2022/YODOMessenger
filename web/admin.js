@@ -222,6 +222,7 @@ const AUDIT_LABELS = {
   REASON_TEMPLATE_SAVED: "Шаблоны причин изменены",
   MOD_POLICY_SAVED: "Политика модерации изменена",
   SANCTION_ESCALATED: "Авто-эскалация санкции",
+  LOGIN_NOTICE_SET: "Сообщение на экране входа изменено",
 };
 
 // Отображаемое имя админа для записей аудита (users/{uid}.displayName).
@@ -336,6 +337,106 @@ function restoreSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Экран блокировки (стиль Windows): часы + код 8213                   */
+/* ------------------------------------------------------------------ */
+
+const LOCK_PIN = "8213";
+
+let lockUnlocked = false;
+
+function updateLockClock() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  $("lock-clock").textContent = pad(now.getHours()) + ":" + pad(now.getMinutes());
+  $("lock-date").textContent = now.toLocaleDateString("ru-RU", {
+    weekday: "long", day: "numeric", month: "long",
+  });
+}
+updateLockClock();
+setInterval(updateLockClock, 10000);
+
+function unlockAdmin() {
+  if (lockUnlocked) return;
+  lockUnlocked = true;
+  try { localStorage.setItem("yodo-admin-device-unlocked", "1"); } catch (e) { /* ignore */ }
+  const lock = $("screen-lock");
+  lock.classList.add("lock-away");
+  setTimeout(() => {
+    lock.classList.add("hidden");
+    // Первый фокус на панели/логине
+    const loginVisible = !$("screen-login").classList.contains("hidden");
+    if (loginVisible) $("login-email").focus();
+  }, 600);
+}
+
+$("form-lock-pin").addEventListener("submit", (e) => e.preventDefault());
+
+$("lock-pin").addEventListener("input", () => {
+  $("lock-pin-error").textContent = "";
+  const value = $("lock-pin").value.replace(/\D/g, "");
+  $("lock-pin").value = value;
+  if (value.length === 4) {
+    if (value === LOCK_PIN) {
+      unlockAdmin();
+    } else {
+      $("lock-pin-error").textContent = "Неверный код";
+      $("lock-pin").classList.add("shake");
+      setTimeout(() => {
+        $("lock-pin").classList.remove("shake");
+        $("lock-pin").value = "";
+      }, 450);
+    }
+  }
+});
+
+// Фокус в поле кода сразу при загрузке
+$("lock-pin").focus();
+window.addEventListener("focus", () => {
+  if (!lockUnlocked) $("lock-pin").focus();
+});
+
+// Заявка на админку с экрана блокировки
+$("btn-lock-request").addEventListener("click", () => {
+  $("req-status").textContent = "";
+  $("req-status").className = "card-hint req-status";
+  $("form-admin-request").reset();
+  $("modal-admin-request").classList.remove("hidden");
+  $("req-name").focus();
+});
+
+$("req-cancel").addEventListener("click", () => {
+  $("modal-admin-request").classList.add("hidden");
+});
+
+$("form-admin-request").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("req-email").value.trim().toLowerCase();
+  const name = $("req-name").value.trim();
+  const desc = $("req-desc").value.trim();
+  const statusEl = $("req-status");
+  if (!email || !email.includes("@")) {
+    statusEl.textContent = "Укажите корректный email";
+    statusEl.className = "card-hint req-status err";
+    return;
+  }
+  try {
+    await addDoc(collection(db, "adminRequests"), {
+      email,
+      name,
+      description: desc,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+    statusEl.textContent = "Заявка отправлена — владелец её рассмотрит и выдаст доступ";
+    statusEl.className = "card-hint req-status ok";
+    setTimeout(() => $("modal-admin-request").classList.add("hidden"), 2200);
+  } catch (err) {
+    statusEl.textContent = "Не удалось отправить заявку: " + (err?.message || err);
+    statusEl.className = "card-hint req-status err";
+  }
+});
+
+/* ------------------------------------------------------------------ */
 /* Авторизация                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -448,6 +549,11 @@ function startSettings() {
     $("banner-link-url").value = snap.get("bannerLinkUrl") || "";
     $("banner-start-at").value = toDatetimeLocal(snap.get("bannerStartAt"));
     $("banner-end-at").value = toDatetimeLocal(snap.get("bannerEndAt"));
+
+    // Сообщение на экране входа в мессенджер (бегущая строка / всплывающее окно).
+    $("login-notice-enabled").checked = snap.get("loginNoticeEnabled") === true;
+    $("login-notice-mode").value = snap.get("loginNoticeMode") === "popup" ? "popup" : "ticker";
+    $("login-notice-text").value = snap.get("loginNoticeText") || "";
   }, handleErr("Не удалось загрузить настройки"));
 
   $("form-board-sync").addEventListener("submit", async (e) => {
@@ -598,6 +704,37 @@ function startSettings() {
       );
     } catch (err) {
       handleErr("Не удалось сохранить баннер")(err);
+    }
+  });
+
+  // Сообщение на экране входа в мессенджер (бегущая строка / всплывающее окно).
+  $("form-login-notice").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const enabled = $("login-notice-enabled").checked;
+    const mode = $("login-notice-mode").value === "popup" ? "popup" : "ticker";
+    const text = $("login-notice-text").value.trim();
+    if (enabled && !text) {
+      toast("Введите текст сообщения", false);
+      return;
+    }
+    try {
+      await setDoc(
+        settingsRef,
+        {
+          loginNoticeEnabled: enabled,
+          loginNoticeMode: mode,
+          loginNoticeText: text,
+          loginNoticeUpdatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+      toast(enabled ? "Сообщение показывается на экране входа" : "Сообщение выключено");
+      logAdminAction(
+        "LOGIN_NOTICE_SET",
+        (enabled ? (mode === "popup" ? "всплывающее окно: " : "бегущая строка: ") : "выключено: ") + text
+      );
+    } catch (err) {
+      handleErr("Не удалось сохранить сообщение")(err);
     }
   });
 }
@@ -5593,6 +5730,28 @@ const SECTION_PERMISSION = {
 let myAdminRole = "owner";
 let adminRolesMap = {};
 
+/** Строки сравнительной таблицы ролей: подпись + проверяемое право. */
+const ROLE_MATRIX_ROWS = [
+  ["Просмотр пользователей", "users.view"],
+  ["Жалобы и обжалования", "moderation"],
+  ["Блокировки пользователей", "users.block"],
+  ["Обращения в поддержку", "support"],
+  ["FAQ (справка)", "content.faq"],
+  ["Новости, опросы, канал, школа", "content"],
+  ["Настройки и push-рассылки", "settings"],
+  ["Аудит действий", "audit"],
+  ["Массовые удаления", "destructive"],
+  ["Управление админами и ролями", "roles"],
+];
+
+/** Есть ли у роли право (учитывает "*" и корневые права вида "content"). */
+function roleCan(role, permission) {
+  const perms = ROLE_PERMISSIONS[role] || [];
+  if (perms.includes("*")) return true;
+  if (perms.includes(permission)) return true;
+  return perms.includes(permission.split(".")[0]);
+}
+
 function roleOfEmail(email) {
   const mail = (email || "").toLowerCase();
   if (ADMIN_EMAILS.includes(mail)) return "owner";
@@ -5658,6 +5817,23 @@ function applyRolePermissions() {
   }
 }
 
+/** Сравнительная таблица прав всех ролей (колонка текущей роли подсвечена). */
+function renderRolesMatrix() {
+  const wrap = $("roles-matrix-wrap");
+  if (!wrap) return;
+  const roles = Object.keys(ROLE_PERMISSIONS);
+  const head = `<tr><th scope="col">Возможность</th>${roles.map((r) =>
+    `<th scope="col"${r === myAdminRole ? ' class="me"' : ""}>${esc(ROLE_LABELS[r] || r)}</th>`).join("")}</tr>`;
+  const body = ROLE_MATRIX_ROWS.map(([label, perm]) => {
+    const cells = roles.map((r) => {
+      const ok = roleCan(r, perm);
+      return `<td class="${ok ? "yes" : "no"}${r === myAdminRole ? " me" : ""}">${ok ? "✓" : "—"}</td>`;
+    }).join("");
+    return `<tr><th scope="row">${esc(label)}</th>${cells}</tr>`;
+  }).join("");
+  wrap.innerHTML = `<table class="roles-matrix"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
 /** Список админов и их ролей в разделе «Обзор». */
 function renderRolesList() {
   const box = $("roles-list");
@@ -5683,6 +5859,67 @@ function renderRolesList() {
     btn.addEventListener("click", () => {
       const mail = btn.closest("[data-role-email]").dataset.roleEmail;
       saveAdminRole(mail, null);
+    });
+  });
+}
+
+/* Заявки на админку: рендер + назначение роли / отклонение. */
+let adminRequestsStop = null;
+
+function renderAdminRequests() {
+  const box = $("admin-requests-list");
+  if (!box) return;
+  if (!adminRequestsStop) {
+    adminRequestsStop = onSnapshot(
+      query(collection(db, "adminRequests"), where("status", "==", "pending"), orderBy("createdAt", "desc"), limit(50)),
+      (snap) => renderAdminRequestsItems(snap),
+      handleErr("Не удалось загрузить заявки")
+    );
+  }
+}
+
+function renderAdminRequestsItems(snap) {
+  const box = $("admin-requests-list");
+  if (!box || !can("roles")) return;
+  if (snap.empty) {
+    box.innerHTML = '<p class="empty-note">Новых заявок нет.</p>';
+    return;
+  }
+  box.innerHTML = snap.docs.map((dSnap) => {
+    const r = dSnap.data();
+    const when = fmtDate(r.createdAt);
+    const desc = r.description ? esc(r.description) : "Без описания";
+    const name = r.name ? esc(r.name) + " · " : "";
+    const options = Object.keys(ROLE_PERMISSIONS).filter((x) => x !== "owner")
+      .map((x) => `<option value="${x}">${esc(ROLE_LABELS[x] || x)}</option>`).join("");
+    return `<div class="item" data-request-id="${esc(dSnap.id)}" data-request-email="${esc(r.email || "")}">
+      <div class="item-head"><span class="item-title">${name}${esc(r.email || "")}</span>
+        <span class="badge badge-yellow">Ожидает</span></div>
+      <div class="item-sub">${desc}</div>
+      <div class="item-sub">Отправлена: ${esc(when)}</div>
+      <div class="request-select-row">
+        <select class="request-role">${options}</select>
+        <button type="button" class="btn-primary btn-request-approve">Назначить</button>
+        <button type="button" class="btn-danger btn-request-reject">Отклонить</button>
+      </div></div>`;
+  }).join("");
+
+  box.querySelectorAll(".item").forEach((row) => {
+    const id = row.dataset.requestId;
+    const email = row.dataset.requestEmail;
+    const select = row.querySelector(".request-role");
+    row.querySelector(".btn-request-approve").addEventListener("click", async () => {
+      const role = select.value;
+      await saveAdminRole(email, role);
+      try {
+        await updateDoc(doc(db, "adminRequests", id), { status: "granted", grantedRole: role, decidedAt: Date.now() });
+      } catch (e) { handleErr("Роль выдана, но статус заявки не обновлён")(e); }
+    });
+    row.querySelector(".btn-request-reject").addEventListener("click", async () => {
+      try {
+        await updateDoc(doc(db, "adminRequests", id), { status: "rejected", decidedAt: Date.now() });
+        toast("Заявка отклонена");
+      } catch (e) { handleErr("Не удалось отклонить заявку")(e); }
     });
   });
 }
@@ -5716,6 +5953,15 @@ async function startAccessControl() {
   myAdminRole = roleOfEmail(auth.currentUser && auth.currentUser.email) || "viewer";
   applyRolePermissions();
   renderRolesList();
+  renderRolesMatrix();
+  renderAdminRequests();
+  const refreshReq = $("btn-refresh-requests");
+  if (refreshReq) {
+    refreshReq.addEventListener("click", () => {
+      if (adminRequestsStop) { adminRequestsStop(); adminRequestsStop = null; }
+      renderAdminRequests();
+    });
+  }
   const form = $("form-role-grant");
   if (form) {
     const select = $("role-grant-role");

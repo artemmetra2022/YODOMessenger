@@ -388,6 +388,24 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // НОВОЕ (заявки на админку): коллекция adminRequests — заявки с экрана
+    // блокировки веб-админки. Создать заявку может ЛЮБОЙ посетитель (он ещё
+    // не авторизован) — строго с валидными полями и без прав что-либо читать
+    // или менять. Читать список, менять статус (granted/rejected) и удалять
+    // могут только владельцы (те же три доверенных email).
+    match /adminRequests/{requestId} {
+      function validRequest() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['email', 'name', 'description', 'status', 'createdAt']) &&
+          d.email is string && d.email.size > 3 && d.email.size <= 120 &&
+          (!d.keys().hasAny(['name']) || (d.name is string && d.name.size <= 60)) &&
+          (!d.keys().hasAny(['description']) || (d.description is string && d.description.size <= 500)) &&
+          d.status == 'pending' && d.createdAt is number;
+      }
+      allow create: if validRequest();
+      allow read, update, delete: if isOfficialChannelAdmin();
+    }
+
     // НОВОЕ (п.19 ТЗ): ограничение возможности писать в поддержку — мера мягче
     // globalBlocks (пользователь не блокируется целиком, только лишается доступа
     // к отправке сообщений в чат поддержки). Та же модель прав: сам пользователь
