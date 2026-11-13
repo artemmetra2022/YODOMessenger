@@ -324,6 +324,7 @@ Start a new conversation!</string>
     <string name="chat_list_just_now">just now</string>
     <string name="chat_list_yesterday">Yesterday</string>
     <string name="chat_search_icon_cd">Search</string>
+    <string name="chat_qr_scan_cd">QR scanner</string>
     <string name="chat_profile_cd">Profile</string>
     <string name="chat_create_cd">Create</string>
 

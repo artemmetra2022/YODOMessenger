@@ -293,6 +293,11 @@ fun YodoNavGraph(
                 onSearchClick = {
                     navController.navigate(Routes.Search.route)
                 },
+                // НОВОЕ (вход по QR-коду): кнопка сканера в шапке главного экрана —
+                // тот же маршрут, что и из «Центра безопасности».
+                onOpenQrLogin = {
+                    navController.navigate(Routes.QrLogin.route)
+                },
                 onNearbyClick = {
                     navController.navigate(Routes.NearbyPeople.route)
                 },

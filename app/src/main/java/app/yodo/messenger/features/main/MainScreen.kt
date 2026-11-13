@@ -37,6 +37,8 @@ fun MainScreen(
     onProfileClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onSearchClick: () -> Unit,
+    // НОВОЕ (вход по QR-коду): быстрый доступ к сканеру QR из шапки списка чатов.
+    onOpenQrLogin: () -> Unit = {},
     onNearbyClick: () -> Unit,
     onOfflineClick: () -> Unit,
     onCreateGroupClick: () -> Unit = {},
@@ -97,6 +99,7 @@ fun MainScreen(
                 onProfileClick = onProfileClick,
                 onSettingsClick = onSettingsClick,
                 onSearchClick = onSearchClick,
+                onOpenQrLogin = onOpenQrLogin,
                 onCreateGroupClick = onCreateGroupClick,
                 onCreateChannelClick = onCreateChannelClick,
                 onOpenContacts = onOpenContacts,

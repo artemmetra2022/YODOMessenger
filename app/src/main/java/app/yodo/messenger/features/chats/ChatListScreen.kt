@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SupportAgent
@@ -161,6 +162,9 @@ fun ChatListScreen(
     onProfileClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onSearchClick: () -> Unit,
+    // НОВОЕ (вход по QR-коду): дублирование кнопки сканера QR на главном экране —
+    // в шапке рядом с поиском и профилем (основной вход — в «Центре безопасности»).
+    onOpenQrLogin: () -> Unit = {},
     onCreateGroupClick: () -> Unit = {},
     onCreateChannelClick: () -> Unit = {},
     onOpenContacts: () -> Unit = {},
@@ -343,6 +347,13 @@ fun ChatListScreen(
                     )
                     IconButton(onClick = onSearchClick, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.chat_search_icon_cd))
+                    }
+                    // НОВОЕ (вход по QR-коду): быстрый доступ к сканеру QR прямо из шапки.
+                    IconButton(onClick = onOpenQrLogin, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Filled.QrCodeScanner,
+                            contentDescription = stringResource(R.string.chat_qr_scan_cd)
+                        )
                     }
                     IconButton(onClick = onProfileClick, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Filled.Person, contentDescription = stringResource(R.string.chat_profile_cd))

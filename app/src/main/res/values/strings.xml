@@ -318,6 +318,7 @@
     <string name="chat_list_just_now">только что</string>
     <string name="chat_list_yesterday">Вчера</string>
     <string name="chat_search_icon_cd">Поиск</string>
+    <string name="chat_qr_scan_cd">Сканер QR</string>
     <string name="chat_profile_cd">Профиль</string>
     <string name="chat_create_cd">Создать</string>
 
